@@ -1,0 +1,19 @@
+// Plain PBR material: one instance per MuJoCo geom, colour from geom_rgba.
+material {
+    name : mujoco_lit,
+    shadingModel : lit,
+    parameters : [
+        { type : float4, name : baseColor },
+        { type : float,  name : roughness },
+        { type : float,  name : metallic }
+    ]
+}
+
+fragment {
+    void material(inout MaterialInputs material) {
+        prepareMaterial(material);
+        material.baseColor = materialParams.baseColor;
+        material.roughness = materialParams.roughness;
+        material.metallic = materialParams.metallic;
+    }
+}

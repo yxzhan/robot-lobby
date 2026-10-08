@@ -1,0 +1,23 @@
+// PBR material for geoms whose MuJoCo material has an RGB texture.
+// Like MuJoCo, the texture is modulated by the material rgba; texrepeat is
+// already baked into the UVs on the CPU.
+material {
+    name : mujoco_lit_textured,
+    shadingModel : lit,
+    requires : [ uv0 ],
+    parameters : [
+        { type : float4,    name : baseColor },
+        { type : sampler2d, name : baseColorMap },
+        { type : float,     name : roughness },
+        { type : float,     name : metallic }
+    ]
+}
+
+fragment {
+    void material(inout MaterialInputs material) {
+        prepareMaterial(material);
+        material.baseColor = materialParams.baseColor * texture(materialParams_baseColorMap, getUV0());
+        material.roughness = materialParams.roughness;
+        material.metallic = materialParams.metallic;
+    }
+}

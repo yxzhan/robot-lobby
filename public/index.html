@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MuJoCo + Filament</title>
+  <style>
+    html, body { margin: 0; height: 100%; overflow: hidden; background: #1b1d22; font: 13px system-ui, sans-serif; }
+    canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+    #ui { position: absolute; top: 12px; left: 12px; display: flex; gap: 6px; align-items: center;
+          color: #ddd; background: rgba(0,0,0,.45); padding: 6px 10px; border-radius: 6px; }
+    #ui button, #ui select { cursor: pointer; background: #333; color: #eee; border: 1px solid #555;
+          border-radius: 4px; padding: 3px 8px; font: inherit; white-space: nowrap; }
+    #ui select { max-width: 40vw; }
+  </style>
+</head>
+<body>
+  <canvas id="canvas"></canvas>
+  <div id="ui">
+    <button id="pause">Pause</button>
+    <button id="reset" title="Every robot back to its spawn pose">Reset</button>
+    <button id="undo" title="Remove the last spawned robot">Undo</button>
+    <button id="clear" title="Remove all robots">Clear</button>
+    <select id="model" title="Robot to spawn: click the floor to place it"></select>
+    <span id="status">loading…</span>
+  </div>
+  <!-- Filament.js is a UMD bundle that defines the global `Filament`. -->
+  <script src="vendor/filament/filament.js"></script>
+  <script type="module" src="main.js"></script>
+</body>
+</html>
