@@ -17,9 +17,11 @@ export function joinPath(...parts) {
   return (parts[0].startsWith('/') ? '/' : '') + out.join('/');
 }
 
+// The FS file shares `bytes` instead of copying it (MuJoCo only reads), so a
+// source that caches its results can fill many MuJoCo instances cheaply.
 function writeFile(mujoco, path, bytes) {
   mujoco.FS.mkdirTree(path.slice(0, path.lastIndexOf('/')));
-  mujoco.FS.writeFile(path, bytes);
+  mujoco.FS.writeFile(path, bytes, { canOwn: true });
 }
 
 function exists(mujoco, path) {

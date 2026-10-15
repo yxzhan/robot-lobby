@@ -11,7 +11,64 @@
           color: #ddd; background: rgba(0,0,0,.45); padding: 6px 10px; border-radius: 6px; }
     #ui button, #ui select { cursor: pointer; background: #333; color: #eee; border: 1px solid #555;
           border-radius: 4px; padding: 3px 8px; font: inherit; white-space: nowrap; }
-    #ui select { max-width: 40vw; }
+    #assets { position: absolute; top: 60px; left: 12px; width: 300px; max-height: calc(100% - 72px - 132px);
+              display: flex; flex-direction: column; gap: 6px; box-sizing: border-box;
+              color: #ddd; background: rgba(0,0,0,.6); padding: 8px; border-radius: 6px; }
+    #assets[hidden] { display: none; }
+    #assets .tabs { display: flex; gap: 2px; }
+    #assets .tabs button { flex: 1; cursor: pointer; background: #2a2c31; color: #bbb; border: 1px solid #444;
+                           border-radius: 4px; padding: 4px 2px; font: inherit; font-size: 12px; white-space: nowrap; }
+    #assets .tabs .count { color: #999; font-size: 11px; }
+    #assets .tabs button.active { background: #3d5a73; color: #fff; border-color: #5a85a8; }
+    #assets input[type=search] { background: #222; color: #eee; border: 1px solid #555; border-radius: 4px;
+                                 padding: 4px 6px; font: inherit; }
+    #assets ul { list-style: none; margin: 0; padding: 0; overflow: auto; min-height: 0;
+                 display: grid; grid-template-columns: 1fr 1fr; gap: 6px; align-content: start; }
+    #assets li { display: flex; flex-direction: column; gap: 2px; padding: 4px; border-radius: 5px; min-width: 0;
+                 cursor: grab; user-select: none; touch-action: none; border: 1px solid transparent; }
+    #assets li:hover { background: rgba(255,255,255,.08); border-color: #555; }
+    #assets li.dragging { background: rgba(80,160,220,.25); border-color: #5a85a8; cursor: grabbing; }
+    #assets .thumb { position: relative; aspect-ratio: 4 / 3; border-radius: 3px; overflow: hidden;
+                     background: linear-gradient(135deg, #2b2f36, #1d2025); }
+    #assets .thumb::before { content: attr(data-initial); position: absolute; inset: 0; display: grid;
+                             place-items: center; color: #667; font-size: 22px; font-weight: 600; }
+    #assets .thumb img { position: relative; display: block; width: 100%; height: 100%; object-fit: cover; }
+    #assets li .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+    #assets li .lib { color: #888; font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    #assets li.group { grid-column: 1 / -1; flex-direction: row; align-items: center; gap: 6px; cursor: pointer;
+                       padding: 4px 2px 2px; color: #ccc; font-size: 12px; font-weight: 600; touch-action: auto;
+                       border: 0; border-bottom: 1px solid #3a3d44; border-radius: 0; }
+    #assets li.group:hover { background: none; color: #fff; }
+    #assets li.group .count { color: #888; font-weight: 400; }
+    #assets li.group .caret::before { content: '▾'; display: inline-block; width: 10px; color: #888; }
+    #assets li.group.folded .caret::before { content: '▸'; }
+    #assets li.empty { grid-column: 1 / -1; color: #999; cursor: default; font-size: 12px; display: block; }
+    #assets .hint { color: #999; font-size: 12px; }
+    #gizmo { position: absolute; left: 12px; bottom: 12px; width: 110px; height: 110px; }
+    .drag-ghost { position: fixed; left: 0; top: 0; pointer-events: none; z-index: 10; color: #fff;
+                  background: rgba(40,40,40,.85); border: 1px solid #666; padding: 3px 8px; border-radius: 4px; }
+    .drag-ghost.placing { background: rgba(30,110,150,.9); border-color: #5ac; }
+    .drag-ghost .readout { font-size: 11px; opacity: .85; font-variant-numeric: tabular-nums; white-space: pre; }
+    #panel { position: absolute; top: 60px; right: 12px; width: 320px; max-height: calc(100% - 72px); overflow: auto;
+             box-sizing: border-box; color: #ddd; background: rgba(0,0,0,.6); padding: 8px 10px; border-radius: 6px; }
+    #panel[hidden] { display: none; }
+    #panel .hint { color: #999; margin: 2px 0 6px; font-size: 12px; }
+    #panel summary { cursor: pointer; padding: 4px 0; font-weight: 600; }
+    #panel details details { margin-left: 10px; }
+    #panel details details > summary { font-size: 12px; color: #aaa; padding: 3px 0; }
+    #panel summary .count { color: #777; font-weight: 400; }
+    #panel .row { display: grid; grid-template-columns: 110px 1fr 52px; gap: 6px; align-items: center; font-size: 12px; }
+    #panel .row span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #panel .row input { width: 100%; margin: 2px 0; }
+    #panel .row input:disabled { opacity: .55; }
+    #panel output { text-align: right; font-variant-numeric: tabular-nums; }
+    #busy { position: fixed; inset: 0; z-index: 100; display: flex; flex-direction: column; gap: 14px;
+            align-items: center; justify-content: center; background: rgba(0,0,0,.55); color: #eee;
+            cursor: wait; user-select: none; }
+    #busy[hidden] { display: none; }
+    #busy .spinner { width: 36px; height: 36px; border: 3px solid rgba(255,255,255,.25); border-top-color: #eee;
+                     border-radius: 50%; animation: spin .8s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
   </style>
 </head>
 <body>
@@ -21,9 +78,23 @@
     <button id="reset" title="Every robot back to its spawn pose">Reset</button>
     <button id="undo" title="Remove the last spawned robot">Undo</button>
     <button id="clear" title="Remove all robots">Clear</button>
-    <select id="model" title="Robot to spawn: click the floor to place it"></select>
+    <button id="assets-toggle" title="Show or hide the asset panel">Assets</button>
+    <button id="inspect" title="Joint positions and actuator controls">Joints</button>
+    <button id="vr" hidden>Enter VR</button>
     <span id="status">loading…</span>
   </div>
+  <div id="assets">
+    <div class="tabs"></div>
+    <input type="search" placeholder="Filter…">
+    <ul></ul>
+    <div class="hint">Drag an item onto the floor to spawn it. While dragging: mouse wheel or Q/E turns it, Shift+wheel or R/F raises/lowers it, Esc cancels.</div>
+  </div>
+  <div id="panel" hidden>
+    <div>Selected: <span id="selected">none</span></div>
+    <div class="hint">Double-click a body to select it, Ctrl+drag to pull it. Joints can be set while paused.</div>
+  </div>
+  <canvas id="gizmo" title="World axes: click an axis to look along it"></canvas>
+  <div id="busy"><div class="spinner"></div><div class="msg">loading…</div></div>
   <!-- Filament.js is a UMD bundle that defines the global `Filament`. -->
   <script src="vendor/filament/filament.js"></script>
   <script type="module" src="main.js"></script>

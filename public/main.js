@@ -1,12 +1,25 @@
 // MuJoCo (official WASM bindings) for physics + Filament.js for rendering.
 //
-// Each MuJoCo geom becomes one Filament renderable whose vertices are baked
-// from geom_size at load time; every frame we only copy geom_xpos/geom_xmat
-// into the Filament transform. The scene stays in MuJoCo's Z-up frame.
+// Rendering and physics use different MuJoCo models. Each robot file is
+// compiled once on its own, in a throwaway MuJoCo instance, to bake its
+// visible geoms into Filament buffers (vertices from geom_size / mesh data,
+// pose relative to the geom's body); all spawned copies share them. The
+// physics world (world.js) is a physics-only model rebuilt, in a fresh MuJoCo
+// instance, on every spawn. Every frame the body poses (xpos/xmat) of the
+// world are composed with each geom's local pose into the Filament transform.
+// The scene stays in MuJoCo's Z-up frame.
+//
+// Fresh instances because the @mujoco/mujoco WASM heap is capped at 2 GB and
+// never shrinks, and MjSpec.delete() does not give back what a compile used:
+// dropping the whole instance is the only way to get that memory back.
 
 import loadMujoco from './vendor/mujoco/mujoco.js';
 import { loadModelFiles, readFirst, urlSource } from './vfs.js';
-import { compileWorld, firstKey } from './world.js';
+import { bodyInertia, compileWorld, firstKey, referencedNames } from './world.js';
+import { CONTROL_DT, G1_MODEL, GrootController, loadGrootPolicy } from './groot.js';
+import { JointPanel, Perturb } from './inspect.js';
+import { AssetPanel, loadAssets } from './assets.js';
+import { AxisGizmo } from './gizmo.js';
 
 // Filament.init() replaces the global with the loaded module, so re-read it after init.
 let Filament = window.Filament;
@@ -108,6 +121,22 @@ function plane(sx, sy) {
   return grid(1, 1, (i, j) => [(j ? 1 : -1) * sx, (i ? -1 : 1) * sy, 0, 0, 0, 1]);
 }
 
+// The drag-to-spawn marker, flat in the z=0 plane, unit radius: a ring for
+// the spawn point and an arrow along +x for the heading (a robot's +x is
+// usually its front). Both sides are drawn.
+function spawnMarkerShape() {
+  const up = (pts) => ({ pos: pts.flat(), nrm: pts.flatMap(() => [0, 0, 1]) });
+  const ring = grid(1, SEG, (i, j) => {
+    const t = (j / SEG) * 2 * Math.PI, r = i ? 0.85 : 1;
+    return [r * Math.cos(t), r * Math.sin(t), 0, 0, 0, 1];
+  });
+  const shaft = { ...up([[0, -0.06, 0], [0.75, -0.06, 0], [0.75, 0.06, 0], [0, 0.06, 0]]), idx: [0, 1, 2, 0, 2, 3] };
+  const head = { ...up([[0.75, -0.22, 0], [1.25, 0, 0], [0.75, 0.22, 0]]), idx: [0, 1, 2] };
+  const out = merge(ring, shaft, head);
+  for (let k = 0, m = out.idx.length; k < m; k += 3) out.idx.push(out.idx[k], out.idx[k + 2], out.idx[k + 1]);
+  return out;
+}
+
 // Triangle soup from mesh_vert / mesh_face with MuJoCo's own per-corner
 // normals (mesh_facenormal -> mesh_normal): smooth where the mesh is smooth,
 // split at the creases MuJoCo detected (or the normals the OBJ file provided).
@@ -182,6 +211,38 @@ function uploadTexture(engine, w, h, rgba) {
   return tex;
 }
 
+// Sky cubemap: a vertical gradient (the scene is Z-up), zenith blue to a pale
+// horizon, then a darker haze below it. Faces +X, -X, +Y, -Y, +Z, -Z.
+function skyTexture(engine, size = 128) {
+  const zenith = [0.22, 0.42, 0.72], horizon = [0.78, 0.85, 0.92], ground = [0.36, 0.39, 0.43];
+  const faces = [
+    (u, v) => [1, -v, -u], (u, v) => [-1, -v, u],
+    (u, v) => [u, 1, v], (u, v) => [u, -1, -v],
+    (u, v) => [u, -v, 1], (u, v) => [-u, -v, -1],
+  ];
+  const srgb = (c) => Math.round(255 * Math.min(1, Math.max(0, c)));
+  const px = new Uint8Array(6 * size * size * 4);
+  let o = 0;
+  for (const dir of faces) {
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) {
+        const d = dir((2 * x + 1) / size - 1, (2 * y + 1) / size - 1);
+        const z = d[2] / Math.hypot(...d);
+        const [a, b, t] = z >= 0 ? [horizon, zenith, Math.pow(z, 0.6)] : [horizon, ground, Math.min(1, -z * 4)];
+        for (let k = 0; k < 3; k++) px[o++] = srgb(a[k] + (b[k] - a[k]) * t);
+        px[o++] = 255;
+      }
+    }
+  }
+  const tex = Filament.Texture.Builder()
+    .width(size).height(size).levels(1)
+    .sampler(Filament.Texture$Sampler.SAMPLER_CUBEMAP)
+    .format(Filament.Texture$InternalFormat.SRGB8_A8)
+    .build(engine);
+  tex.setImageCube(engine, 0, Filament.PixelBuffer(px, Filament.PixelDataFormat.RGBA, Filament.PixelDataType.UBYTE));
+  return tex;
+}
+
 // A texture MuJoCo decoded itself (builtins, cube faces, …) from tex_data.
 function mjTexture(engine, model, t) {
   const w = model.tex_width[t], h = model.tex_height[t], nc = model.tex_nchannel[t];
@@ -224,8 +285,9 @@ function geomShape(model, g) {
 // ---------------------------------------------------------------------------
 // Filament helpers
 
-// `uv` (Float32Array, 2 per vertex) is only passed for textured materials.
-function makeRenderable(engine, shape, matInstance, uv = null) {
+// GPU buffers for one shape: {vb, ib, box}. `uv` (Float32Array, 2 per
+// vertex) is only passed for textured materials.
+function makeGeometry(engine, shape, uv = null) {
   const pos = new Float32Array(shape.pos);
   const nrm = new Float32Array(shape.nrm);
   const idx = new Uint32Array(shape.idx);
@@ -263,18 +325,34 @@ function makeRenderable(engine, shape, matInstance, uv = null) {
     lo[i % 3] = Math.min(lo[i % 3], pos[i]);
     hi[i % 3] = Math.max(hi[i % 3], pos[i]);
   }
+  const box = {
+    center: lo.map((v, k) => (v + hi[k]) / 2),
+    halfExtent: lo.map((v, k) => (hi[k] - v) / 2 + 1e-4),
+  };
+  return { vb, ib, box };
+}
+
+// A renderable entity drawing `geo` (makeGeometry) with `matInstance`.
+// Several entities may share the same buffers and material instance.
+function makeEntity(engine, geo, matInstance, castShadows = true) {
   const entity = Filament.EntityManager.get().create();
   Filament.RenderableManager.Builder(1)
-    .boundingBox({
-      center: lo.map((v, k) => (v + hi[k]) / 2),
-      halfExtent: lo.map((v, k) => (hi[k] - v) / 2 + 1e-4),
-    })
+    .boundingBox(geo.box)
     .material(0, matInstance)
-    .geometry(0, Filament.RenderableManager$PrimitiveType.TRIANGLES, vb, ib)
-    .castShadows(true)
+    .geometry(0, Filament.RenderableManager$PrimitiveType.TRIANGLES, geo.vb, geo.ib)
+    .castShadows(castShadows)
     .receiveShadows(true)
     .build(engine, entity);
-  return { entity, vb, ib, matInstance };
+  return entity;
+}
+
+// Row-major 3x3 rotation of a unit quaternion (w, x, y, z), like mju_quat2Mat.
+function quatToMat([w, x, y, z]) {
+  return [
+    1 - 2 * (y * y + z * z), 2 * (x * y - w * z), 2 * (x * z + w * y),
+    2 * (x * y + w * z), 1 - 2 * (x * x + z * z), 2 * (y * z - w * x),
+    2 * (x * z - w * y), 2 * (y * z + w * x), 1 - 2 * (x * x + y * y),
+  ];
 }
 
 // Simple orbit camera around a Z-up target.
@@ -283,7 +361,10 @@ class OrbitCamera {
     this.center = center; this.dist = dist;
     this.azim = -0.6; this.elev = 0.35;
     let last = null, button = 0;
-    canvas.addEventListener('pointerdown', (e) => { last = [e.clientX, e.clientY]; button = e.button; canvas.setPointerCapture(e.pointerId); });
+    canvas.addEventListener('pointerdown', (e) => {
+      if (e.ctrlKey || e.metaKey) { last = null; return; }  // Ctrl+drag perturbs (inspect.js)
+      last = [e.clientX, e.clientY]; button = e.button; canvas.setPointerCapture(e.pointerId);
+    });
     canvas.addEventListener('pointerup', () => { last = null; });
     canvas.addEventListener('contextmenu', (e) => e.preventDefault());
     canvas.addEventListener('pointermove', (e) => {
@@ -320,15 +401,19 @@ class OrbitCamera {
 // ---------------------------------------------------------------------------
 
 class App {
-  constructor(mujoco, canvas) {
-    this.mujoco = mujoco;
+  constructor(canvas) {
     this.canvas = canvas;
     this.paused = false;
-    this.items = [];  // [{geom, entity, vb, ib, matInstance}]
-    this.textures = new Map();  // MuJoCo texture id -> {tex, waiting: [MaterialInstance]} (per model)
-    this.generation = 0;        // bumped by clear() so late image decodes are dropped
+    this.mujoco = this.model = this.data = null;  // the physics world
+    this.robots = [];  // spawned, in attach order: {visual, pos, bodyOffset, entities, groot}
+    this.controllers = [];  // the robots' policies (GrootController), ticked every CONTROL_DT
+    this.nextControl = 0;   // sim time of the next policy tick
+    this.stepping = null;   // the pending advance(), if any
+    this.perturb = new Perturb(this);  // double-click selection, Ctrl+drag force
+    this.panel = null;                 // JointPanel, set by the page
 
-    const engine = this.engine = Filament.Engine.create(canvas);
+    // xrCompatible: the same context renders the WebXR session (enterVR).
+    const engine = this.engine = Filament.Engine.create(canvas, { xrCompatible: true });
     this.scene = engine.createScene();
     this.swapChain = engine.createSwapChain();
     this.renderer = engine.createRenderer();
@@ -361,14 +446,57 @@ class App {
     this.scene.addEntity(this.sun);
     const sh = new Float32Array(27);
     sh.set([0.65, 0.7, 0.8], 0);
+    this.scene.setSkybox(Filament.Skybox.Builder().environment(skyTexture(engine)).build(engine));
     this.scene.setIndirectLight(
       Filament.IndirectLight.Builder().irradianceSh(3, sh).intensity(25000).build(engine));
 
+    // The floor of world.js's BASE_XML (a size-0, i.e. infinite, plane), drawn
+    // 40 m x 40 m: 40 x 40 checker cells.
+    const floor = this.matChecker.createInstance();
+    floor.setColor3Parameter('color1', Filament.RgbType.sRGB, [0.25, 0.3, 0.36]);
+    floor.setColor3Parameter('color2', Filament.RgbType.sRGB, [0.45, 0.5, 0.56]);
+    floor.setFloatParameter('scale', 1.0);  // checker cell size (m)
+    // Pushed back in depth: an environment's own floor usually lies exactly
+    // at z = 0 too, and two coplanar surfaces z-fight (flicker between each
+    // other with the view). Offset, the world floor always loses such ties.
+    floor.setPolygonOffset(1, 1);
+    this.scene.addEntity(makeEntity(engine, makeGeometry(engine, plane(20, 20)), floor));
+
+    // Perturbation markers: the selection point, the drag target and a rope
+    // between them. Hidden (scaled to zero) when unused.
+    const marker = (rgb, geo) => {
+      const mi = this.matLit.createInstance();
+      mi.setColor4Parameter('baseColor', Filament.RgbaType.sRGB, [...rgb, 1]);
+      mi.setFloatParameter('roughness', 0.4);
+      mi.setFloatParameter('metallic', 0.0);
+      const e = makeEntity(engine, geo, mi);
+      this.scene.addEntity(e);
+      return e;
+    };
+    const sphere = makeGeometry(engine, roundShape(1, 1, 1));
+    this.markers = {
+      sel: marker([1, 0.45, 0.1], sphere),
+      target: marker([1, 0.8, 0.2], sphere),
+      rope: marker([1, 0.65, 0.15], makeGeometry(engine, cylinder(1, 0.5))),
+    };
+    const spawnMi = this.matLit.createInstance();
+    spawnMi.setColor4Parameter('baseColor', Filament.RgbaType.sRGB, [0.2, 0.8, 1, 1]);
+    spawnMi.setFloatParameter('roughness', 0.6);
+    spawnMi.setFloatParameter('metallic', 0.0);
+    this.spawnMarker = makeEntity(engine, makeGeometry(engine, spawnMarkerShape()), spawnMi, false);
+    this.scene.addEntity(this.spawnMarker);
+    // From the floor up to a raised spawn marker.
+    this.spawnPole = makeEntity(engine, makeGeometry(engine, cylinder(1, 0.5)), spawnMi, false);
+    this.scene.addEntity(this.spawnPole);
+
+    this.orbit = new OrbitCamera(canvas, [0, 0, 0.4], 4);
+    this.setSpawnMarker(null);
     this.resize();
     window.addEventListener('resize', () => this.resize());
   }
 
   resize() {
+    if (this.xr) return;  // the session sizes the canvas
     const dpr = window.devicePixelRatio || 1;
     const w = Math.round(this.canvas.clientWidth * dpr), h = Math.round(this.canvas.clientHeight * dpr);
     this.canvas.width = w; this.canvas.height = h;
@@ -376,19 +504,14 @@ class App {
     this.camera.setProjectionFov(45, w / h, 0.01, 200, Filament.Camera$Fov.VERTICAL);
   }
 
-  // Takes ownership of a compiled MjModel. `images` (texture name ->
-  // {read, cands}) supplies the image textures the loader replaced with
-  // placeholders (see vfs.js). `init(data)` may set the state before the
-  // first mj_forward.
-  load(model, images = new Map(), init = null) {
-    const { mujoco } = this;
-    this.clear();
-    this.images = images;
-    this.model = model;
-    this.data = new mujoco.MjData(model);
-    init?.(this.data);
-    mujoco.mj_forward(model, this.data);
-
+  // Render data for one robot model: one part per visible geom, with GPU
+  // buffers, a material instance and the geom's pose in its body. Shared by
+  // every spawned copy, so it is built once per robot file. `images` (texture
+  // name -> candidate paths, readable with `read`) supplies the image textures
+  // the loader replaced with placeholders (see vfs.js).
+  buildVisual(mujoco, model, images, read) {
+    const textures = new Map();  // MuJoCo texture id -> {tex, waiting: [MaterialInstance]}
+    const parts = [];
     for (let g = 0; g < model.ngeom; g++) {
       const matid = model.geom_matid[g];
       const rgba = matid >= 0 ? model.mat_rgba.slice(4 * matid, 4 * matid + 4)
@@ -407,44 +530,35 @@ class App {
       if (textured) {
         mi = this.matTextured.createInstance();
         mi.setColor4Parameter('baseColor', Filament.RgbaType.sRGB, [rgba[0], rgba[1], rgba[2], 1]);
-        this.bindTexture(texid, mi);
-        mi.setFloatParameter('roughness', 0.45);
-        mi.setFloatParameter('metallic', 0.0);
+        this.bindTexture(textures, mujoco, model, images, read, texid, mi);
         uv = geomUVs(model, g, shape, matid);
-      } else if (model.geom_type[g] === 0 && matid < 0) {  // bare plane: default checker floor
-        mi = this.matChecker.createInstance();
-        mi.setColor3Parameter('color1', Filament.RgbType.sRGB, [0.25, 0.3, 0.36]);
-        mi.setColor3Parameter('color2', Filament.RgbType.sRGB, [0.45, 0.5, 0.56]);
-        mi.setFloatParameter('scale', 0.5);
       } else {
         mi = this.matLit.createInstance();
         mi.setColor4Parameter('baseColor', Filament.RgbaType.sRGB, [rgba[0], rgba[1], rgba[2], 1]);
-        mi.setFloatParameter('roughness', 0.45);
-        mi.setFloatParameter('metallic', 0.0);
       }
-      const item = makeRenderable(this.engine, shape, mi, uv);
-      item.geom = g;
-      this.scene.addEntity(item.entity);
-      this.items.push(item);
+      mi.setFloatParameter('roughness', 0.45);
+      mi.setFloatParameter('metallic', 0.0);
+      parts.push({
+        ...makeGeometry(this.engine, shape, uv), mi,
+        body: model.geom_bodyid[g],
+        pos: Array.from(model.geom_pos.subarray(3 * g, 3 * g + 3)),
+        rot: quatToMat(model.geom_quat.subarray(4 * g, 4 * g + 4)),
+      });
     }
-
-    // The camera stays put across spawns.
-    this.orbit ??= new OrbitCamera(this.canvas, [0, 0, 0.4], 4);
-    this.simStart = performance.now() - this.data.time * 1000;
-    this.syncTransforms();
+    return parts;
   }
 
   // Binds MuJoCo texture `texid` to `mi`, creating it on first use. Image
   // textures are decoded asynchronously; until then `mi` shows plain white.
-  bindTexture(texid, mi) {
-    let entry = this.textures.get(texid);
+  bindTexture(textures, mujoco, model, images, read, texid, mi) {
+    let entry = textures.get(texid);
     if (!entry) {
       entry = { tex: null, waiting: [] };
-      this.textures.set(texid, entry);
-      const name = this.mujoco.mj_id2name(this.model, this.mujoco.mjtObj.mjOBJ_TEXTURE.value, texid);
-      const image = this.images.get(name);
-      if (image) this.loadImage(entry, image, name);
-      else entry.tex = mjTexture(this.engine, this.model, texid);
+      textures.set(texid, entry);
+      const name = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_TEXTURE.value, texid);
+      const cands = images.get(name);
+      if (cands) this.loadImage(entry, read, cands, name);
+      else entry.tex = mjTexture(this.engine, model, texid);
     }
     if (entry.tex) {
       mi.setTextureParameter('baseColorMap', entry.tex, this.sampler);
@@ -454,11 +568,9 @@ class App {
     }
   }
 
-  async loadImage(entry, { read, cands }, name) {
-    const gen = this.generation;
+  async loadImage(entry, read, cands, name) {
     try {
       const { w, h, rgba } = await decodeImage(await readFirst(read, cands));
-      if (gen !== this.generation) return;  // model was replaced meanwhile
       entry.tex = uploadTexture(this.engine, w, h, rgba);
       for (const mi of entry.waiting) mi.setTextureParameter('baseColorMap', entry.tex, this.sampler);
       entry.waiting = [];
@@ -467,21 +579,41 @@ class App {
     }
   }
 
-  clear() {
-    this.generation++;
-    for (const it of this.items) {
-      this.scene.remove(it.entity);
-      this.engine.destroyEntity(it.entity);
-      this.engine.destroyVertexBuffer(it.vb);
-      this.engine.destroyIndexBuffer(it.ib);
-      this.engine.destroyMaterialInstance(it.matInstance);
+  addEntities(parts) {
+    return parts.map((p) => {
+      const e = makeEntity(this.engine, p, p.mi);
+      this.scene.addEntity(e);
+      return e;
+    });
+  }
+
+  removeEntities(entities) {
+    for (const e of entities) {
+      this.scene.remove(e);
+      this.engine.destroyEntity(e);
     }
-    this.items = [];
-    for (const { tex } of this.textures.values()) if (tex) this.engine.destroyTexture(tex);
-    this.textures.clear();
+  }
+
+  // Swaps in a new physics world: `model` belongs to `mujoco` (a fresh
+  // instance), `robots` are its robots in attach order with their bodyOffset
+  // set. `init(data)` may set the state before the first mj_forward. The old
+  // model and data are deleted; the caller drops the old instance.
+  setWorld(mujoco, model, robots, init = null) {
+    const data = new mujoco.MjData(model);
+    this.perturb.clear();
+    init?.(data);
+    mujoco.mj_forward(model, data);
     this.data?.delete();
     this.model?.delete();
-    this.data = this.model = null;
+    this.mujoco = mujoco;
+    this.model = model;
+    this.data = data;
+    this.robots = robots;
+    this.controllers = robots.flatMap((r) => (r.groot ? [r.groot] : []));
+    this.nextControl = data.time;
+    this.simStart = performance.now() - data.time * 1000;
+    this.syncTransforms();
+    this.panel?.build();
   }
 
   // Back to `this.initial` ({qpos, ctrl}: every robot's spawn pose), if set.
@@ -492,12 +624,14 @@ class App {
       this.data.ctrl.set(this.initial.ctrl);
     }
     this.mujoco.mj_forward(this.model, this.data);
+    for (const c of this.controllers) c.reset();
+    this.nextControl = 0;
     this.simStart = performance.now();
     this.syncTransforms();  // frame() only syncs while running
   }
 
-  // Where the pointer ray hits the z=0 floor, or null if it misses.
-  pickFloor(clientX, clientY) {
+  // The camera ray under the pointer: {eye, dir (unit), forward (unit view direction)}.
+  pointerRay(clientX, clientY) {
     const rect = this.canvas.getBoundingClientRect();
     const x = ((clientX - rect.left) / rect.width) * 2 - 1;
     const y = 1 - ((clientY - rect.top) / rect.height) * 2;
@@ -507,58 +641,281 @@ class App {
     const f = norm(c.map((k, i) => k - eye[i]));
     const r = norm(cross(f, [0, 0, 1])), u = cross(r, f);
     const t = Math.tan((45 / 2) * (Math.PI / 180));  // matches setProjectionFov(45, …, VERTICAL)
-    const d = [0, 1, 2].map((i) => f[i] + r[i] * x * t * (rect.width / rect.height) + u[i] * y * t);
-    if (d[2] > -1e-6) return null;
-    const s = -eye[2] / d[2];
-    return [eye[0] + s * d[0], eye[1] + s * d[1], 0];
+    const dir = norm([0, 1, 2].map((i) => f[i] + r[i] * x * t * (rect.width / rect.height) + u[i] * y * t));
+    return { eye, dir, forward: f };
   }
 
+  // Where the pointer ray hits the floor (or the plane at height z), or null
+  // if it misses.
+  pickFloor(clientX, clientY, z = 0) {
+    const { eye, dir: d } = this.pointerRay(clientX, clientY);
+    if (eye[2] - z <= 0 || d[2] > -1e-6) return null;
+    const s = (z - eye[2]) / d[2];
+    return [eye[0] + s * d[0], eye[1] + s * d[1], z];
+  }
+
+  // The first physics geom under the pointer: {body, point}, or null. Body 0
+  // is the world (the floor, static geoms). Visual-only geoms are not in the
+  // physics world, so this hits collision geoms.
+  pickBody(clientX, clientY) {
+    const { mujoco, model, data } = this;
+    if (!model) return null;
+    const { eye, dir } = this.pointerRay(clientX, clientY);
+    const geom = new mujoco.IntBuffer(1), normal = new mujoco.DoubleBuffer(3);
+    try {
+      const dist = mujoco.mj_ray(model, data, eye, dir, null, true, -1, geom, normal);
+      const g = geom.GetView()[0];
+      if (dist < 0 || g < 0) return null;
+      return { body: model.geom_bodyid[g], point: eye.map((v, i) => v + dist * dir[i]) };
+    } finally {
+      geom.delete();
+      normal.delete();
+    }
+  }
+
+  // Shows the drag-to-spawn marker at `pos` heading `yaw`, with a pole down
+  // to the floor when it is raised, or hides it (null). Its size follows the
+  // camera distance.
+  setSpawnMarker(pos, yaw = 0) {
+    const tcm = this.engine.getTransformManager();
+    const put = (entity, m) => {
+      const inst = tcm.getInstance(entity);
+      tcm.setTransform(inst, m ?? [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]);
+      inst.delete();
+    };
+    const k = 0.06 * this.orbit.dist, c = Math.cos(yaw) * k, s = Math.sin(yaw) * k;
+    put(this.spawnMarker, pos && [c, s, 0, 0, -s, c, 0, 0, 0, 0, k, 0, pos[0], pos[1], pos[2] + 0.003, 1]);
+    const h = pos?.[2] ?? 0, w = 0.06 * k;
+    put(this.spawnPole, Math.abs(h) > 1e-3 ? [w, 0, 0, 0, 0, w, 0, 0, 0, 0, h, 0, pos[0], pos[1], h / 2, 1] : null);
+  }
+
+  // Places the perturbation markers (see the constructor).
+  syncMarkers() {
+    const tcm = this.engine.getTransformManager();
+    const put = (entity, m) => {
+      const inst = tcm.getInstance(entity);
+      tcm.setTransform(inst, m ?? [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]);
+      inst.delete();
+    };
+    const p = this.model ? this.perturb.point() : null, q = this.perturb.target;
+    const r = 0.006 * this.orbit.dist;  // constant on-screen size
+    const ball = (c, k) => [k, 0, 0, 0, 0, k, 0, 0, 0, 0, k, 0, c[0], c[1], c[2], 1];
+    put(this.markers.sel, p && ball(p, r));
+    put(this.markers.target, p && q && ball(q, 0.7 * r));
+    let rope = null;
+    if (p && q) {
+      const d = q.map((v, i) => v - p[i]), len = Math.hypot(...d);
+      if (len > 1e-6) {
+        const z = d.map((v) => v / len);
+        const a = Math.abs(z[2]) < 0.9 ? [0, 0, 1] : [1, 0, 0];
+        let x = [a[1] * z[2] - a[2] * z[1], a[2] * z[0] - a[0] * z[2], a[0] * z[1] - a[1] * z[0]];
+        const xl = Math.hypot(...x);
+        x = x.map((v) => v / xl);
+        const y = [z[1] * x[2] - z[2] * x[1], z[2] * x[0] - z[0] * x[2], z[0] * x[1] - z[1] * x[0]];
+        const w = 0.25 * r, mid = p.map((v, i) => (v + q[i]) / 2);
+        rope = [...x.map((v) => v * w), 0, ...y.map((v) => v * w), 0, ...z.map((v) => v * len), 0, ...mid, 1];
+      }
+    }
+    put(this.markers.rope, rope);
+  }
+
+  // Geom pose = body pose (from the world) * geom pose in the body (from the
+  // robot's own model). The robot's body k > 0 is world body bodyOffset + k - 1;
+  // its static (worldbody) geoms sit at the spawn point, turned by its yaw.
   syncTransforms() {
     const tcm = this.engine.getTransformManager();
-    const xpos = this.data.geom_xpos, xmat = this.data.geom_xmat;
-    for (const { geom: g, entity } of this.items) {
-      const R = xmat.subarray(9 * g, 9 * g + 9), p = xpos.subarray(3 * g, 3 * g + 3);
-      // MuJoCo xmat is row-major 3x3; Filament wants a column-major 4x4.
-      const m = [R[0], R[3], R[6], 0, R[1], R[4], R[7], 0, R[2], R[5], R[8], 0, p[0], p[1], p[2], 1];
-      const inst = tcm.getInstance(entity);
-      tcm.setTransform(inst, m);
-      inst.delete();
+    const xpos = this.data.xpos, xmat = this.data.xmat;
+    for (const { visual, pos, yaw = 0, bodyOffset, entities } of this.robots) {
+      const c = Math.cos(yaw), s = Math.sin(yaw);
+      const Rz = [c, -s, 0, s, c, 0, 0, 0, 1];
+      for (const [i, part] of visual.parts.entries()) {
+        let B = Rz, t = pos;
+        if (part.body > 0) {
+          const b = bodyOffset + part.body - 1;
+          B = xmat.subarray(9 * b, 9 * b + 9);
+          t = xpos.subarray(3 * b, 3 * b + 3);
+        }
+        const G = part.rot, q = part.pos;
+        const R = new Array(9);
+        for (let r = 0; r < 3; r++) {
+          for (let c = 0; c < 3; c++) R[3 * r + c] = B[3 * r] * G[c] + B[3 * r + 1] * G[3 + c] + B[3 * r + 2] * G[6 + c];
+        }
+        const p = [0, 1, 2].map((r) => t[r] + B[3 * r] * q[0] + B[3 * r + 1] * q[1] + B[3 * r + 2] * q[2]);
+        // Row-major 3x3 -> Filament's column-major 4x4.
+        const m = [R[0], R[3], R[6], 0, R[1], R[4], R[7], 0, R[2], R[5], R[8], 0, p[0], p[1], p[2], 1];
+        const inst = tcm.getInstance(entities[i]);
+        tcm.setTransform(inst, m);
+        inst.delete();
+      }
     }
   }
 
-  frame() {
-    if (this.model && !this.paused) {
-      // Keep simulation time locked to wall time (capped so a hidden tab doesn't explode).
-      const target = (performance.now() - this.simStart) / 1000;
-      const t0 = performance.now();
-      while (this.data.time < target && performance.now() - t0 < 20) {
-        this.mujoco.mj_step(this.model, this.data);
+  // Steps the world up to wall time (capped so a hidden tab doesn't explode),
+  // ticking the policies every CONTROL_DT of sim time. Inference is async
+  // (onnxruntime-web), so this awaits it between steps; a world swapped in
+  // meanwhile (spawn, undo) ends the call.
+  async advance() {
+    const { mujoco, model, data } = this;
+    const valid = () => this.data === data;
+    const target = (performance.now() - this.simStart) / 1000;
+    const t0 = performance.now();
+    while (data.time < target && performance.now() - t0 < 20) {
+      if (this.controllers.length && data.time >= this.nextControl - 1e-9) {
+        await Promise.all(this.controllers.map((c) => c.step(data, valid)));
+        if (!valid()) return;
+        this.nextControl += CONTROL_DT;
       }
-      if (this.data.time < target) this.simStart = performance.now() - this.data.time * 1000;
-      this.syncTransforms();
+      this.perturb.apply();
+      mujoco.mj_step(model, data);
     }
-    if (this.orbit) this.camera.lookAt(this.orbit.eye(), this.orbit.center, [0, 0, 1]);
+    if (data.time < target) this.simStart = performance.now() - data.time * 1000;
+    this.syncTransforms();
+  }
+
+  // `xrFrame` is set when called from the WebXR session's animation loop.
+  frame(xrFrame = null) {
+    if (this.model && !this.paused && !this.stepping) {
+      this.stepping = this.advance()
+        .catch((err) => { this.paused = true; console.error('simulation stopped', err); })
+        .finally(() => { this.stepping = null; });
+    }
+    this.syncMarkers();
+    this.panel?.update(performance.now());
+    if (xrFrame) {
+      this.renderXR(xrFrame);
+    } else {
+      this.camera.lookAt(this.orbit.eye(), this.orbit.center, [0, 0, 1]);
+      if (this.renderer.beginFrame(this.swapChain)) {
+        this.renderer.renderView(this.view);
+        this.renderer.endFrame();
+      }
+      this.engine.execute();
+    }
+    const xr = this.xr;
+    // A session frame that arrives after the session ended is dropped: 'end'
+    // has restarted the window loop.
+    if (xr) xr.session.requestAnimationFrame((_t, f) => this.xr === xr && this.frame(f));
+    else requestAnimationFrame(() => this.frame());
+  }
+
+  // ---- WebXR (view only, no interaction) ----------------------------------
+  //
+  // Filament.js cannot render into the session's framebuffer, so each eye is
+  // rendered by its own View into its viewport of the (canvas) default
+  // framebuffer, sized like the XR layer, and the whole image is then blitted
+  // onto the layer. The scene is Z-up, WebXR is Y-up: the 'local-floor' space
+  // is mapped onto the scene with the viewer starting 2.5 m back on -Y,
+  // looking along +Y at the origin.
+
+  async enterVR() {
+    const session = await navigator.xr.requestSession('immersive-vr', { requiredFeatures: ['local-floor'] });
+    const gl = this.canvas.getContext('webgl2');  // Filament's own context
+    await gl.makeXRCompatible();
+    const near = 0.05, far = 200;
+    session.updateRenderState({ depthNear: near, depthFar: far });
+    // No antialias: a multisampled layer cannot be blitted into.
+    const layer = new XRWebGLLayer(session, gl, { antialias: false, depth: false });
+    session.updateRenderState({ baseLayer: layer });
+    const space = await session.requestReferenceSpace('local-floor');
+    const eyes = [0, 1].map(() => {
+      const entity = Filament.EntityManager.get().create();
+      const camera = this.engine.createCamera(entity);
+      const view = this.engine.createView();
+      view.setCamera(camera);
+      view.setScene(this.scene);
+      view.setAmbientOcclusionOptions({ enabled: true, radius: 0.2 });
+      view.setAntiAliasing(Filament.View$AntiAliasing.FXAA);
+      return { entity, camera, view };
+    });
+    this.canvas.width = layer.framebufferWidth;
+    this.canvas.height = layer.framebufferHeight;
+    this.xr = { session, gl, layer, space, eyes, near, far, frames: 0, t0: performance.now() };
+    session.addEventListener('end', () => {
+      this.xr = null;
+      for (const { entity, view } of eyes) {
+        this.engine.destroyView(view);
+        this.engine.destroyCameraComponent(entity);
+      }
+      this.resize();
+      requestAnimationFrame(() => this.frame());  // the session's loop has stopped
+    });
+    console.log(`WebXR: ${layer.framebufferWidth}x${layer.framebufferHeight} framebuffer`);
+    return session;
+  }
+
+  renderXR(frame) {
+    const { gl, layer, space, eyes, near, far } = this.xr;
+    const pose = frame.getViewerPose(space);
+    if (!pose) return;
+    // scene_from_xr (column-major): x -> x, y -> z, z -> -y, origin at (0, -2.5, 0).
+    const M = [1, 0, 0, 0, 0, 0, 1, 0, 0, -1, 0, 0, 0, -2.5, 0, 1];
+    const mul = (a, b) => {  // column-major 4x4 a * b
+      const r = new Array(16);
+      for (let c = 0; c < 4; c++) {
+        for (let k = 0; k < 4; k++) {
+          r[4 * c + k] = a[k] * b[4 * c] + a[4 + k] * b[4 * c + 1] + a[8 + k] * b[4 * c + 2] + a[12 + k] * b[4 * c + 3];
+        }
+      }
+      return r;
+    };
+    const views = pose.views.slice(0, eyes.length);
+    for (const [i, v] of views.entries()) {
+      const { camera, view } = eyes[i];
+      const vp = layer.getViewport(v);
+      view.setViewport([vp.x, vp.y, vp.width, vp.height]);
+      camera.setCustomProjection(Array.from(v.projectionMatrix), near, far);
+      camera.setModelMatrix(mul(M, v.transform.matrix));
+    }
     if (this.renderer.beginFrame(this.swapChain)) {
-      this.renderer.renderView(this.view);
+      for (let i = 0; i < views.length; i++) this.renderer.renderView(eyes[i].view);
       this.renderer.endFrame();
+    } else {
+      this.xr.skipped = (this.xr.skipped ?? 0) + 1;
     }
     this.engine.execute();
-    requestAnimationFrame(() => this.frame());
+
+    // Default framebuffer -> layer. Filament caches GL state, so the scissor
+    // test and the framebuffer binding are put back as it left them.
+    const w = layer.framebufferWidth, h = layer.framebufferHeight;
+    const scissor = gl.isEnabled(gl.SCISSOR_TEST);
+    if (scissor) gl.disable(gl.SCISSOR_TEST);
+    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
+    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, layer.framebuffer);
+    gl.blitFramebuffer(0, 0, w, h, 0, 0, w, h, gl.COLOR_BUFFER_BIT, gl.NEAREST);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    if (scissor) gl.enable(gl.SCISSOR_TEST);
+
+    // Frame rate, for checking performance on the headset (remote devtools).
+    const x = this.xr;
+    x.frames++;
+    const dt = performance.now() - x.t0;
+    if (dt > 2000) {
+      console.log(`WebXR: ${(1000 * x.frames / dt).toFixed(1)} fps, ${x.skipped ?? 0} frames skipped by Filament`);
+      x.frames = 0; x.skipped = 0; x.t0 = performance.now();
+    }
   }
 }
 
 // ---------------------------------------------------------------------------
 
 const status = document.getElementById('status');
-const picker = document.getElementById('model');
 
-function addOptions(label, entries) {  // entries: [[text, value]]
-  const group = document.createElement('optgroup');
-  group.label = label;
-  for (const [text, value] of entries) group.append(new Option(text, value));
-  picker.append(group);
-  return group;
+// Full-screen overlay shown while spawning/compiling; it swallows pointer
+// input, and keydowns are dropped here (capture phase, registered first) so
+// nothing reaches the page meanwhile. Keyups pass, so held keys are released.
+const busyEl = document.getElementById('busy');
+const busyMsg = busyEl.querySelector('.msg');
+function setBusy(msg) {
+  busyEl.hidden = msg == null;
+  if (msg == null) return;
+  busyMsg.textContent = msg;
+  document.activeElement?.blur?.();  // e.g. the asset filter box
 }
+window.addEventListener('keydown', (e) => {
+  if (busyEl.hidden) return;
+  e.preventDefault();
+  e.stopImmediatePropagation();
+}, { capture: true });
 
 // Lets the browser paint the status text before a blocking compile.
 const nextFrame = () => new Promise((r) => requestAnimationFrame(() => setTimeout(r)));
@@ -589,62 +946,147 @@ function snapshot(app) {
 }
 
 try {
-  const [mujoco] = await Promise.all([
-    loadMujoco(),
-    new Promise((resolve) => Filament.init([MAT_LIT, MAT_CHECKER, MAT_TEXTURED], resolve)),
-  ]);
+  await new Promise((resolve) => Filament.init([MAT_LIT, MAT_CHECKER, MAT_TEXTURED], resolve));
   Filament = window.Filament;
-  const app = new App(mujoco, document.getElementById('canvas'));
+  const app = new App(document.getElementById('canvas'));
+  app.panel = new JointPanel(app, document.getElementById('panel'));
+  const gizmo = new AxisGizmo(document.getElementById('gizmo'), app.orbit);
+  (function drawGizmo() { gizmo.draw(); requestAnimationFrame(drawGizmo); })();
   window.app = app;  // handy for poking at it from devtools
 
-  // Menagerie index written by scripts/vendor.mjs; absent if not checked out.
-  try {
-    const res = await fetch('menagerie.json');
-    if (res.ok) {
-      const robots = await res.json();
-      addOptions('mujoco_menagerie', robots.map((r) => [r.name, `${r.name}/${r.main}`]));
-      const panda = robots.find((r) => r.name === 'franka_emika_panda');
-      if (panda) picker.value = `${panda.name}/${panda.main}`;
+  // Model library indexes written by scripts/vendor.mjs; absent if the
+  // library is not checked out.
+  const assets = await loadAssets([
+    ['menagerie', 'mujoco_menagerie'], ['my_environment', 'my_environment'], ['my_objects', 'my_objects'],
+  ]);
+
+  // Asset paths (`rel`) are under public/: '<library>/<model>/<file>.xml'.
+  // Every rebuild writes the robots' files into a fresh MuJoCo FS, so keep
+  // them in memory.
+  const fetched = new Map();
+  const publicUrl = urlSource('.');
+  const models = (rel) => {
+    if (!fetched.has(rel)) {
+      const bytes = publicUrl(rel);
+      bytes.catch(() => fetched.delete(rel));  // a failed fetch is retried next time
+      fetched.set(rel, bytes);
     }
-  } catch (err) {
-    console.warn('no menagerie index', err);
+    return fetched.get(rel);
+  };
+
+  // Per robot file (asset rel), shared by its spawned copies: render parts,
+  // full-model inertia, first keyframe, names referenced in its XML.
+  const visuals = new Map();
+  function robotVisual(rel, label, progress) {
+    if (!visuals.has(rel)) {
+      const pending = (async () => {
+        const mujoco = await loadMujoco();  // throwaway: dropped after this
+        const { path, images, docs } = await loadModelFiles(mujoco, models, '/models', rel, progress);
+        progress(`preparing ${label} for rendering…`);
+        await nextFrame();
+        const model = mujoco.MjModel.from_xml_path(path);
+        try {
+          return {
+            rel, parts: app.buildVisual(mujoco, model, images, models),
+            inertia: bodyInertia(model), key: firstKey(docs), refs: referencedNames(docs),
+          };
+        } finally {
+          model.delete();
+        }
+      })();
+      pending.catch(() => visuals.delete(rel));  // retry on the next click
+      visuals.set(rel, pending);
+    }
+    return visuals.get(rel);
   }
 
-  // Picker values are menagerie paths: '<robot>/<file>.xml'.
-  const menagerie = urlSource('menagerie');
-  const robots = [];  // spawned, in attach order: {label, path, prefix, pos, key, images, read}
+  // The GR00T locomotion policy (groot.js), loaded on the first G1 spawn from
+  // public/groot (see scripts/vendor.mjs). Resolves to null if unavailable:
+  // the G1 then spawns without a controller.
+  let groot = null;
+  function grootPolicy(progress) {
+    groot ??= (async () => {
+      progress('loading GR00T policy…');
+      const ort = await import('./vendor/onnxruntime/ort.wasm.min.mjs');
+      ort.env.wasm.wasmPaths = new URL('vendor/onnxruntime/', location.href).href;
+      ort.env.wasm.numThreads = 1;  // tiny MLPs; threads would need cross-origin isolation
+      return loadGrootPolicy(ort, (name) => `groot/${name}`);
+    })().catch((err) => {
+      console.warn('GR00T policy unavailable, G1 will not walk', err);
+      return null;
+    });
+    return groot;
+  }
+
+  const robots = [];  // spawned, in attach order: {label, visual, prefix, pos, yaw, entities, bodyOffset, groot}
   let nextId = 1, busy = false;
 
-  const hint = () => picker.value
-    ? `${robots.length} robots · click the floor to spawn ${picker.selectedOptions[0].text}`
-    : `${robots.length} robots`;
+  const hint = () => {
+    const walk = robots.some((r) => r.groot) ? ' · WASD walk, QE turn, RF height' : '';
+    return `${robots.length} spawned · drag an asset onto the floor` + walk;
+  };
 
-  // Compiles the world for `list` and swaps it in. `fresh` is a robot that is
-  // not in the current model yet: it starts from its own keyframe, if any.
-  function rebuild(list, fresh = null) {
-    const model = compileWorld(mujoco, list);  // throws before anything changes
-    const old = snapshot(app);
-    const images = new Map();
+  // Compiles the world for `list` in a fresh MuJoCo instance and swaps it in.
+  // `fresh` is a robot that is not in the current world yet: it starts from
+  // its own keyframe, if any. Throws (changing nothing) if compiling fails.
+  async function rebuild(list, fresh = null, progress = () => {}) {
+    const mujoco = await loadMujoco();
+    const specs = [];
     for (const r of list) {
-      for (const [name, cands] of r.images) images.set(r.prefix + name, { read: r.read, cands });
+      const { path } = await loadModelFiles(mujoco, models, '/models', r.visual.rel);
+      specs.push({ path, prefix: r.prefix, pos: r.pos, yaw: r.yaw, strip: { refs: r.visual.refs, inertia: r.visual.inertia } });
     }
-    app.load(model, images, (data) => {
+    progress(`compiling ${list.length} robots…`);
+    await nextFrame();
+    const model = compileWorld(mujoco, specs);
+    let offset = 1;
+    for (const r of list) {
+      r.bodyOffset = offset;
+      offset += r.visual.inertia.nbody - 1;
+    }
+    if (offset !== model.nbody) {
+      model.delete();
+      throw new Error(`world has ${model.nbody} bodies, expected ${offset}`);
+    }
+
+    // Policy-driven robots: find their joints in the new model and set its
+    // actuator gains to the policy's PD gains.
+    for (const r of list) r.groot?.bind(mujoco, model);
+
+    const old = snapshot(app);
+    if (fresh) fresh.entities = app.addEntities(fresh.visual.parts);
+    try {
+      app.setWorld(mujoco, model, list, init);
+    } catch (err) {
+      if (fresh) app.removeEntities(fresh.entities);
+      throw err;
+    }
+    function init(data) {
       if (old) copySharedState(old, data, model);
       if (!fresh) return;
       const q0 = old?.nq ?? 0, u0 = old?.nu ?? 0;
-      const key = fresh.key;
+      const key = fresh.visual.key;
       if (key?.qpos?.length === model.nq - q0) {
         data.qpos.set(key.qpos, q0);
-        // The keyframe is in the robot's own world frame: shift free joints
-        // by the spawn point (qpos0 already includes it).
+        // The keyframe is in the robot's own world frame: move free joints
+        // to the spawn point and heading (qpos0 already includes them).
+        const c = Math.cos(fresh.yaw), s = Math.sin(fresh.yaw);
+        const hw = Math.cos(fresh.yaw / 2), hz = Math.sin(fresh.yaw / 2);
+        const q = data.qpos;
         for (let j = 0; j < model.njnt; j++) {
           const adr = model.jnt_qposadr[j];
           if (adr < q0 || model.jnt_type[j] !== 0) continue;
-          for (let k = 0; k < 3; k++) data.qpos[adr + k] += fresh.pos[k];
+          const [x, y] = [q[adr], q[adr + 1]];
+          q[adr] = fresh.pos[0] + c * x - s * y;
+          q[adr + 1] = fresh.pos[1] + s * x + c * y;
+          q[adr + 2] += fresh.pos[2];
+          const [w, qx, qy, qz] = q.subarray(adr + 3, adr + 7);  // (hw, 0, 0, hz) * quat
+          q.set([hw * w - hz * qz, hw * qx - hz * qy, hw * qy + hz * qx, hw * qz + hz * w], adr + 3);
         }
       }
       if (key?.ctrl?.length === model.nu - u0) data.ctrl.set(key.ctrl, u0);
-    });
+      fresh.groot?.pose(data);
+    }
     // Reset returns every robot to its spawn pose.
     const prev = app.initial;
     const initial = { qpos: Float64Array.from(app.data.qpos), ctrl: Float64Array.from(app.data.ctrl) };
@@ -655,17 +1097,19 @@ try {
     app.initial = initial;
   }
 
-  async function spawn(rel, pos) {
+  async function spawn({ rel, name: label }, pos, yaw) {
     busy = true;
+    setBusy(`spawning ${label}…`);
     const t0 = performance.now();
-    const label = picker.selectedOptions[0]?.text ?? rel;
     try {
-      const progress = (msg) => { status.textContent = msg; };
-      const { path, images, docs } = await loadModelFiles(mujoco, menagerie, '/menagerie', rel, progress);
-      status.textContent = `compiling ${robots.length + 1} robots…`;
-      await nextFrame();
-      const robot = { label, path, prefix: `r${nextId}/`, pos, key: firstKey(docs), images, read: menagerie };
-      rebuild([...robots, robot], robot);
+      const progress = (msg) => { status.textContent = msg; setBusy(msg); };
+      const visual = await robotVisual(rel, label, progress);
+      const robot = { label, visual, prefix: `r${nextId}/`, pos, yaw };
+      if (rel === `menagerie/${G1_MODEL}`) {
+        const policy = await grootPolicy(progress);
+        if (policy) robot.groot = new GrootController(policy, robot.prefix);
+      }
+      await rebuild([...robots, robot], robot, progress);
       robots.push(robot);
       nextId++;
       const secs = ((performance.now() - t0) / 1000).toFixed(1);
@@ -675,6 +1119,7 @@ try {
       console.error(err);
     } finally {
       busy = false;
+      setBusy(null);
     }
   }
 
@@ -682,35 +1127,60 @@ try {
   async function respawn(list) {
     if (busy) return;
     busy = true;
+    setBusy('rebuilding…');
     try {
-      status.textContent = `compiling ${list.length} robots…`;
-      await nextFrame();
-      rebuild(list);
-      robots.length = 0;
-      robots.push(...list);
+      const removed = robots.slice(list.length);
+      await rebuild(list, null, (msg) => { status.textContent = msg; setBusy(msg); });
+      for (const r of removed) app.removeEntities(r.entities);
+      robots.length = list.length;
       status.textContent = hint();
     } catch (err) {
       status.textContent = `failed: ${err.message ?? err}`;
       console.error(err);
     } finally {
       busy = false;
+      setBusy(null);
     }
   }
 
-  // A click (not a drag: that orbits/pans) on the floor spawns the picked robot.
-  const canvas = document.getElementById('canvas');
-  let down = null;
-  canvas.addEventListener('pointerdown', (e) => { down = e.button === 0 ? [e.clientX, e.clientY] : null; });
-  canvas.addEventListener('pointerup', (e) => {
-    if (!down || Math.hypot(e.clientX - down[0], e.clientY - down[1]) > 4) return;
-    down = null;
-    if (!picker.value) return;
-    if (busy) { status.textContent = 'busy, try again in a moment'; return; }
-    const hit = app.pickFloor(e.clientX, e.clientY);
-    if (hit) spawn(picker.value, hit);
-  });
+  // For devtools and scripts/render_previews.mjs.
+  window.spawnAsset = (rel, pos = [0, 0, 0], yaw = 0) => spawn(assets.find((a) => a.rel === rel) ?? { rel, name: rel }, pos, yaw);
+  window.clearAssets = () => respawn([]);
 
-  picker.onchange = () => { if (!busy) status.textContent = hint(); };
+  // Assets are spawned by dragging them from the asset panel onto the floor.
+  new AssetPanel(app, document.getElementById('assets'), assets, {
+    onDrop: (asset, pos, yaw) => spawn(asset, pos, yaw),
+    canDrop: () => {
+      if (busy) status.textContent = 'busy, try again in a moment';
+      return !busy;
+    },
+  });
+  const assetsEl = document.getElementById('assets');
+  document.getElementById('assets-toggle').onclick = () => { assetsEl.hidden = !assetsEl.hidden; };
+
+  // Double-click selects a body, Ctrl+drag pulls the selection (inspect.js).
+  const canvas = document.getElementById('canvas');
+  let dragging = false;
+  canvas.addEventListener('pointerdown', (e) => {
+    if (!(e.ctrlKey || e.metaKey)) return;
+    if (app.model && app.perturb.begin(app.pointerRay(e.clientX, e.clientY))) {
+      dragging = true;
+      canvas.setPointerCapture(e.pointerId);
+    }
+  });
+  canvas.addEventListener('pointermove', (e) => {
+    if (dragging) app.perturb.move(app.pointerRay(e.clientX, e.clientY));
+  });
+  canvas.addEventListener('pointerup', () => {
+    if (dragging) { dragging = false; app.perturb.end(); }
+  });
+  canvas.addEventListener('dblclick', (e) => app.perturb.select(app.pickBody(e.clientX, e.clientY)));
+  const panelEl = document.getElementById('panel');
+  document.getElementById('inspect').onclick = () => {
+    panelEl.hidden = !panelEl.hidden;
+    app.panel.lastUpdate = 0;
+  };
+
   document.getElementById('pause').onclick = (e) => {
     app.paused = !app.paused;
     e.target.textContent = app.paused ? 'Resume' : 'Pause';
@@ -720,10 +1190,58 @@ try {
   document.getElementById('undo').onclick = () => robots.length && respawn(robots.slice(0, -1));
   document.getElementById('clear').onclick = () => robots.length && respawn([]);
 
-  rebuild([]);
+  // Enter VR: shown only where an immersive-vr session is supported (WebXR
+  // needs a secure context: https or localhost).
+  const vr = document.getElementById('vr');
+  if (await navigator.xr?.isSessionSupported('immersive-vr').catch(() => false)) {
+    vr.hidden = false;
+    vr.onclick = async () => {
+      if (app.xr) { app.xr.session.end(); return; }
+      try {
+        const session = await app.enterVR();
+        vr.textContent = 'Exit VR';
+        session.addEventListener('end', () => { vr.textContent = 'Enter VR'; });
+      } catch (err) {
+        status.textContent = `VR failed: ${err.message ?? err}`;
+        console.error(err);
+      }
+    };
+  }
+
+  // Velocity command for every policy-driven robot: WASD walk, QE turn, held
+  // R/F raise/lower the commanded base height.
+  const DRIVE = { w: [0, 0.5], s: [0, -0.3], a: [1, 0.3], d: [1, -0.3], q: [2, 0.6], e: [2, -0.6] };
+  const held = new Set();
+  const onKey = (e) => {
+    const k = e.key.toLowerCase();
+    if (!(k in DRIVE) && k !== 'r' && k !== 'f') return;
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    e.preventDefault();
+    if (e.type === 'keydown') held.add(k); else held.delete(k);
+  };
+  window.addEventListener('keydown', onKey);
+  window.addEventListener('keyup', onKey);
+  window.addEventListener('blur', () => held.clear());
+  let lastDrive = performance.now();
+  (function drive() {
+    const now = performance.now(), dt = (now - lastDrive) / 1000;
+    lastDrive = now;
+    const cmd = [0, 0, 0];
+    for (const k of held) if (DRIVE[k]) cmd[DRIVE[k][0]] += DRIVE[k][1];
+    const dh = (held.has('r') - held.has('f')) * 0.15 * dt;
+    for (const c of app.controllers) {
+      c.cmd = cmd;
+      c.height = Math.min(1.0, Math.max(0.5, c.height + dh));
+    }
+    requestAnimationFrame(drive);
+  })();
+
+  await rebuild([]);
   status.textContent = hint();
+  setBusy(null);
   app.frame();
 } catch (err) {
   status.textContent = `error: ${err.message ?? err}`;
+  setBusy(`error: ${err.message ?? err}`);
   throw err;
 }

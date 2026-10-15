@@ -4,12 +4,13 @@
   "description": "MuJoCo WASM physics rendered with Filament.js",
   "scripts": {
     "postinstall": "node scripts/vendor.mjs",
-    "start": "python3 -m http.server 9000 -d public"
+    "start": "python3 -m http.server 5000 -d public"
   },
   "license": "ISC",
   "dependencies": {
     "@mujoco/mujoco": "3.15.0",
-    "filament": "1.53.4"
+    "filament": "1.53.4",
+    "onnxruntime-web": "1.30.0"
   },
   "private": true
 }
