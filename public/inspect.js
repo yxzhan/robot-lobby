@@ -1,7 +1,8 @@
 // Simulate-style inspection of the physics world (like MuJoCo's simulate /
-// MuJoCo Live): double-click selects a body, Ctrl+drag pulls it with a spring
-// (Perturb), and a side panel (JointPanel) shows joint positions and actuator
-// controls; joints can be set while paused, controls at any time.
+// MuJoCo Live): double-click selects a body, Shift+drag pulls it with a spring
+// (Perturb), and the Stage panel (StagePanel) lists what is spawned, each with
+// its joint positions and actuator controls (joints can be set while paused,
+// controls at any time) and buttons to reset or remove it.
 
 const sub = (a, b) => a.map((v, i) => v - b[i]);
 const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
@@ -97,13 +98,20 @@ export class Perturb {
   }
 }
 
-// Side panel: per spawned robot, a slider per hinge/slide joint (qpos) and
-// per actuator (ctrl). Rebuilt for every world, refreshed ~10 times a second
-// for the expanded robots.
-export class JointPanel {
-  constructor(app, el) {
+// Side panel: per spawned robot, Reset (back to its spawn pose) and Remove
+// buttons, a slider per hinge/slide joint (qpos) and per actuator (ctrl).
+// Rebuilt for every world, refreshed ~10 times a second for the expanded
+// robots. `onRemove(robot)` removes a robot (the page rebuilds the world);
+// the Save / Forget buttons call `onSave()` / `onForget()`.
+export class StagePanel {
+  constructor(app, el, { onRemove = () => {}, onSave = () => {}, onForget = () => {} } = {}) {
     this.app = app;
     this.el = el;
+    this.onRemove = onRemove;
+    el.querySelector('.save').onclick = onSave;
+    el.querySelector('.forget').onclick = onForget;
+    this.savedEl = el.querySelector('.saved');
+    this.empty = el.querySelector('.empty');
     this.open = new Set();  // robot prefixes whose section is expanded
     this.closed = new Set();  // "<prefix>Joints"/"<prefix>Controls" subsections collapsed
     this.rows = [];         // {input, out, read(), write(v), joint}
@@ -158,7 +166,22 @@ export class JointPanel {
       const det = document.createElement('details');
       det.dataset.key = r.prefix;
       det.open = this.open.has(r.prefix);
-      det.innerHTML = `<summary>${r.prefix.slice(0, -1)} · ${r.label}</summary>`;
+      det.innerHTML = '<summary><span class="title"></span><span class="actions">'
+        + '<button class="reset" title="Back to its spawn pose">Reset</button>'
+        + '<button class="remove" title="Remove from the scene">✕</button></span></summary>';
+      det.querySelector('.title').textContent = `${r.prefix.slice(0, -1)} · ${r.label}`;
+      // Buttons inside <summary> would also fold the section.
+      const action = (sel, fn) => {
+        det.querySelector(sel).onclick = (e) => { e.preventDefault(); e.stopPropagation(); fn(); };
+      };
+      action('.reset', () => { this.app.resetRobot(r); this.lastUpdate = 0; });
+      action('.remove', () => this.onRemove(r));
+      if (!joints.length && !ctrls.length) {
+        const none = document.createElement('div');
+        none.className = 'hint';
+        none.textContent = 'No joints or actuators to set.';
+        det.append(none);
+      }
       det.ontoggle = () => { this.lastUpdate = 0; };
       for (const [title, list] of [['Joints', joints], ['Controls', ctrls]]) {
         if (!list.length) continue;
@@ -172,7 +195,22 @@ export class JointPanel {
       }
       this.el.append(det);
     }
+    if (this.empty) this.empty.hidden = robots.length > 0;
     this.lastUpdate = 0;
+  }
+
+  // Shows when the stage was saved (`stage`: {saved, items}, or null).
+  showSaved(stage) {
+    const forget = this.el.querySelector('.forget');
+    forget.disabled = !stage;
+    if (!stage) {
+      this.savedEl.textContent = 'not saved';
+      return;
+    }
+    const t = new Date(stage.saved);
+    const when = t.toLocaleString([], { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+    this.savedEl.textContent = `saved ${stage.items.length} · ${when}`;
+    this.savedEl.title = 'Loaded on the next page load';
   }
 
   row(robot, item) {

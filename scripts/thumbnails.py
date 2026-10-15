@@ -15,7 +15,7 @@ import pathlib
 from PIL import Image
 
 PUBLIC = pathlib.Path(__file__).resolve().parent.parent / 'public'
-LIBRARIES = ['menagerie', 'my_environment', 'my_objects']
+LIBRARIES = ['my_robot', 'menagerie', 'my_environment', 'my_objects']
 WIDTH, HEIGHT = 320, 240  # 2x the panel's card size
 QUALITY = 80
 

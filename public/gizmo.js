@@ -42,7 +42,8 @@ export class AxisGizmo {
     const g = c.getContext('2d');
     g.setTransform(dpr, 0, 0, dpr, 0, 0);
     g.clearRect(0, 0, size, size);
-    const mid = size / 2, len = size * 0.34, rad = size * 0.085;
+    // Dots (and their letters) keep a legible size on a small gizmo.
+    const rad = Math.max(6, size * 0.085), mid = size / 2, len = Math.min(size * 0.34, mid - rad - 1);
     g.fillStyle = 'rgba(0,0,0,.35)';
     g.beginPath();
     g.arc(mid, mid, size / 2 - 1, 0, 2 * Math.PI);
@@ -90,7 +91,7 @@ export class AxisGizmo {
   // The axis end under the pointer, nearest to the camera first.
   hit(e) {
     const rect = this.canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left, y = e.clientY - rect.top, rad = rect.width * 0.1;
+    const x = e.clientX - rect.left, y = e.clientY - rect.top, rad = Math.max(7, rect.width * 0.1);
     return [...this.ends].sort((a, b) => a.depth - b.depth)
       .find((p) => Math.hypot(p.x - x, p.y - y) <= rad) ?? null;
   }

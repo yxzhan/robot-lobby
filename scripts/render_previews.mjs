@@ -3,21 +3,21 @@
 // spawned alone, framed by its collision geoms' bounds, and captured.
 // scripts/thumbnails.py then turns the previews into panel thumbnails.
 //
-//   npm start &                                   # serves public/ on :5000
+//   npm start &                                   # serves public/ on :4000
 //   node scripts/render_previews.mjs [library…]   # default: my_objects
 //   node scripts/vendor.mjs && python3 scripts/thumbnails.py
 //
 // Options (env): CHROME=/path/to/chrome (default: Playwright's headless
-// shell in ~/.cache/ms-playwright), URL=http://127.0.0.1:5000/, FORCE=1 to
+// shell in ~/.cache/ms-playwright), URL=http://127.0.0.1:4000/, FORCE=1 to
 // re-render assets that already have a screenshot.
 import { spawn } from 'node:child_process';
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-const LIBRARY_DIRS = { menagerie: 'mujoco_menagerie', my_environment: 'my_environment', my_objects: 'my_objects' };
+const LIBRARY_DIRS = { my_robot: 'my_robot', menagerie: 'mujoco_menagerie', my_environment: 'my_environment', my_objects: 'my_objects' };
 const libraries = process.argv.slice(2).length ? process.argv.slice(2) : ['my_objects'];
-const url = process.env.URL ?? 'http://127.0.0.1:5000/';
+const url = process.env.URL ?? 'http://127.0.0.1:4000/';
 
 function findChrome() {
   if (process.env.CHROME) return process.env.CHROME;
@@ -75,7 +75,7 @@ const ev = async (expression) => {
 try {
   await send('Page.navigate', { url });
   for (let i = 0; i < 200 && !(await ev(`!!window.spawnAsset && !!window.app?.model`).catch(() => false)); i++) await sleep(300);
-  await ev(`for (const id of ['ui', 'assets', 'panel']) document.getElementById(id).style.display = 'none'`);
+  await ev(`for (const id of ['ui', 'views', 'assets', 'side', 'gizmo', 'stats']) document.getElementById(id).style.display = 'none'`);
   for (const [i, a] of todo.entries()) {
     await ev(`clearAssets()`);
     await ev(`spawnAsset(${JSON.stringify(a.rel)})`);

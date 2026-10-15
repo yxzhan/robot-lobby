@@ -11,7 +11,7 @@
           color: #ddd; background: rgba(0,0,0,.45); padding: 6px 10px; border-radius: 6px; }
     #ui button, #ui select { cursor: pointer; background: #333; color: #eee; border: 1px solid #555;
           border-radius: 4px; padding: 3px 8px; font: inherit; white-space: nowrap; }
-    #assets { position: absolute; top: 60px; left: 12px; width: 300px; max-height: calc(100% - 72px - 132px);
+    #assets { position: absolute; top: 60px; left: 12px; width: 300px; max-height: calc(100% - 72px - 104px);
               display: flex; flex-direction: column; gap: 6px; box-sizing: border-box;
               color: #ddd; background: rgba(0,0,0,.6); padding: 8px; border-radius: 6px; }
     #assets[hidden] { display: none; }
@@ -44,24 +44,72 @@
     #assets li.group.folded .caret::before { content: '▸'; }
     #assets li.empty { grid-column: 1 / -1; color: #999; cursor: default; font-size: 12px; display: block; }
     #assets .hint { color: #999; font-size: 12px; }
-    #gizmo { position: absolute; left: 12px; bottom: 12px; width: 110px; height: 110px; }
+    #stats { position: absolute; right: 12px; bottom: 12px; cursor: pointer; opacity: .9; }
+    #gizmo { position: absolute; left: 12px; bottom: 12px; width: 84px; height: 84px; }
     .drag-ghost { position: fixed; left: 0; top: 0; pointer-events: none; z-index: 10; color: #fff;
                   background: rgba(40,40,40,.85); border: 1px solid #666; padding: 3px 8px; border-radius: 4px; }
     .drag-ghost.placing { background: rgba(30,110,150,.9); border-color: #5ac; }
     .drag-ghost .readout { font-size: 11px; opacity: .85; font-variant-numeric: tabular-nums; white-space: pre; }
-    #panel { position: absolute; top: 60px; right: 12px; width: 320px; max-height: calc(100% - 72px); overflow: auto;
-             box-sizing: border-box; color: #ddd; background: rgba(0,0,0,.6); padding: 8px 10px; border-radius: 6px; }
-    #panel[hidden] { display: none; }
-    #panel .hint { color: #999; margin: 2px 0 6px; font-size: 12px; }
-    #panel summary { cursor: pointer; padding: 4px 0; font-weight: 600; }
-    #panel details details { margin-left: 10px; }
-    #panel details details > summary { font-size: 12px; color: #aaa; padding: 3px 0; }
-    #panel summary .count { color: #777; font-weight: 400; }
-    #panel .row { display: grid; grid-template-columns: 110px 1fr 52px; gap: 6px; align-items: center; font-size: 12px; }
-    #panel .row span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    #panel .row input { width: 100%; margin: 2px 0; }
-    #panel .row input:disabled { opacity: .55; }
-    #panel output { text-align: right; font-variant-numeric: tabular-nums; }
+    #views { position: absolute; top: 12px; right: 12px; display: flex; padding: 3px; gap: 3px;
+             background: rgba(0,0,0,.45); border-radius: 8px; }
+    #views button { display: flex; align-items: center; gap: 6px; cursor: pointer; font: inherit;
+                    color: #aaa; background: transparent; border: 1px solid transparent; border-radius: 5px;
+                    padding: 4px 10px; transition: background .15s, color .15s; }
+    #views button::before { content: ''; width: 7px; height: 7px; border-radius: 50%;
+                            background: #555; transition: background .15s, box-shadow .15s; }
+    #views button:hover { color: #eee; background: rgba(255,255,255,.08); }
+    #views button[aria-pressed=true] { color: #fff; background: #3d5a73; border-color: #5a85a8; }
+    #views button[aria-pressed=true]::before { background: #7fd1ff; box-shadow: 0 0 6px #7fd1ff; }
+    /* Right column: Stage on top (scrolls), Control below it. */
+    #side { position: absolute; top: 60px; right: 12px; width: 320px; max-height: calc(100% - 72px - 60px);
+            display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
+    #side > * { pointer-events: auto; box-sizing: border-box; color: #ddd; background: rgba(0,0,0,.6);
+                padding: 8px 10px; border-radius: 6px; }
+    #side > [hidden] { display: none; }
+    #stage { overflow: auto; min-height: 0; flex: 0 1 auto; }
+    #control { flex: none; }
+    #control h3 { margin: 0 0 6px; font-size: 13px; }
+    #control .field { display: grid; grid-template-columns: 80px 1fr; align-items: center; gap: 6px; margin: 4px 0; font-size: 12px; }
+    #control select { font: inherit; color: #eee; background: #222; border: 1px solid #555; border-radius: 4px; padding: 2px 4px; }
+    #control select:disabled { opacity: 1; color: #bbb; }
+    #control .hint { color: #999; font-size: 12px; margin-top: 6px; line-height: 1.7; }
+    #control kbd { display: inline-block; min-width: 14px; text-align: center; padding: 0 3px; margin-right: 2px;
+                   border: 1px solid #555; border-bottom-width: 2px; border-radius: 3px; background: #2a2c31;
+                   color: #ddd; font: 11px ui-monospace, monospace; }
+    #control .readout { margin-top: 4px; font: 11px ui-monospace, monospace; color: #9cd; white-space: pre; }
+    #stage[hidden] { display: none; }
+    #stage .hint { color: #999; margin: 2px 0 6px; font-size: 12px; }
+    #stage summary { cursor: pointer; padding: 4px 0; font-weight: 600; }
+    #stage > details { border-top: 1px solid #3a3d44; }
+    #stage > details > summary { display: flex; align-items: center; gap: 6px; }
+    #stage > details > summary::before { content: '▸'; color: #888; width: 10px; }
+    #stage > details[open] > summary::before { content: '▾'; }
+    #stage > details > summary::-webkit-details-marker { display: none; }
+    #stage > details > summary { list-style: none; }
+    #stage summary .title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #stage summary .actions { display: flex; gap: 4px; }
+    #stage summary .actions button { cursor: pointer; font: inherit; font-size: 11px; font-weight: 400;
+                                     color: #ddd; background: #333; border: 1px solid #555; border-radius: 4px; padding: 1px 7px; }
+    #stage summary .actions button:hover { background: #444; }
+    #stage summary .actions .remove:hover { background: #8a2b2b; border-color: #c55; color: #fff; }
+    #stage .empty[hidden] { display: none; }
+    #stage .stage-bar { display: flex; align-items: center; gap: 6px; padding-bottom: 6px; margin-bottom: 4px;
+                        border-bottom: 1px solid #3a3d44; }
+    #stage .stage-bar button { cursor: pointer; font: inherit; font-size: 12px; color: #eee; background: #333;
+                               border: 1px solid #555; border-radius: 4px; padding: 2px 8px; }
+    #stage .stage-bar button.save { background: #2f5a3c; border-color: #4d8a5f; }
+    #stage .stage-bar button:hover:not(:disabled) { filter: brightness(1.2); }
+    #stage .stage-bar button:disabled { opacity: .45; cursor: default; }
+    #stage .stage-bar .saved { flex: 1; text-align: right; color: #999; font-size: 11px;
+                               overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #stage details details { margin-left: 10px; }
+    #stage details details > summary { font-size: 12px; color: #aaa; padding: 3px 0; }
+    #stage summary .count { color: #777; font-weight: 400; }
+    #stage .row { display: grid; grid-template-columns: 110px 1fr 52px; gap: 6px; align-items: center; font-size: 12px; }
+    #stage .row span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #stage .row input { width: 100%; margin: 2px 0; }
+    #stage .row input:disabled { opacity: .55; }
+    #stage output { text-align: right; font-variant-numeric: tabular-nums; }
     #busy { position: fixed; inset: 0; z-index: 100; display: flex; flex-direction: column; gap: 14px;
             align-items: center; justify-content: center; background: rgba(0,0,0,.55); color: #eee;
             cursor: wait; user-select: none; }
@@ -78,10 +126,13 @@
     <button id="reset" title="Every robot back to its spawn pose">Reset</button>
     <button id="undo" title="Remove the last spawned robot">Undo</button>
     <button id="clear" title="Remove all robots">Clear</button>
-    <button id="assets-toggle" title="Show or hide the asset panel">Assets</button>
-    <button id="inspect" title="Joint positions and actuator controls">Joints</button>
     <button id="vr" hidden>Enter VR</button>
     <span id="status">loading…</span>
+  </div>
+  <div id="views" role="group" aria-label="Panels">
+    <button data-panel="assets" title="Show or hide the asset library">Assets</button>
+    <button data-panel="stage" title="Spawned robots: joints, controls, reset, remove">Stage</button>
+    <button data-panel="control" title="Drive a robot: controller and input">Control</button>
   </div>
   <div id="assets">
     <div class="tabs"></div>
@@ -89,9 +140,21 @@
     <ul></ul>
     <div class="hint">Drag an item onto the floor to spawn it. While dragging: mouse wheel or Q/E turns it, Shift+wheel or R/F raises/lowers it, Esc cancels.</div>
   </div>
-  <div id="panel" hidden>
+  <div id="side">
+  <div id="stage">
+    <div class="stage-bar">
+      <button class="save" title="Remember what is spawned, where and facing where; loaded on the next page load">Save stage</button>
+      <button class="forget" title="Start with an empty floor next time">Forget</button>
+      <span class="saved"></span>
+    </div>
     <div>Selected: <span id="selected">none</span></div>
-    <div class="hint">Double-click a body to select it, Ctrl+drag to pull it. Joints can be set while paused.</div>
+    <div class="hint">Double-click a body to select it, Shift+drag to pull it. Joints can be set while paused.</div>
+    <div class="hint empty">Nothing spawned yet: drag an asset onto the floor.</div>
+  </div>
+  <div id="control" hidden>
+    <h3>Control</h3>
+    <div class="body"></div>
+  </div>
   </div>
   <canvas id="gizmo" title="World axes: click an axis to look along it"></canvas>
   <div id="busy"><div class="spinner"></div><div class="msg">loading…</div></div>

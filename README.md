@@ -6,13 +6,14 @@ No bundler — `public/` is a static site.
 
 ```sh
 npm install      # postinstall copies the wasm/js runtimes into public/vendor/
-npm start        # python3 -m http.server 8000 -d public
+npm start        # python3 scripts/serve.py 4000: public/ with Cache-Control: no-store
 ```
 
-Open http://localhost:8000 (in JupyterHub: `.../user/<name>/proxy/8000/` — all
+Open http://localhost:4000 (in JupyterHub: `.../user/<name>/proxy/4000/` — all
 URLs are relative, so the path proxy works). Left-drag orbits, right-drag pans,
 wheel zooms. The gizmo in the bottom-left corner shows the world axes (Z up);
-click an axis to look along it (`public/gizmo.js`).
+click an axis to look along it (`public/gizmo.js`). The meter in the
+bottom-right corner is stats.js: click it to cycle FPS / ms per frame / MB.
 
 ## Spawning robots
 
@@ -20,20 +21,28 @@ The scene starts as an empty floor (`BASE_XML` in `public/world.js`). The
 Assets panel lists every model under three tabs — Environments, Robots,
 Objects (`public/assets.js`); drag one onto the floor to spawn it there. While
 dragging, a marker on the floor shows the spawn point and heading (the model's
-+x, which starts out facing the camera); the mouse wheel or Q/E turns it in
++x, which starts out along the world +x axis); the mouse wheel or Q/E turns it in
 15° steps, Shift+wheel or R/F raises or lowers it in 5 cm steps (a pole
 shows the height; it is kept for the next drag), and Esc cancels. The drag
-label shows the spawn position and heading. Undo removes the last one, Clear all of them, Reset
-puts every robot back in its spawn pose.
+label shows the spawn position and heading. The toolbar (top left) runs the
+simulation: Undo removes the last one, Clear all of them, Reset puts every
+robot back in its spawn pose. The toggles at the top right show or hide the
+Assets, Stage and Control panels.
 
 Like MuJoCo's simulate: double-click a body to select it (double-click the
-floor to deselect) and Ctrl+drag (⌘+drag on macOS) to pull it with a spring
-on `xfrc_applied`; the Joints button opens a panel with each robot's joint
-positions (settable while paused) and actuator controls (`public/inspect.js`).
+floor to deselect) and Shift+drag to pull it with a spring
+on `xfrc_applied`. The Stage panel lists everything spawned, each with its
+joint positions (settable while paused), actuator controls, a Reset button
+(back to its spawn pose, at rest, while the rest keeps going) and a remove
+button (`public/inspect.js`). Save stage remembers what is spawned, with
+its spawn position and heading (not its joint state), in the browser's
+localStorage; the next page load spawns it all again in one compile (Forget
+starts from an empty floor again).
 Picking uses `mj_ray` on the physics world, so it hits collision geoms.
 
 - **Asset list** — one entry per model directory with a `scene.xml` in each
-  library checked out next to `package.json`: `mujoco_menagerie/` (Robots),
+  library checked out next to `package.json`: `my_robot/` (Robots, listed
+  first under "My robots"), `mujoco_menagerie/` (Robots),
   `my_environment/` (Robots if its `scene.xml` includes a model file,
   Environments otherwise) and `my_objects/` (Objects). `npm install` (or
   `node scripts/vendor.mjs`) symlinks each into `public/` and writes
@@ -68,8 +77,10 @@ Picking uses `mj_ray` on the physics world, so it hits collision geoms.
 A compiled `MjModel` cannot grow, so each spawn rebuilds the world: parse
 `BASE_XML` into an `MjSpec`, `mjs_attach` every robot's spec under a frame at
 its click point with a unique prefix (`r1/`, `r2/`, …), `mj_compile`. Robots
-are attached in order, so the existing ones keep their state (their
-qpos/qvel/act/ctrl are a prefix of the new model's); the new one starts from
+are attached in order, so the existing ones keep their state (each robot's
+qpos/qvel/act/ctrl/mocap entries are a contiguous range sized by its own
+model, copied over to wherever they land when one is removed); the new one
+starts from
 its own first keyframe (qpos + ctrl, free joints shifted to the click point)
 or `qpos0`. Compile time grows with the number of robots (~3 s per spawn
 with a dozen menagerie robots). Physics `<option>`s come from `BASE_XML`: a
@@ -115,8 +126,12 @@ does not ship; `iit_softfoot` (an `<asset><model>` sub-model) fails to attach. S
 If the GR00T locomotion policies are checked out next to `package.json`
 (`git clone https://huggingface.co/nepyope/GR00T-WholeBodyControl_g1`),
 `npm install` links them as `public/groot`, and every spawned `unitree_g1`
-walks under them: **WASD** walk, **QE** turn, hold **R**/**F** to raise or
-lower the base. `public/groot.js` is a port of lerobot's
+walks under them. The Control panel (`public/control.js`) picks which one
+is driven (the newest by default, or the one double-clicked; double-clicking
+anything else releases it; the others get a zero command and stand)
+and, later, by which controller and input; with the keyboard: **WASD** walk,
+**QE** turn, hold **R**/**F** to raise or lower the base (keys typed into a
+text field are ignored). `public/groot.js` is a port of lerobot's
 `GrootLocomotionController` running on onnxruntime-web (WASM, one thread,
 ~0.2 ms per inference): two MLPs (Balance when the command is ~0, Walk
 otherwise) at 50 Hz on 6 stacked 86-D observations, driving legs and waist,

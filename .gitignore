@@ -9,9 +9,12 @@ public/my_environment
 public/my_environment.json
 public/my_objects
 public/my_objects.json
+public/my_robot
+public/my_robot.json
 public/thumbs/
 # model libraries / policies checked out next to package.json
 mujoco_menagerie/
 GR00T-WholeBodyControl_g1/
 my_environment/
 my_objects/
+my_robot/

@@ -11,6 +11,8 @@ const copies = {
   'node_modules/onnxruntime-web/dist/ort.wasm.min.mjs': 'public/vendor/onnxruntime/ort.wasm.min.mjs',
   'node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.mjs': 'public/vendor/onnxruntime/ort-wasm-simd-threaded.mjs',
   'node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.wasm': 'public/vendor/onnxruntime/ort-wasm-simd-threaded.wasm',
+  // mrdoob's FPS / frame time / memory meter (ES module).
+  'node_modules/stats.js/src/Stats.js': 'public/vendor/stats/Stats.js',
 };
 for (const [from, to] of Object.entries(copies)) {
   mkdirSync(to.slice(0, to.lastIndexOf('/')), { recursive: true });
@@ -66,7 +68,7 @@ function readmeGroups(dir) {
   return groups;
 }
 
-function indexLibrary(dir, name, category) {
+function indexLibrary(dir, name, category, defaultGroup = null) {
   if (!existsSync(dir)) return;
   const link = `public/${name}`;
   if (!existsSync(link) && !lstatSync(link, { throwIfNoEntry: false })) symlinkSync(`../${dir}`, link);
@@ -86,9 +88,9 @@ function indexLibrary(dir, name, category) {
     });
     const shot = over.thumbnail ?? pickScreenshot(`${dir}/${d.name}`, models.at(-1).main, d.name);
     if (shot) models.at(-1).screenshot = shot;
-    const group = over.group ?? groups.get(d.name)?.[0];
+    const group = over.group ?? groups.get(d.name)?.[0] ?? defaultGroup;
     if (group) models.at(-1).group = group;
-    models.at(-1).rank = over.group ? -1 : groups.get(d.name)?.[1] ?? Infinity;
+    models.at(-1).rank = over.group || defaultGroup ? -1 : groups.get(d.name)?.[1] ?? Infinity;
   }
   // By group (in README order; asset.json groups first, ungrouped last), then
   // name: the asset panel lists groups in the order they first appear.
@@ -97,6 +99,7 @@ function indexLibrary(dir, name, category) {
   writeFileSync(`public/${name}.json`, JSON.stringify(models, null, 1));
   console.log('indexed', models.length, `${dir} models into public/${name}.json`);
 }
+indexLibrary('my_robot', 'my_robot', 'robot', 'My robots');  // your own robots: listed first
 indexLibrary('mujoco_menagerie', 'menagerie', 'robot');
 indexLibrary('my_environment', 'my_environment', 'auto');  // your own models
 indexLibrary('my_objects', 'my_objects', 'object');        // your own objects, if any

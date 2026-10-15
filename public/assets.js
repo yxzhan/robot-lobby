@@ -3,8 +3,8 @@
 // within a tab, models with a `group` (menagerie's README sections) are listed
 // under foldable group headers.
 // An item is spawned by dragging it onto the floor: while dragging, a marker
-// on the floor shows the spawn point and heading, which starts out facing the
-// camera and turns in 15° steps with the mouse wheel or Q/E; Shift+wheel or
+// on the floor shows the spawn point and heading, which starts out along the
+// world +x axis and turns in 15° steps with the mouse wheel or Q/E; Shift+wheel or
 // R/F raise and lower it in 5 cm steps (the height is kept for the next
 // drag); Esc cancels. The drag label shows the position and heading.
 
@@ -187,10 +187,9 @@ export class AssetPanel {
     this.pick();
   }
 
-  // Heading: the asset's +x towards the camera, plus the user's turns.
+  // Heading of the asset's +x: the world +x axis plus the user's turns.
   yaw() {
-    const eye = this.app.orbit.eye(), p = this.drag.pos;
-    return Math.atan2(eye[1] - p[1], eye[0] - p[0]) + this.drag.turn;
+    return this.drag.turn;
   }
 
   turn(delta) {

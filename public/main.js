@@ -17,9 +17,11 @@ import loadMujoco from './vendor/mujoco/mujoco.js';
 import { loadModelFiles, readFirst, urlSource } from './vfs.js';
 import { bodyInertia, compileWorld, firstKey, referencedNames } from './world.js';
 import { CONTROL_DT, G1_MODEL, GrootController, loadGrootPolicy } from './groot.js';
-import { JointPanel, Perturb } from './inspect.js';
+import { Perturb, StagePanel } from './inspect.js';
 import { AssetPanel, loadAssets } from './assets.js';
 import { AxisGizmo } from './gizmo.js';
+import { ControlPanel } from './control.js';
+import Stats from './vendor/stats/Stats.js';
 
 // Filament.init() replaces the global with the loaded module, so re-read it after init.
 let Filament = window.Filament;
@@ -362,7 +364,7 @@ class OrbitCamera {
     this.azim = -0.6; this.elev = 0.35;
     let last = null, button = 0;
     canvas.addEventListener('pointerdown', (e) => {
-      if (e.ctrlKey || e.metaKey) { last = null; return; }  // Ctrl+drag perturbs (inspect.js)
+      if (e.shiftKey) { last = null; return; }  // Shift+drag perturbs (inspect.js)
       last = [e.clientX, e.clientY]; button = e.button; canvas.setPointerCapture(e.pointerId);
     });
     canvas.addEventListener('pointerup', () => { last = null; });
@@ -409,8 +411,10 @@ class App {
     this.controllers = [];  // the robots' policies (GrootController), ticked every CONTROL_DT
     this.nextControl = 0;   // sim time of the next policy tick
     this.stepping = null;   // the pending advance(), if any
-    this.perturb = new Perturb(this);  // double-click selection, Ctrl+drag force
-    this.panel = null;                 // JointPanel, set by the page
+    this.perturb = new Perturb(this);  // double-click selection, Shift+drag force
+    this.panel = null;                 // StagePanel, set by the page
+    this.control = null;               // ControlPanel, set by the page
+    this.stats = null;                 // stats.js meter, set by the page
 
     // xrCompatible: the same context renders the WebXR session (enterVR).
     const engine = this.engine = Filament.Engine.create(canvas, { xrCompatible: true });
@@ -614,20 +618,38 @@ class App {
     this.simStart = performance.now() - data.time * 1000;
     this.syncTransforms();
     this.panel?.build();
+    this.control?.build();
   }
 
-  // Back to `this.initial` ({qpos, ctrl}: every robot's spawn pose), if set.
+  // Every robot back to its spawn pose (robot.initial), time back to 0.
   reset() {
     this.mujoco.mj_resetData(this.model, this.data);
-    if (this.initial) {
-      this.data.qpos.set(this.initial.qpos);
-      this.data.ctrl.set(this.initial.ctrl);
-    }
+    const layout = stateLayout(this.robots);
+    for (const r of this.robots) this.writeInitial(r, layout.get(r));
     this.mujoco.mj_forward(this.model, this.data);
     for (const c of this.controllers) c.reset();
     this.nextControl = 0;
     this.simStart = performance.now();
     this.syncTransforms();  // frame() only syncs while running
+  }
+
+  // One robot back to its spawn pose, at rest; the others and time go on.
+  resetRobot(robot) {
+    const { mujoco, model, data } = this;
+    const at = stateLayout(this.robots).get(robot);
+    if (!at) return;
+    this.writeInitial(robot, at);
+    data.qvel.fill(0, at.qvel, at.qvel + robot.visual.dims.nv);
+    data.act.fill(0, at.act, at.act + robot.visual.dims.na);
+    mujoco.mj_forward(model, data);
+    robot.groot?.reset();
+    this.syncTransforms();
+  }
+
+  writeInitial(robot, at) {
+    if (!robot.initial) return;
+    this.data.qpos.set(robot.initial.qpos, at.qpos);
+    this.data.ctrl.set(robot.initial.ctrl, at.ctrl);
   }
 
   // The camera ray under the pointer: {eye, dir (unit), forward (unit view direction)}.
@@ -774,6 +796,7 @@ class App {
 
   // `xrFrame` is set when called from the WebXR session's animation loop.
   frame(xrFrame = null) {
+    this.stats?.begin();
     if (this.model && !this.paused && !this.stepping) {
       this.stepping = this.advance()
         .catch((err) => { this.paused = true; console.error('simulation stopped', err); })
@@ -791,6 +814,7 @@ class App {
       }
       this.engine.execute();
     }
+    this.stats?.end();
     const xr = this.xr;
     // A session frame that arrives after the session ended is dropped: 'end'
     // has restarted the window loop.
@@ -896,6 +920,24 @@ class App {
   }
 }
 
+// Robots are attached in order and each one's joints, actuators and mocap
+// bodies stay together, so a robot's qpos/qvel/act/ctrl/mocap entries are a
+// contiguous range of each array, sized by its own model (visual.dims).
+// stateLayout(robots): robot -> {field: start index in data[field]}.
+const STATE_FIELDS = [['qpos', 1], ['qvel', 1], ['act', 1], ['ctrl', 1], ['mocap_pos', 3], ['mocap_quat', 4]];
+const DIM_OF = { qpos: 'nq', qvel: 'nv', act: 'na', ctrl: 'nu', mocap_pos: 'nmocap', mocap_quat: 'nmocap' };
+function stateLayout(robots) {
+  const layout = new Map(), at = { nq: 0, nv: 0, na: 0, nu: 0, nmocap: 0 };
+  for (const r of robots) {
+    const starts = {};
+    for (const [field, n] of STATE_FIELDS) starts[field] = n * at[DIM_OF[field]];
+    layout.set(r, starts);
+    for (const k in at) at[k] += r.visual.dims[k];
+  }
+  layout.total = at;
+  return layout;
+}
+
 // ---------------------------------------------------------------------------
 
 const status = document.getElementById('status');
@@ -920,36 +962,47 @@ window.addEventListener('keydown', (e) => {
 // Lets the browser paint the status text before a blocking compile.
 const nextFrame = () => new Promise((r) => requestAnimationFrame(() => setTimeout(r)));
 
-// Copies the state of the old model into `data` for the robots both models
-// share. Robots are attached in order, so their qpos/qvel/act/ctrl/mocap
-// entries form a common prefix.
-function copySharedState(old, data, model) {
-  const prefix = (name, n) => data[name].set(old[name].subarray(0, Math.min(n, data[name].length)));
-  prefix('qpos', old.nq);
-  prefix('qvel', old.nv);
-  prefix('act', old.na);
-  prefix('ctrl', old.nu);
-  prefix('mocap_pos', 3 * old.nmocap);
-  prefix('mocap_quat', 4 * old.nmocap);
+// Copies the state of the old world into `data` for every robot of `robots`
+// (the new world's) that was in the old one too, wherever its entries moved
+// (a robot removed before it shifts them).
+function copySharedState(old, data, robots) {
+  const now = stateLayout(robots);
+  for (const r of robots) {
+    const from = old.layout.get(r);
+    if (!from) continue;
+    const to = now.get(r);
+    for (const [field, n] of STATE_FIELDS) {
+      const len = n * r.visual.dims[DIM_OF[field]];
+      data[field].set(old[field].subarray(from[field], from[field] + len), to[field]);
+    }
+  }
   data.time = old.time;
 }
 
 function snapshot(app) {
   const { model: m, data: d } = app;
   if (!m) return null;
-  const copy = (a) => Float64Array.from(a);
-  return {
-    nq: m.nq, nv: m.nv, na: m.na, nu: m.nu, nmocap: m.nmocap, time: d.time,
-    qpos: copy(d.qpos), qvel: copy(d.qvel), act: copy(d.act), ctrl: copy(d.ctrl),
-    mocap_pos: copy(d.mocap_pos), mocap_quat: copy(d.mocap_quat),
-  };
+  const snap = { time: d.time, layout: stateLayout(app.robots) };
+  for (const [field] of STATE_FIELDS) snap[field] = Float64Array.from(d[field]);
+  return snap;
 }
 
 try {
   await new Promise((resolve) => Filament.init([MAT_LIT, MAT_CHECKER, MAT_TEXTURED], resolve));
   Filament = window.Filament;
   const app = new App(document.getElementById('canvas'));
-  app.panel = new JointPanel(app, document.getElementById('panel'));
+  app.panel = new StagePanel(app, document.getElementById('stage'), {
+    onRemove: (robot) => respawn(robots.filter((r) => r !== robot)),
+    onSave: () => saveStage(),
+    onForget: () => forgetStage(),
+  });
+  app.control = new ControlPanel(app, document.getElementById('control'));
+  // Frame meter (stats.js) in the bottom-right corner; click it to cycle
+  // FPS / ms per frame (JS time of App.frame) / MB of JS heap.
+  app.stats = new Stats();
+  app.stats.dom.id = 'stats';
+  app.stats.dom.style.cssText = '';  // placed by #stats in index.html
+  document.body.append(app.stats.dom);
   const gizmo = new AxisGizmo(document.getElementById('gizmo'), app.orbit);
   (function drawGizmo() { gizmo.draw(); requestAnimationFrame(drawGizmo); })();
   window.app = app;  // handy for poking at it from devtools
@@ -957,7 +1010,8 @@ try {
   // Model library indexes written by scripts/vendor.mjs; absent if the
   // library is not checked out.
   const assets = await loadAssets([
-    ['menagerie', 'mujoco_menagerie'], ['my_environment', 'my_environment'], ['my_objects', 'my_objects'],
+    // In this order in the asset panel: your own robots first.
+    ['my_robot', 'my_robot'], ['menagerie', 'mujoco_menagerie'], ['my_environment', 'my_environment'], ['my_objects', 'my_objects'],
   ]);
 
   // Asset paths (`rel`) are under public/: '<library>/<model>/<file>.xml'.
@@ -989,6 +1043,7 @@ try {
           return {
             rel, parts: app.buildVisual(mujoco, model, images, models),
             inertia: bodyInertia(model), key: firstKey(docs), refs: referencedNames(docs),
+            dims: { nq: model.nq, nv: model.nv, na: model.na, nu: model.nu, nmocap: model.nmocap },
           };
         } finally {
           model.delete();
@@ -1022,14 +1077,15 @@ try {
   let nextId = 1, busy = false;
 
   const hint = () => {
-    const walk = robots.some((r) => r.groot) ? ' · WASD walk, QE turn, RF height' : '';
+    const walk = robots.some((r) => r.groot) ? ' · drive a G1 from the Control panel' : '';
     return `${robots.length} spawned · drag an asset onto the floor` + walk;
   };
 
   // Compiles the world for `list` in a fresh MuJoCo instance and swaps it in.
-  // `fresh` is a robot that is not in the current world yet: it starts from
-  // its own keyframe, if any. Throws (changing nothing) if compiling fails.
-  async function rebuild(list, fresh = null, progress = () => {}) {
+  // `fresh` are the robots of `list` that are not in the current world yet:
+  // each starts from its own keyframe, if any. Throws (changing nothing) if
+  // compiling fails.
+  async function rebuild(list, fresh = [], progress = () => {}) {
     const mujoco = await loadMujoco();
     const specs = [];
     for (const r of list) {
@@ -1044,9 +1100,12 @@ try {
       r.bodyOffset = offset;
       offset += r.visual.inertia.nbody - 1;
     }
-    if (offset !== model.nbody) {
+    const { total } = stateLayout(list);
+    const mismatch = Object.keys(total).find((k) => total[k] !== model[k]);
+    if (offset !== model.nbody || mismatch) {
       model.delete();
-      throw new Error(`world has ${model.nbody} bodies, expected ${offset}`);
+      throw new Error(mismatch ? `world has ${mismatch} ${model[mismatch]}, expected ${total[mismatch]}`
+                               : `world has ${model.nbody} bodies, expected ${offset}`);
     }
 
     // Policy-driven robots: find their joints in the new model and set its
@@ -1054,19 +1113,22 @@ try {
     for (const r of list) r.groot?.bind(mujoco, model);
 
     const old = snapshot(app);
-    if (fresh) fresh.entities = app.addEntities(fresh.visual.parts);
+    const layout = stateLayout(list);
+    for (const r of fresh) r.entities = app.addEntities(r.visual.parts);
     try {
       app.setWorld(mujoco, model, list, init);
     } catch (err) {
-      if (fresh) app.removeEntities(fresh.entities);
+      for (const r of fresh) app.removeEntities(r.entities);
       throw err;
     }
     function init(data) {
-      if (old) copySharedState(old, data, model);
-      if (!fresh) return;
-      const q0 = old?.nq ?? 0, u0 = old?.nu ?? 0;
+      if (old) copySharedState(old, data, list);
+      for (const r of fresh) startPose(data, r);
+    }
+    function startPose(data, fresh) {
+      const { qpos: q0, ctrl: u0 } = layout.get(fresh), { nq, nu } = fresh.visual.dims;
       const key = fresh.visual.key;
-      if (key?.qpos?.length === model.nq - q0) {
+      if (key?.qpos?.length === nq) {
         data.qpos.set(key.qpos, q0);
         // The keyframe is in the robot's own world frame: move free joints
         // to the spawn point and heading (qpos0 already includes them).
@@ -1075,7 +1137,7 @@ try {
         const q = data.qpos;
         for (let j = 0; j < model.njnt; j++) {
           const adr = model.jnt_qposadr[j];
-          if (adr < q0 || model.jnt_type[j] !== 0) continue;
+          if (adr < q0 || adr >= q0 + nq || model.jnt_type[j] !== 0) continue;
           const [x, y] = [q[adr], q[adr + 1]];
           q[adr] = fresh.pos[0] + c * x - s * y;
           q[adr + 1] = fresh.pos[1] + s * x + c * y;
@@ -1084,17 +1146,28 @@ try {
           q.set([hw * w - hz * qz, hw * qx - hz * qy, hw * qy + hz * qx, hw * qz + hz * w], adr + 3);
         }
       }
-      if (key?.ctrl?.length === model.nu - u0) data.ctrl.set(key.ctrl, u0);
+      if (key?.ctrl?.length === nu) data.ctrl.set(key.ctrl, u0);
       fresh.groot?.pose(data);
     }
-    // Reset returns every robot to its spawn pose.
-    const prev = app.initial;
-    const initial = { qpos: Float64Array.from(app.data.qpos), ctrl: Float64Array.from(app.data.ctrl) };
-    if (prev) {
-      initial.qpos.set(prev.qpos.subarray(0, Math.min(prev.qpos.length, initial.qpos.length)));
-      initial.ctrl.set(prev.ctrl.subarray(0, Math.min(prev.ctrl.length, initial.ctrl.length)));
+    // Reset returns a robot to its spawn pose.
+    for (const r of fresh) {
+      const at = layout.get(r), { nq, nu } = r.visual.dims;
+      r.initial = {
+        qpos: app.data.qpos.slice(at.qpos, at.qpos + nq),
+        ctrl: app.data.ctrl.slice(at.ctrl, at.ctrl + nu),
+      };
     }
-    app.initial = initial;
+  }
+
+  // A new robot (not in the world yet) for asset file `rel`.
+  async function makeRobot(rel, label, pos, yaw, progress) {
+    const visual = await robotVisual(rel, label, progress);
+    const robot = { label, visual, prefix: `r${nextId++}/`, pos, yaw };
+    if (rel === `menagerie/${G1_MODEL}`) {
+      const policy = await grootPolicy(progress);
+      if (policy) robot.groot = new GrootController(policy, robot.prefix);
+    }
+    return robot;
   }
 
   async function spawn({ rel, name: label }, pos, yaw) {
@@ -1103,15 +1176,9 @@ try {
     const t0 = performance.now();
     try {
       const progress = (msg) => { status.textContent = msg; setBusy(msg); };
-      const visual = await robotVisual(rel, label, progress);
-      const robot = { label, visual, prefix: `r${nextId}/`, pos, yaw };
-      if (rel === `menagerie/${G1_MODEL}`) {
-        const policy = await grootPolicy(progress);
-        if (policy) robot.groot = new GrootController(policy, robot.prefix);
-      }
-      await rebuild([...robots, robot], robot, progress);
+      const robot = await makeRobot(rel, label, pos, yaw, progress);
+      await rebuild([...robots, robot], [robot], progress);
       robots.push(robot);
-      nextId++;
       const secs = ((performance.now() - t0) / 1000).toFixed(1);
       status.textContent = `spawned ${label} (${secs}s) · ${hint()}`;
     } catch (err) {
@@ -1123,16 +1190,17 @@ try {
     }
   }
 
-  // Undo / clear: recompile with fewer robots (state of the rest is kept).
+  // Undo / clear / remove one: recompile with the robots of `list` (a subset
+  // of `robots`, in order); the state of the rest is kept.
   async function respawn(list) {
     if (busy) return;
     busy = true;
     setBusy('rebuilding…');
     try {
-      const removed = robots.slice(list.length);
-      await rebuild(list, null, (msg) => { status.textContent = msg; setBusy(msg); });
+      const removed = robots.filter((r) => !list.includes(r));
+      await rebuild(list, [], (msg) => { status.textContent = msg; setBusy(msg); });
       for (const r of removed) app.removeEntities(r.entities);
-      robots.length = list.length;
+      robots.splice(0, robots.length, ...list);
       status.textContent = hint();
     } catch (err) {
       status.textContent = `failed: ${err.message ?? err}`;
@@ -1141,6 +1209,51 @@ try {
       busy = false;
       setBusy(null);
     }
+  }
+
+  // The saved stage: what is spawned, where and heading where (no joint
+  // state), in this browser's localStorage. Loaded on the next page load.
+  const STAGE_KEY = 'mujoco-filament/stage';
+  const savedStage = () => {
+    try { return JSON.parse(localStorage.getItem(STAGE_KEY)); } catch { return null; }
+  };
+  function saveStage() {
+    const stage = {
+      saved: new Date().toISOString(),
+      items: robots.map((r) => ({ rel: r.visual.rel, label: r.label, pos: r.pos.map((v) => +v.toFixed(4)), yaw: +r.yaw.toFixed(4) })),
+    };
+    try {
+      localStorage.setItem(STAGE_KEY, JSON.stringify(stage));
+      status.textContent = `stage saved (${stage.items.length} items) · ${hint()}`;
+    } catch (err) {
+      status.textContent = `could not save the stage: ${err.message ?? err}`;
+    }
+    app.panel.showSaved(stage);
+  }
+  function forgetStage() {
+    try { localStorage.removeItem(STAGE_KEY); } catch {}
+    app.panel.showSaved(null);
+    status.textContent = `saved stage forgotten · ${hint()}`;
+  }
+  // Spawns every item of a saved stage, in one compile. Items whose files
+  // fail to load are skipped (and reported).
+  async function loadStage(stage) {
+    const items = stage?.items ?? [];
+    if (!items.length) return;
+    const progress = (msg) => { status.textContent = msg; setBusy(msg); };
+    const added = [], failed = [];
+    for (const [i, it] of items.entries()) {
+      progress(`loading stage ${i + 1}/${items.length}: ${it.label}…`);
+      try {
+        added.push(await makeRobot(it.rel, it.label, it.pos, it.yaw, progress));
+      } catch (err) {
+        console.error(`stage item ${it.rel}:`, err);
+        failed.push(it.label);
+      }
+    }
+    await rebuild([...robots, ...added], added, progress);
+    robots.push(...added);
+    status.textContent = (failed.length ? `stage loaded, skipped ${failed.join(', ')} · ` : 'stage loaded · ') + hint();
   }
 
   // For devtools and scripts/render_previews.mjs.
@@ -1155,14 +1268,22 @@ try {
       return !busy;
     },
   });
-  const assetsEl = document.getElementById('assets');
-  document.getElementById('assets-toggle').onclick = () => { assetsEl.hidden = !assetsEl.hidden; };
+  // Panel toggles (top right), apart from the simulation controls.
+  for (const b of document.querySelectorAll('#views button')) {
+    const panel = document.getElementById(b.dataset.panel);
+    b.setAttribute('aria-pressed', String(!panel.hidden));
+    b.onclick = () => {
+      panel.hidden = !panel.hidden;
+      b.setAttribute('aria-pressed', String(!panel.hidden));
+      if (panel === app.panel.el) app.panel.lastUpdate = 0;
+    };
+  }
 
-  // Double-click selects a body, Ctrl+drag pulls the selection (inspect.js).
+  // Double-click selects a body, Shift+drag pulls the selection (inspect.js).
   const canvas = document.getElementById('canvas');
   let dragging = false;
   canvas.addEventListener('pointerdown', (e) => {
-    if (!(e.ctrlKey || e.metaKey)) return;
+    if (!e.shiftKey) return;
     if (app.model && app.perturb.begin(app.pointerRay(e.clientX, e.clientY))) {
       dragging = true;
       canvas.setPointerCapture(e.pointerId);
@@ -1174,13 +1295,14 @@ try {
   canvas.addEventListener('pointerup', () => {
     if (dragging) { dragging = false; app.perturb.end(); }
   });
-  canvas.addEventListener('dblclick', (e) => app.perturb.select(app.pickBody(e.clientX, e.clientY)));
-  const panelEl = document.getElementById('panel');
-  document.getElementById('inspect').onclick = () => {
-    panelEl.hidden = !panelEl.hidden;
-    app.panel.lastUpdate = 0;
-  };
-
+  // Double-clicking a controllable robot also makes it the driven one;
+  // double-clicking anything else releases control.
+  canvas.addEventListener('dblclick', (e) => {
+    const hit = app.pickBody(e.clientX, e.clientY);
+    app.perturb.select(hit);
+    const robot = hit && app.robots.find((r) => hit.body >= r.bodyOffset && hit.body < r.bodyOffset + r.visual.inertia.nbody - 1);
+    app.control.drive(robot ?? null);
+  });
   document.getElementById('pause').onclick = (e) => {
     app.paused = !app.paused;
     e.target.textContent = app.paused ? 'Resume' : 'Pause';
@@ -1208,36 +1330,21 @@ try {
     };
   }
 
-  // Velocity command for every policy-driven robot: WASD walk, QE turn, held
-  // R/F raise/lower the commanded base height.
-  const DRIVE = { w: [0, 0.5], s: [0, -0.3], a: [1, 0.3], d: [1, -0.3], q: [2, 0.6], e: [2, -0.6] };
-  const held = new Set();
-  const onKey = (e) => {
-    const k = e.key.toLowerCase();
-    if (!(k in DRIVE) && k !== 'r' && k !== 'f') return;
-    if (e.ctrlKey || e.metaKey || e.altKey) return;
-    e.preventDefault();
-    if (e.type === 'keydown') held.add(k); else held.delete(k);
-  };
-  window.addEventListener('keydown', onKey);
-  window.addEventListener('keyup', onKey);
-  window.addEventListener('blur', () => held.clear());
-  let lastDrive = performance.now();
-  (function drive() {
-    const now = performance.now(), dt = (now - lastDrive) / 1000;
-    lastDrive = now;
-    const cmd = [0, 0, 0];
-    for (const k of held) if (DRIVE[k]) cmd[DRIVE[k][0]] += DRIVE[k][1];
-    const dh = (held.has('r') - held.has('f')) * 0.15 * dt;
-    for (const c of app.controllers) {
-      c.cmd = cmd;
-      c.height = Math.min(1.0, Math.max(0.5, c.height + dh));
-    }
-    requestAnimationFrame(drive);
-  })();
-
   await rebuild([]);
   status.textContent = hint();
+  const stage = savedStage();
+  app.panel.showSaved(stage);
+  if (stage?.items?.length) {
+    busy = true;
+    try {
+      await loadStage(stage);
+    } catch (err) {
+      status.textContent = `could not load the saved stage: ${err.message ?? err}`;
+      console.error(err);
+    } finally {
+      busy = false;
+    }
+  }
   setBusy(null);
   app.frame();
 } catch (err) {
