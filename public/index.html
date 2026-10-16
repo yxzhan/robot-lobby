@@ -67,7 +67,6 @@
                 padding: 8px 10px; border-radius: 6px; }
     #side > [hidden] { display: none; }
     #stage { overflow: auto; min-height: 0; flex: 0 1 auto; }
-    #teleop { flex: none; }
     #teleop h3 { margin: 0 0 6px; font-size: 13px; }
     #teleop .field { display: grid; grid-template-columns: 80px 1fr; align-items: center; gap: 6px; margin: 4px 0; font-size: 12px; }
     #teleop select { font: inherit; color: #eee; background: #222; border: 1px solid #555; border-radius: 4px; padding: 2px 4px; }
@@ -76,7 +75,42 @@
     #teleop kbd { display: inline-block; min-width: 14px; text-align: center; padding: 0 3px; margin-right: 2px;
                    border: 1px solid #555; border-bottom-width: 2px; border-radius: 3px; background: #2a2c31;
                    color: #ddd; font: 11px ui-monospace, monospace; }
-    #teleop .readout { margin-top: 4px; font: 11px ui-monospace, monospace; color: #9cd; white-space: pre; }
+    #teleop .readout { margin-top: 4px; font: 11px ui-monospace, monospace; color: #9cd; white-space: pre-wrap; }
+    #teleop { overflow: hidden auto; min-height: 0; flex: 0 10 auto; }  /* gives way before Stage */
+    #teleop .ik { margin-top: 8px; padding-top: 6px; border-top: 1px solid #3a3d44; font-size: 12px; }
+    #teleop .ik-head { display: flex; align-items: center; gap: 6px; font-weight: 600; font-size: 13px; cursor: pointer; list-style: none; padding: 2px 0; }
+    #teleop .ik-head::-webkit-details-marker { display: none; }
+    #teleop .ik-head::before { content: '▸'; color: #888; width: 10px; font-weight: 400; }
+    #teleop details.ik[open] > .ik-head::before { content: '▾'; }
+    #teleop .ik-head .count { margin-left: auto; color: #888; font-weight: 400; font-size: 11px; }
+    #teleop button { cursor: pointer; font: inherit; font-size: 11px; color: #ddd; background: #333;
+                     border: 1px solid #555; border-radius: 4px; padding: 1px 7px; }
+    #teleop button:hover { background: #444; }
+    #teleop .bar { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin: 6px 0 2px; }
+    #teleop .note { color: #8a8; font-size: 11px; }
+    #teleop details.chain { border: 1px solid #3a3d44; border-radius: 5px; padding: 2px 6px; margin: 6px 0; }
+    #teleop details.chain summary { cursor: pointer; display: flex; align-items: center; gap: 6px; padding: 3px 0; }
+    #teleop details.chain .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+    #teleop details.chain .title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+    #teleop details.chain .err { color: #9cd; font: 11px ui-monospace, monospace; white-space: nowrap; }
+    #teleop .field .ctl { display: flex; gap: 4px; min-width: 0; }
+    #teleop .field .ctl select { flex: 1; min-width: 0; }
+    #teleop input[type=number] { width: 0; flex: 1; min-width: 0; font: inherit; color: #eee; background: #222;
+                                 border: 1px solid #555; border-radius: 4px; padding: 1px 3px; }
+    #teleop .joints { display: grid; gap: 1px; margin: 4px 0; font-size: 11px; }
+    #teleop .joints label { display: flex; align-items: center; gap: 4px; }
+    #teleop .joints label.off { color: #777; }
+    #teleop .joints .why { margin-left: auto; color: #888; font-style: italic; }
+    #teleop .error { color: #f88; margin: 4px 0; }
+    #teleop .chips { display: flex; gap: 4px; flex-wrap: wrap; }
+    #teleop .chip { display: flex; align-items: center; gap: 3px; padding: 1px 7px 1px 3px; border: 1px solid #555;
+                    border-radius: 10px; background: #2a2c31; cursor: pointer; }
+    #teleop .chip:has(input:checked) { background: #3d5a73; border-color: #5a85a8; color: #fff; }
+    #teleop .chip.bad { border-color: #c55; }
+    #teleop .chip input { margin: 0; }
+    #teleop .gains { display: grid; grid-template-columns: 52px repeat(3, 1fr); gap: 3px; margin: 4px 0; font-size: 11px; color: #aaa; }
+    #teleop .gains input { width: auto; }
+    #teleop .base .ctl select:first-child { flex: 2; }
     #stage[hidden] { display: none; }
     #stage .hint { color: #999; margin: 2px 0 6px; font-size: 12px; }
     #stage summary { cursor: pointer; padding: 4px 0; font-weight: 600; }
@@ -151,7 +185,7 @@
     <div class="hint">Double-click a body to select it, Shift+drag to pull it. Joints can be set while paused.</div>
     <div class="hint empty">Nothing spawned yet: drag an asset onto the floor.</div>
   </div>
-  <div id="teleop" hidden>
+  <div id="teleop">
     <h3>Teleop</h3>
     <div class="body"></div>
   </div>

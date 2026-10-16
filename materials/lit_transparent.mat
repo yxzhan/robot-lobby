@@ -1,0 +1,23 @@
+// Like lit.mat, for geoms whose rgba alpha is below 1 (glass, …): alpha
+// blended (Filament expects premultiplied colour). Back faces are culled, as
+// in MuJoCo (decal layers would otherwise show mirrored from behind).
+material {
+    name : mujoco_lit_transparent,
+    shadingModel : lit,
+    blending : transparent,
+    parameters : [
+        { type : float4, name : baseColor },
+        { type : float,  name : roughness },
+        { type : float,  name : metallic }
+    ]
+}
+
+fragment {
+    void material(inout MaterialInputs material) {
+        prepareMaterial(material);
+        vec4 color = materialParams.baseColor;
+        material.baseColor = vec4(color.rgb * color.a, color.a);
+        material.roughness = materialParams.roughness;
+        material.metallic = materialParams.metallic;
+    }
+}

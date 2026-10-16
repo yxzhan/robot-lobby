@@ -16,11 +16,16 @@
 import loadMujoco from './vendor/mujoco/mujoco.js';
 import { loadModelFiles, readFirst, urlSource } from './vfs.js';
 import { bodyInertia, compileWorld, firstKey, referencedNames } from './world.js';
-import { CONTROL_DT, G1_MODEL, GrootController, loadGrootPolicy } from './groot.js';
+import { CONTROL_DT } from './groot.js';
+import { defaultPolicy, loadPolicy, policyById } from './policy.js';
 import { Perturb, StagePanel } from './inspect.js';
 import { AssetPanel, loadAssets } from './assets.js';
 import { AxisGizmo } from './gizmo.js';
 import { TeleopPanel } from './teleop.js';
+import { BaseController } from './base.js';
+import { IkController } from './ik.js';
+import { MARKER } from './marker.js';
+import { CHAIN_COLORS } from './teleop.js';
 import Stats from './vendor/stats/Stats.js';
 
 // Filament.init() replaces the global with the loaded module, so re-read it after init.
@@ -28,6 +33,9 @@ let Filament = window.Filament;
 const MAT_LIT = 'materials/lit.filamat';
 const MAT_CHECKER = 'materials/checker.filamat';
 const MAT_TEXTURED = 'materials/lit_textured.filamat';
+// Alpha-blended variants, for geoms whose rgba alpha is below 1.
+const MAT_TRANSPARENT = 'materials/lit_transparent.filamat';
+const MAT_TEXTURED_TRANSPARENT = 'materials/lit_textured_transparent.filamat';
 
 
 // ---------------------------------------------------------------------------
@@ -99,6 +107,32 @@ function cylinder(r, h) {
   return merge(side, disk(r, h, 1), disk(r, -h, -1));
 }
 
+// Side of a cone frustum along +z: radius r0 at z0 to r1 at z1.
+function frustum(r0, r1, z0, z1) {
+  const h = z1 - z0, l = Math.hypot(h, r0 - r1);
+  return grid(1, SEG, (i, j) => {
+    const t = (j / SEG) * 2 * Math.PI, c = Math.cos(t), s = Math.sin(t), r = i ? r0 : r1;
+    return [r * c, r * s, i ? z0 : z1, (c * h) / l, (s * h) / l, (r0 - r1) / l];
+  });
+}
+
+// Ring of radius R around +z, tube radius r.
+function torus(R, r, minor = 12) {
+  return grid(minor, SEG * 2, (i, j) => {
+    const p = (-i / minor) * 2 * Math.PI, t = (j / (SEG * 2)) * 2 * Math.PI;
+    const cp = Math.cos(p), sp = Math.sin(p), ct = Math.cos(t), st = Math.sin(t);
+    return [(R + r * cp) * ct, (R + r * cp) * st, r * sp, cp * ct, cp * st, sp];
+  });
+}
+
+// Interactive marker arrows (marker.js MARKER): one along +z and one along -z.
+function markerArrows() {
+  const [a, b, c] = MARKER.arrow, rs = MARKER.shaft, rh = MARKER.head;
+  const up = merge(frustum(rs, rs, a, b), disk(rs, a, -1), frustum(rh, 0, b, c), disk(rh, b, -1));
+  const down = { pos: up.pos.map((v, k) => (k % 3 === 0 ? v : -v)), nrm: up.nrm.map((v, k) => (k % 3 === 0 ? v : -v)), idx: up.idx };
+  return merge(up, down);  // down: turned half a turn about x, so its winding still faces out
+}
+
 function box(sx, sy, sz) {
   const faces = [];
   const s = [sx, sy, sz];
@@ -124,6 +158,11 @@ function plane(sx, sy) {
 }
 
 const SPAWN_MARKER_RADIUS = 0.25;  // m
+// IK marker colors: x/y/z arrows and rings, the hovered or dragged part.
+const AXIS_COLORS = [[0.9, 0.2, 0.2], [0.25, 0.8, 0.3], [0.25, 0.45, 1]];
+const MARKER_HOT = [1, 0.85, 0.2];
+// Columns: where a marker part's local x, y, z go, so its +z lies along x, y or z.
+const PART_AXES = [[[0, 1, 0], [0, 0, 1], [1, 0, 0]], [[0, 0, 1], [1, 0, 0], [0, 1, 0]], [[1, 0, 0], [0, 1, 0], [0, 0, 1]]];
 const ORIGIN_AXIS_LENGTH = 0.3, ORIGIN_AXIS_RADIUS = 0.008;  // m
 
 // The drag-to-spawn marker, flat in the z=0 plane, unit radius: a ring for
@@ -367,7 +406,9 @@ class OrbitCamera {
     this.azim = -0.6; this.elev = 0.35;
     let last = null, button = 0;
     canvas.addEventListener('pointerdown', (e) => {
-      if (e.shiftKey) { last = null; return; }  // Shift+drag perturbs (inspect.js)
+      // Shift+drag perturbs (inspect.js); `intercept(e)` claims other drags
+      // (the Teleop panel's IK handles).
+      if (e.shiftKey || this.intercept?.(e)) { last = null; return; }
       last = [e.clientX, e.clientY]; button = e.button; canvas.setPointerCapture(e.pointerId);
     });
     canvas.addEventListener('pointerup', () => { last = null; });
@@ -410,8 +451,8 @@ class App {
     this.canvas = canvas;
     this.paused = false;
     this.mujoco = this.model = this.data = null;  // the physics world
-    this.robots = [];  // spawned, in attach order: {visual, pos, bodyOffset, entities, groot}
-    this.controllers = [];  // the robots' policies (GrootController), ticked every CONTROL_DT
+    this.robots = [];  // spawned, in attach order: {visual, pos, bodyOffset, entities, policy, base, ik, use}
+    this.controllers = [];  // the robots' switched-on controllers (a policy, BaseController, IkController), ticked every CONTROL_DT
     this.nextControl = 0;   // sim time of the next policy tick
     this.stepping = null;   // the pending advance(), if any
     this.perturb = new Perturb(this);  // double-click selection, Shift+drag force
@@ -435,6 +476,8 @@ class App {
     this.matLit = engine.createMaterial(MAT_LIT);
     this.matChecker = engine.createMaterial(MAT_CHECKER);
     this.matTextured = engine.createMaterial(MAT_TEXTURED);
+    this.matTransparent = engine.createMaterial(MAT_TRANSPARENT);
+    this.matTexturedTransparent = engine.createMaterial(MAT_TEXTURED_TRANSPARENT);
     const F = Filament;
     this.sampler = new F.TextureSampler(F.MinFilter.LINEAR_MIPMAP_LINEAR, F.MagFilter.LINEAR, F.WrapMode.REPEAT);
     this.sampler.setAnisotropy(8);
@@ -486,6 +529,20 @@ class App {
       target: marker([1, 0.8, 0.2], sphere),
       rope: marker([1, 0.65, 0.15], makeGeometry(engine, cylinder(1, 0.5))),
     };
+    // Teleop arm IK targets: an RViz-style interactive marker per chain
+    // (marker.js; TeleopPanel.gizmos()), parts 0-2 arrows, 3-5 rings, 6 the ball.
+    const arrows = makeGeometry(engine, markerArrows());
+    const ring = makeGeometry(engine, torus(MARKER.ring, MARKER.tube));
+    const ball = makeGeometry(engine, roundShape(MARKER.ball, MARKER.ball, MARKER.ball));
+    this.gizmoParts = CHAIN_COLORS.map((center) => [arrows, arrows, arrows, ring, ring, ring, ball].map((geo, part) => {
+      const mi = this.matLit.createInstance();
+      mi.setFloatParameter('roughness', 0.5);
+      mi.setFloatParameter('metallic', 0.0);
+      const e = makeEntity(engine, geo, mi, false);
+      this.scene.addEntity(e);
+      const color = part === 6 ? center : AXIS_COLORS[part % 3];
+      return { e, mi, color, shown: null };
+    }));
     const spawnMi = this.matLit.createInstance();
     spawnMi.setColor4Parameter('baseColor', Filament.RgbaType.sRGB, [0.2, 0.8, 1, 1]);
     spawnMi.setFloatParameter('roughness', 0.6);
@@ -544,20 +601,22 @@ class App {
       const texid = matid >= 0 ? model.mat_texid[nrole * matid + 1] : -1;
       const textured = texid >= 0 && model.tex_type[texid] === 0;
 
+      // Alpha below 1 is drawn blended (back to front per renderable, so a
+      // self-overlapping or interpenetrating transparent mesh can sort wrong).
+      const transparent = rgba[3] < 1;
       let mi, uv = null;
       if (textured) {
-        mi = this.matTextured.createInstance();
-        mi.setColor4Parameter('baseColor', Filament.RgbaType.sRGB, [rgba[0], rgba[1], rgba[2], 1]);
+        mi = (transparent ? this.matTexturedTransparent : this.matTextured).createInstance();
         this.bindTexture(textures, mujoco, model, images, read, texid, mi);
         uv = geomUVs(model, g, shape, matid);
       } else {
-        mi = this.matLit.createInstance();
-        mi.setColor4Parameter('baseColor', Filament.RgbaType.sRGB, [rgba[0], rgba[1], rgba[2], 1]);
+        mi = (transparent ? this.matTransparent : this.matLit).createInstance();
       }
+      mi.setColor4Parameter('baseColor', Filament.RgbaType.sRGB, [rgba[0], rgba[1], rgba[2], transparent ? rgba[3] : 1]);
       mi.setFloatParameter('roughness', 0.45);
       mi.setFloatParameter('metallic', 0.0);
       parts.push({
-        ...makeGeometry(this.engine, shape, uv), mi,
+        ...makeGeometry(this.engine, shape, uv), mi, transparent,
         body: model.geom_bodyid[g],
         pos: Array.from(model.geom_pos.subarray(3 * g, 3 * g + 3)),
         rot: quatToMat(model.geom_quat.subarray(4 * g, 4 * g + 4)),
@@ -599,7 +658,7 @@ class App {
 
   addEntities(parts) {
     return parts.map((p) => {
-      const e = makeEntity(this.engine, p, p.mi);
+      const e = makeEntity(this.engine, p, p.mi, !p.transparent);  // glass casts no shadow
       this.scene.addEntity(e);
       return e;
     });
@@ -627,12 +686,20 @@ class App {
     this.model = model;
     this.data = data;
     this.robots = robots;
-    this.controllers = robots.flatMap((r) => (r.groot ? [r.groot] : []));
+    this.refreshControllers();
     this.nextControl = data.time;
     this.simStart = performance.now() - data.time * 1000;
     this.syncTransforms();
     this.panel?.build();
     this.teleop?.build();
+  }
+
+  // The controllers to tick: each robot's switched-on ones (robot.use).
+  refreshControllers() {
+    this.controllers = this.robots.flatMap((r) => {
+      if (r.ik) r.ik.enabled = !!r.use?.ik;
+      return [r.use?.policy && r.policy, r.use?.base && r.base, r.use?.ik && r.ik].filter(Boolean);
+    });
   }
 
   // Every robot back to its spawn pose (robot.initial), time back to 0.
@@ -656,7 +723,7 @@ class App {
     data.qvel.fill(0, at.qvel, at.qvel + robot.visual.dims.nv);
     data.act.fill(0, at.act, at.act + robot.visual.dims.na);
     mujoco.mj_forward(model, data);
-    robot.groot?.reset();
+    for (const c of [robot.policy, robot.base, robot.ik]) c?.reset();
     this.syncTransforms();
   }
 
@@ -765,6 +832,23 @@ class App {
       }
     }
     put(this.markers.rope, rope);
+
+    // IK markers: part frame = marker pose * the part's axis (z -> x/y/z) * scale.
+    const gizmos = this.model ? this.teleop?.gizmos() ?? [] : [];
+    this.gizmoParts.forEach((parts, i) => {
+      const g = gizmos[i];
+      parts.forEach((p, part) => {
+        if (!g) { put(p.e, null); return; }
+        const L = PART_AXES[part % 3], R = g.rot, k = g.scale;
+        const W = [0, 1, 2].map((c) => [0, 1, 2].map((r) => (R[3 * r] * L[c][0] + R[3 * r + 1] * L[c][1] + R[3 * r + 2] * L[c][2]) * k));
+        put(p.e, [...W[0], 0, ...W[1], 0, ...W[2], 0, ...g.pos, 1]);
+        const color = g.hot === part ? MARKER_HOT : p.color;
+        if (p.shown !== color) {
+          p.mi.setColor4Parameter('baseColor', Filament.RgbaType.sRGB, [...color, 1]);
+          p.shown = color;
+        }
+      });
+    });
   }
 
   // Geom pose = body pose (from the world) * geom pose in the body (from the
@@ -1014,7 +1098,7 @@ function snapshot(app) {
 }
 
 try {
-  await new Promise((resolve) => Filament.init([MAT_LIT, MAT_CHECKER, MAT_TEXTURED], resolve));
+  await new Promise((resolve) => Filament.init([MAT_LIT, MAT_CHECKER, MAT_TEXTURED, MAT_TRANSPARENT, MAT_TEXTURED_TRANSPARENT], resolve));
   Filament = window.Filament;
   const app = new App(document.getElementById('canvas'));
   app.panel = new StagePanel(app, document.getElementById('stage'), {
@@ -1079,30 +1163,86 @@ try {
     return visuals.get(rel);
   }
 
-  // The GR00T locomotion policy (groot.js), loaded on the first G1 spawn from
-  // public/groot (see scripts/vendor.mjs). Resolves to null if unavailable:
-  // the G1 then spawns without a controller.
-  let groot = null;
-  function grootPolicy(progress) {
-    groot ??= (async () => {
-      progress('loading GR00T policy…');
-      const ort = await import('./vendor/onnxruntime/ort.wasm.min.mjs');
-      ort.env.wasm.wasmPaths = new URL('vendor/onnxruntime/', location.href).href;
-      ort.env.wasm.numThreads = 1;  // tiny MLPs; threads would need cross-origin isolation
-      return loadGrootPolicy(ort, (name) => `groot/${name}`);
-    })().catch((err) => {
-      console.warn('GR00T policy unavailable, G1 will not walk', err);
-      return null;
-    });
-    return groot;
-  }
-
-  const robots = [];  // spawned, in attach order: {label, visual, prefix, pos, yaw, entities, bodyOffset, groot}
+  const robots = [];  // spawned, in attach order: {label, visual, prefix, pos, yaw, entities, bodyOffset, policy, base, ik, use}
   let nextId = 1, busy = false;
 
   const hint = () => {
-    const walk = robots.some((r) => r.groot) ? ' · drive a G1 from the Teleop panel' : '';
+    const walk = robots.some((r) => r.use) ? ' · drive it from the Teleop panel' : '';
     return `${robots.length} spawned · drag an asset onto the floor` + walk;
+  };
+
+  // Which controllers a robot uses ({policy: a POLICIES id or '', base, ik}),
+  // saved per robot file from the Teleop panel. Defaults: the policy made
+  // for the robot (GR00T on every G1 variant), the base if one is found
+  // (decided at bind), IK always.
+  const USE_STORE = 'mujoco-filament/controllers/';
+  function loadUse(key) {
+    try {
+      const saved = JSON.parse(localStorage.getItem(USE_STORE + key) ?? 'null');
+      if (saved) {
+        if ('groot' in saved) { saved.policy = saved.groot ? 'groot-g1' : ''; delete saved.groot; }  // older choice
+        return saved;
+      }
+    } catch { /* no storage */ }
+    return { policy: defaultPolicy(key), base: null, ik: true };
+  }
+
+  // Binds the controller of `kind` to the current world; false (with
+  // robot.errors[kind] set) if it cannot drive this robot.
+  function bindController(r, kind, mujoco, model) {
+    const bodies = [r.bodyOffset, r.bodyOffset + r.visual.inertia.nbody - 1];
+    const owner = (j) => (r.use.policy && r.policy?.owns(j)) || (r.use.base && r.base?.owns(j)) || null;
+    try {
+      if (kind === 'policy') r.policy.bind(mujoco, model);
+      else r[kind].bind(mujoco, model, kind === 'ik' ? owner : () => null, bodies);
+      delete r.errors[kind];
+      return true;
+    } catch (err) {
+      r.errors[kind] = err.message ?? String(err);
+      return false;
+    }
+  }
+
+  // Makes robot.policy the controller of the policy r.use.policy names
+  // (loading its weights); clears r.use.policy if that fails.
+  async function makePolicy(r, progress) {
+    const p = policyById(r.use.policy);
+    if (r.policy && r.policy.policyId !== p?.id) { r.policy.unbind?.(); r.policy = null; }
+    if (!p) { if (r.use.policy) r.errors.policy = `no policy ${r.use.policy}`; r.use.policy = ''; return; }
+    try {
+      const weights = await loadPolicy(p, progress);
+      if (!r.policy) r.policy = Object.assign(p.create(weights, r.prefix), { policyId: p.id });
+    } catch (err) {
+      console.warn(`policy ${p.id} unavailable`, err);
+      r.errors.policy = `${p.name}: could not load (${err.message ?? err})`;
+      r.use.policy = '';
+    }
+  }
+
+  // Switches a robot's controller of `kind` ('policy' | 'base' | 'ik') on or
+  // off (Teleop panel), remembering the choice for its robot file. For
+  // 'policy', `on` is the POLICIES id to run ('' for none).
+  app.setUse = async (r, kind, on) => {
+    if (kind === 'policy') {
+      r.policy?.unbind?.();
+      r.use.policy = on || '';
+      delete r.errors.policy;
+      await makePolicy(r, (msg) => { status.textContent = msg; });
+      if (r.use.policy) {
+        r.policy.reset();
+        if (!bindController(r, 'policy', app.mujoco, app.model)) r.use.policy = '';
+      }
+    } else {
+      r.use[kind] = on;
+    }
+    if (kind === 'base') r.base.reset();
+    // What the policy or base drives is off limits to IK: find the chains
+    // again (an automatic setup may change, e.g. G1 legs without GR00T).
+    if (kind !== 'ik' && r.ik?.config?.auto) r.ik.config = null;
+    r.ik?.targets.clear();
+    if (r.ik) bindController(r, 'ik', app.mujoco, app.model);
+    try { localStorage.setItem(USE_STORE + r.key, JSON.stringify(r.use)); } catch { /* no storage */ }
+    app.refreshControllers();
   };
 
   // Compiles the world for `list` in a fresh MuJoCo instance and swaps it in.
@@ -1127,14 +1267,24 @@ try {
     const { total } = stateLayout(list);
     const mismatch = Object.keys(total).find((k) => total[k] !== model[k]);
     if (offset !== model.nbody || mismatch) {
+      const msg = mismatch ? `world has ${mismatch} ${model[mismatch]}, expected ${total[mismatch]}`
+                           : `world has ${model.nbody} bodies, expected ${offset}`;
       model.delete();
-      throw new Error(mismatch ? `world has ${mismatch} ${model[mismatch]}, expected ${total[mismatch]}`
-                               : `world has ${model.nbody} bodies, expected ${offset}`);
+      throw new Error(msg);
     }
 
-    // Policy-driven robots: find their joints in the new model and set its
-    // actuator gains to the policy's PD gains.
-    for (const r of list) r.groot?.bind(mujoco, model);
+    // Controlled robots: find their joints and actuators in the new model
+    // (GR00T also sets its actuator gains to the policy's PD gains).
+    for (const r of list) {
+      if (r.use.policy && r.policy && !bindController(r, 'policy', mujoco, model)) r.use.policy = '';
+      if (r.base) bindController(r, 'base', mujoco, model);
+      r.use.base ??= !!r.base?.config?.kind;
+    }
+    // IK chains between the robot's bodies, around the joints the
+    // controller drives.
+    for (const r of list) {
+      if (r.ik) bindController(r, 'ik', mujoco, model);
+    }
 
     const old = snapshot(app);
     const layout = stateLayout(list);
@@ -1148,6 +1298,26 @@ try {
     function init(data) {
       if (old) copySharedState(old, data, list);
       for (const r of fresh) startPose(data, r);
+    }
+    // A keyframe made for the robot's own scene can put it under our floor
+    // (TIAGo's: z = -0.985, for a floor at -0.99): if its collision geoms
+    // reach more than 10 cm below the spawn height, its free joints go up
+    // until they clear it (bounding spheres, so it may drop a little).
+    function liftAboveFloor(data, fresh, q0, nq) {
+      mujoco.mj_kinematics(model, data);
+      const first = fresh.bodyOffset, end = first + fresh.visual.inertia.nbody - 1;
+      let low = Infinity;
+      for (let g = 0; g < model.ngeom; g++) {
+        const b = model.geom_bodyid[g];
+        if (b < first || b >= end || !(model.geom_contype[g] || model.geom_conaffinity[g])) continue;
+        low = Math.min(low, data.geom_xpos[3 * g + 2] - model.geom_rbound[g]);
+      }
+      const lift = fresh.pos[2] - low;
+      if (!(lift > 0.1)) return;
+      for (let j = 0; j < model.njnt; j++) {
+        const adr = model.jnt_qposadr[j];
+        if (adr >= q0 && adr < q0 + nq && model.jnt_type[j] === 0) data.qpos[adr + 2] += lift;
+      }
     }
     function startPose(data, fresh) {
       const { qpos: q0, ctrl: u0 } = layout.get(fresh), { nq, nu } = fresh.visual.dims;
@@ -1169,9 +1339,10 @@ try {
           const [w, qx, qy, qz] = q.subarray(adr + 3, adr + 7);  // (hw, 0, 0, hz) * quat
           q.set([hw * w - hz * qz, hw * qx - hz * qy, hw * qy + hz * qx, hw * qz + hz * w], adr + 3);
         }
+        liftAboveFloor(data, fresh, q0, nq);
       }
       if (key?.ctrl?.length === nu) data.ctrl.set(key.ctrl, u0);
-      fresh.groot?.pose(data);
+      if (fresh.use.policy) fresh.policy?.pose(data);
     }
     // Reset returns a robot to its spawn pose.
     for (const r of fresh) {
@@ -1187,10 +1358,15 @@ try {
   async function makeRobot(rel, label, pos, yaw, progress) {
     const visual = await robotVisual(rel, label, progress);
     const robot = { label, visual, prefix: `r${nextId++}/`, pos, yaw };
-    if (rel.endsWith(`/mujoco_menagerie/${G1_MODEL}`)) {
-      const policy = await grootPolicy(progress);
-      if (policy) robot.groot = new GrootController(policy, robot.prefix);
-    }
+    // Every robot gets the controllers of the Teleop panel, each switched
+    // on or off (robot.use): a trained policy (policy.js), a mobile base and
+    // IK chains, each saved, built in or found in the model.
+    const key = rel.match(/(?:^|\/)mjcf_assets\/robots\/(.+)$/)?.[1];
+    if (!key) return robot;
+    Object.assign(robot, { key, use: loadUse(key), errors: {} });
+    robot.base = new BaseController(key, robot.prefix);
+    robot.ik = new IkController(key, robot.prefix);
+    await makePolicy(robot, progress);
     return robot;
   }
 
@@ -1306,7 +1482,10 @@ try {
   // Double-click selects a body, Shift+drag pulls the selection (inspect.js).
   const canvas = document.getElementById('canvas');
   let dragging = false;
+  // Dragging an IK marker (Teleop panel) moves it instead of the camera.
+  app.orbit.intercept = (e) => e.button === 0 && app.teleop.grab(app.pointerRay(e.clientX, e.clientY));
   canvas.addEventListener('pointerdown', (e) => {
+    if (app.teleop.dragging) canvas.setPointerCapture(e.pointerId);
     if (!e.shiftKey) return;
     if (app.model && app.perturb.begin(app.pointerRay(e.clientX, e.clientY))) {
       dragging = true;
@@ -1315,8 +1494,11 @@ try {
   });
   canvas.addEventListener('pointermove', (e) => {
     if (dragging) app.perturb.move(app.pointerRay(e.clientX, e.clientY));
+    if (app.teleop.dragging) app.teleop.dragTo(app.pointerRay(e.clientX, e.clientY));
+    else if (!e.buttons) canvas.style.cursor = app.teleop.hoverAt(app.pointerRay(e.clientX, e.clientY)) ? 'grab' : '';
   });
   canvas.addEventListener('pointerup', () => {
+    app.teleop.release();
     if (dragging) { dragging = false; app.perturb.end(); }
   });
   // Double-clicking a controllable robot also makes it the driven one;

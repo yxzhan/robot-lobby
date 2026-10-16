@@ -84,12 +84,19 @@ export function firstKey(docs) {
 }
 
 // Names that something other than a geom or mesh refers to (contact pairs,
-// sensors, …), from the robot's XML documents. Such geoms are never stripped.
+// sensors, tendon wrapping surfaces, …), from the robot's XML documents.
+// Such geoms are never stripped.
 export function referencedNames(docs) {
   const refs = new Set();
   for (const doc of docs) {
     for (const el of doc.getElementsByTagName('*')) {
-      if (el.nodeName === 'geom' || el.nodeName === 'mesh') continue;
+      if (el.nodeName === 'mesh') continue;
+      if (el.nodeName === 'geom') {
+        // A spatial tendon's wrap, <geom geom="…" sidesite="…"/>: the wrapped
+        // geom is often contype 0 (MS-Human's muscles), yet the tendon needs it.
+        if (el.parentNode?.nodeName === 'spatial') refs.add(el.getAttribute('geom'));
+        continue;
+      }
       for (const a of el.attributes) if (a.name !== 'name') refs.add(a.value);
     }
   }

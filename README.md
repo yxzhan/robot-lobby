@@ -51,8 +51,14 @@ Picking uses `mj_ray` on the physics world, so it hits collision geoms.
   `mujoco_menagerie` keeps its own names, so it is indexed from its README's
   "Menagerie Models" table: one model per row, spawning the model file the
   row's scene includes (so the scene's floor and lights stay out), with the
-  row's image as screenshot; directories the table does not list go under
-  "Others".
+  row's image as screenshot. Each further `scene_<suffix>.xml` of a model
+  directory (left/right hands, `_with_hands`, actuator variants, …)
+  adds the model it includes as `<dir>_<suffix>` in the same group, with the
+  matching `.png` if there is one, else the directory's only `.png`, else the
+  base model's. Directories the table does not list go under "Others". MJX
+  models (scene or model file named `*mjx*`) are left out: they collide only
+  through contact pairs with their scene's own floor, so they would fall
+  through the viewer's.
   `npm install` (or `node scripts/vendor.mjs`) links the library as
   `public/mjcf_assets` and indexes it into `public/assets.json`. Within a tab, models are listed under their
   source, `digital_twin` first and the others by name; menagerie robots are
@@ -121,29 +127,162 @@ Hence:
 Side effect: visual geoms are not in the physics model, so ray-based
 sensors (rangefinders) no longer hit them.
 
+A keyframe made for the robot's own scene can put it below our floor
+(TIAGo's sits at z = -0.985 on a floor at -0.99); a spawn whose collision
+geoms reach more than 10 cm below the spawn height is raised to clear it.
+
 Known gaps: `shadow_dexee` needs the `mujoco.pid` plugin, which the WASM build
-does not ship; `iit_softfoot` (an `<asset><model>` sub-model) fails to attach. Skyboxes, cube textures and hfields are not drawn.
+does not ship; `iit_softfoot` (an `<asset><model>` sub-model) fails to attach;
+`tetheria_aero_hand_open` loses 6 of its 7 tendon actuators in `mjs_attach`
+(spawning reports the mismatch). Skyboxes, cube textures and hfields are not
+drawn.
+
+## Teleop panel and controllers
+
+The Teleop panel (`public/teleop.js`, open by default) picks which robot is
+driven (the newest by default, or the one double-clicked; double-clicking
+anything else releases it; the others get a zero command and stand or
+brake) and which of its controllers are on: **Policy**, **Base**, **IK**,
+any of them or none. The choice is saved per robot file
+(`mujoco-filament/controllers/<path>`); by default a robot runs the policy
+made for it (GR00T on every menagerie G1 variant, no compatibility check:
+switched on elsewhere, a policy reports the missing joint), Base when a
+mobile base was found, IK always. Switching a policy off gives the
+actuators their own gains back, and an automatic IK setup is found again
+around whatever the remaining controllers drive (a G1 without its policy
+gets leg chains). Keyboard: **WASD** walk / drive, **QE** turn, hold
+**R**/**F** to raise or lower a locomotion policy's base height (keys typed
+into a text field are ignored); the sections fold.
+
+Policies are listed in `POLICIES` (`public/policy.js`): each entry has an
+id, a name, the robot files it starts on for (`defaultFor`), `load()` for
+its weights (shared, loaded on first use; onnxruntime-web is there as
+`onnxRuntime()`) and `create(weights, prefix)` for a controller with
+`bind` / `unbind` / `owns` / `pose` / `reset` / async `step`, plus `cmd` /
+`drive` (and `height`) for a locomotion policy driven by the keys. The
+panel's Policy section picks the model; a hand or quadruped policy is one
+more entry.
 
 ## Walking G1 (GR00T policy)
 
 If the GR00T locomotion policies are checked out next to `package.json`
 (`git clone https://huggingface.co/nepyope/GR00T-WholeBodyControl_g1`),
-`npm install` links them as `public/groot`, and every spawned `unitree_g1`
-walks under them. The Teleop panel (`public/teleop.js`) picks which one
-is driven (the newest by default, or the one double-clicked; double-clicking
-anything else releases it; the others get a zero command and stand)
-and, later, by which controller and input; with the keyboard: **WASD** walk,
-**QE** turn, hold **R**/**F** to raise or lower the base (keys typed into a
-text field are ignored). `public/groot.js` is a port of lerobot's
+`npm install` links them as `public/groot`; they load the first time a
+robot runs the `groot-g1` policy. `public/groot.js` is a port of lerobot's
 `GrootLocomotionController` running on onnxruntime-web (WASM, one thread,
 ~0.2 ms per inference): two MLPs (Balance when the command is ~0, Walk
 otherwise) at 50 Hz on 6 stacked 86-D observations, driving legs and waist,
 while the arms hold whatever target their actuators have (the default pose
-at spawn; set them with the Stage panel's control sliders, as in
-g1_mujoco). The policy's PD gains are written
+at spawn; set them with IK chains or the Stage panel's control sliders, as
+in g1_mujoco). The policy's PD gains are written
 into the menagerie position actuators (`gainprm`/`biasprm`), and the IMU is
 the floating base (`qpos[3:7]`, `qvel[3:6]`), as in lerobot's G1 sim.
 Inference is async, so `App.advance()` awaits it every 0.02 s of sim time.
+`g1.xml` and `g1_with_hands.xml` both walk.
+
+## Mobile bases
+
+Every robot gets a `BaseController` (`public/base.js`), driven
+from the Teleop panel like the G1 (**WASD**, **QE**), with a PI loop on the
+floating base's measured twist (ground truth as odometry) and an
+acceleration limit on the command (a step to full speed tips a tall robot
+over). With no command the wheels brake. The panel shows command and
+measurement and edits the setup; **Save** keeps it per robot file
+(`mujoco-filament/base/<path>`), **Auto** / **Defaults** goes back to the
+found / built-in one, **Export** copies JSON for `BASE_DEFAULTS`.
+
+Kinds:
+- **wheels**: a free root joint on driven wheels (velocity servos, or
+  motors with a P loop on wheel speed). Wheel positions and spin axes come
+  from the model; each wheel turns at `ω = g·v / (r g·d)`, `v` the wheel
+  center's velocity for the commanded twist, `d` its rolling direction and
+  `g` the direction it pushes: `d` for a plain wheel (differential, skid
+  steer; no sideways motion), `d ± axis` for mecanum rollers at ±45°.
+  Configurable: base joint, wheels (actuator, roller), radius, key speeds,
+  feedforward / P / I / integral limit / acceleration per axis.
+- **planar**: x / y / yaw position servos on the root body (TidyBot): the
+  pose target is integrated from the command.
+
+`autoConfig()` finds them: wheels are hinge joints with a velocity servo
+or motor, a level axis and a low axle; a wheel carrying unactuated roller
+hinges is mecanum, the side its lowest roller leans to giving ±45°; the
+radius is the axle height in the default pose. Garmi has a built-in setup
+(its mecanum base: forward and sideways track open-loop; its rollers give
+yaw a lever of only |x − y| = 4 cm, hence a yaw feedforward of 3). Checked:
+Garmi, TIAGo (position / velocity / motor variants: forward to 0.01 m/s),
+TidyBot (planar). Model limits: RB-Y1's base mesh rests on the floor (no
+casters), so its wheels cannot move it; TIAGo++'s omni base has no rollers
+(no sideways motion, a skid-steer box); Stretch 3's left wheel does not
+follow its servo.
+
+## IK chains
+
+Every robot under `mjcf_assets/robots/` gets an `IkController`
+(`public/ik.js`), on by default: IK chains whose targets are RViz-style
+interactive markers (`public/marker.js`, a fixed 0.15 m in the world):
+drag an arrow to move the target along that axis, a ring to turn it about
+that axis, the center ball (colored by chain) to move it in the plane
+facing the camera. Axes are the target's own (red x, green y, blue z); the
+part under the pointer turns yellow, and the camera does not move while a
+marker is held. **G** opens or closes the gripper of the chain dragged
+last. Until a marker moves, a chain just holds its joints where they are.
+
+A chain is only `{root, tip}`, plus the tip frame: a site rigidly attached
+to the tip body (a TCP) or the body moved by an offset (Franka's 0.1034 m):
+its joints are the ones on the body path from the tip up to the root,
+root's own joints included, so moving the root to the elbow or down to
+Garmi's lift changes which joints take part. Joints without a position
+actuator, joints another controller drives (G1's waist and legs under
+GR00T), free joints and joints the user unticks stay still; a joint
+coupled to another by a joint equality (Garmi's second lift stage) adds its
+motion to its leader's Jacobian column.
+
+Configs come from, in order: the one saved in the panel, `IK_DEFAULTS`
+(Garmi: both arms, root `*_fr3_link1`, tip `*_fr3_hand` + 0.1034 m), or
+`autoConfig()`, which looks at the model: joints with a position servo,
+not driven by another controller, not on the robot's root body (a mobile
+base) and not named like hand/gripper joints (`finger`, `jaw`, `thumb`,
+`hand_`, …) are movable; every serial run of at least 3 of them that ends a
+branch of the body tree becomes a chain, from where the tree branches (or
+the base) to the last movable body, carried on through fixed single
+children (flange to hand). Shorter end runs (a pan-tilt head, fingers) are
+dropped first. The tip frame is the model's TCP site when one is fixed to
+the tip, by name, best first: `tcp`, `pinch`, `grasp`, `gripper` /
+`end_effector` / `ee`, `hand_center` / `palm`, then the `attachment_site`
+flange (i2rt YAM `tcp_site`, Kinova `pinch_site`, ViperX `pinch`, ALOHA
+`*/gripper`, SO-101 `gripperframe`, TidyBot `pinch_site`, UR5e / iiwa /
+Lite6 `attachment_site`). MJCF has no TCP element, so a model without such
+a site (menagerie's `panda.xml`, G1) keeps the body origin;
+`IK_DEFAULTS` gives Panda and Garmi the Franka TCP offset instead. The one actuator driving joints below the tip that no chain
+uses becomes the gripper. Examples: Panda `link1 → hand` (gripper
+`actuator8`), UR5e `shoulder_link → wrist_3_link`, ALOHA and TIAGo dual
+both arms, Apollo arms, legs and neck, Spot four legs, G1 both arms (legs
+and waist are GR00T's), TIAGo `torso_lift_link → arm_7_link` (lift
+included); Go2 and H1 have torque motors, so none.
+
+Each tick (50 Hz) every chain takes one damped-least-squares step
+(`dq = Jᵀ(JJᵀ+λ²I)⁻¹e`, Jacobian from `xaxis`/`xanchor`), with a pull
+towards the starting posture in the null space, joint speed limits and
+joint/ctrl range clamps, tracking position and orientation (orientation
+weighted 0.3 m/rad; a chain with fewer than 6 joints gets the least-squares
+compromise). A joint the step would push past its range is taken out and
+the step solved again, so the rest do not chase what it cannot do. IK runs
+on the *commanded* joint positions (forward kinematics in a scratch
+`MjData`), so gravity sag does not wind the targets up. The target lives in
+the frame of the parent of the first body the chain moves: it travels with
+the base (and the lift, when the chain starts above it), and a chain rooted
+at G1's pelvis keeps its target on the torso while it walks.
+
+The Teleop panel edits the driven robot's chains: tip and root (select, or
+double-click a body and press ◎), TCP site or offset, joints, gripper actuator;
+**+ Chain** starts one at the selected body. **Save** keeps the setup per
+robot file in localStorage (`mujoco-filament/ik/<path>`), **Auto** /
+**Defaults** goes back to the found / built-in one, **Export** copies it as
+JSON for `IK_DEFAULTS`. While IK is on it owns its joints' controls, so the
+Stage panel's sliders for them are overridden; untick **IK chains** to set
+them by hand. Known limits: a straight, singular arm (RB-Y1 at rest) cannot
+move along itself until moved another way first; joints driven through a
+tendon (Stretch's telescoping arm) are not IK joints.
 
 ## Textures
 
@@ -161,6 +300,13 @@ flipped/grid textures still come from `tex_data`. Meshes use their `mesh_texcoor
 (e.g. a textured table box, the groundplane) get an object-space planar
 projection per face. `texrepeat`/`texuniform` are baked into the UVs. Planes
 without any material get the built-in checker; otherwise the material color.
+
+Geoms whose rgba alpha is below 1 (glass doors, …) use the alpha-blended
+variants `lit_transparent` / `lit_textured_transparent` (the texture's own
+alpha multiplies in) and cast no shadow; alpha 0 hides a geom, as in MuJoCo.
+Back faces are culled like MuJoCo does. Filament sorts transparent
+renderables back to front per renderable, so a self-overlapping or
+interpenetrating transparent mesh can blend in the wrong order.
 
 ## How it works
 
@@ -186,6 +332,8 @@ same Filament release
 matc -a opengl -p mobile -o public/materials/lit.filamat     materials/lit.mat
 matc -a opengl -p mobile -o public/materials/checker.filamat materials/checker.mat
 matc -a opengl -p mobile -o public/materials/lit_textured.filamat materials/lit_textured.mat
+matc -a opengl -p mobile -o public/materials/lit_transparent.filamat materials/lit_transparent.mat
+matc -a opengl -p mobile -o public/materials/lit_textured_transparent.filamat materials/lit_textured_transparent.mat
 ```
 
 ## Relation to MuJoCo's own Filament renderer

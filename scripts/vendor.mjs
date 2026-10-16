@@ -75,25 +75,56 @@ function readmeRows(sourceDir) {
 // table, one per row: the entry is the model file the linked scene includes
 // (or the linked file itself if it includes none), the screenshot the row's
 // image. A directory listed twice (an arm and its gripper) gives a second
-// model named <dir>_<file>. Directories the table does not list but that
-// have a scene.xml including a model go under "Others".
+// model named <dir>_<file>. Then every other scene_<suffix>.xml of a
+// directory (variants: scene_right.xml, scene_with_hands.xml, scene_motor.xml,
+// …) adds the model it includes as <dir>_<suffix>, in the same group, with
+// the matching .png (<model>.png, <base model>_<suffix>.png or
+// <dir>_<suffix>.png), else the directory's only .png, else the base
+// model's screenshot. Directories the table does not list but that have a
+// scene.xml including a model go under "Others". MJX models (scene or model
+// file named *mjx*) are left out: they collide only through contact pairs
+// with their scene's own floor, so they fall through the viewer's.
+const MJX = /mjx/i;
 function menagerieModels(sourceDir) {
-  const models = [], listed = new Set();
+  const models = [], byDir = new Map();  // dir -> its models
+  const add = (m) => {
+    if (MJX.test(m.scene) || MJX.test(m.main)) return;
+    models.push(m);
+    if (!byDir.has(m.dirName)) byDir.set(m.dirName, []);
+    byDir.get(m.dirName).push(m);
+  };
   for (const row of readmeRows(sourceDir)) {
     const dir = `${sourceDir}/${row.dir}`, linked = `${dir}/${row.file}`;
     if (!existsSync(linked)) { console.warn(`skipping ${linked}: listed in the README but missing`); continue; }
     const main = includedFile(linked) ?? row.file;
-    const name = listed.has(row.dir) ? `${row.dir}_${row.file.replace(/\.xml$/, '').replace(/^scene_?/, '') || 'scene'}` : row.dir;
-    listed.add(row.dir);
+    const name = byDir.has(row.dir) ? `${row.dir}_${row.file.replace(/\.xml$/, '').replace(/^scene_?/, '') || 'scene'}` : row.dir;
     const screenshot = row.img && existsSync(`${sourceDir}/${row.img}`) ? `../${row.img}` : undefined;
-    models.push({ name, dir, main, group: row.group, rank: row.rank, screenshot });
+    add({ name, dirName: row.dir, dir, main, scene: row.file, group: row.group, rank: row.rank, screenshot });
   }
-  for (const name of subdirs(sourceDir)) {
-    const dir = `${sourceDir}/${name}`, scene = `${dir}/scene.xml`;
-    const main = !listed.has(name) && existsSync(scene) && includedFile(scene);
-    if (!main) continue;  // listed, or not a model directory (assets/, test/, …)
-    const shot = [`${name}.png`, main.replace(/\.xml$/, '.png')].find((f) => existsSync(`${dir}/${f}`));
-    models.push({ name, dir, main, group: 'Others', rank: Infinity, screenshot: shot });
+  const stem = (f) => f.replace(/\.[^.]*$/, '');
+  for (const dirName of subdirs(sourceDir)) {
+    const dir = `${sourceDir}/${dirName}`;
+    const files = readdirSync(dir);
+    const pngs = files.filter((f) => f.toLowerCase().endsWith('.png'));
+    // Shortest first (scene.xml, then scene_motor.xml before scene_motor_2.xml):
+    // when two scenes include the same model, the plainer name keeps it.
+    const scenes = files.filter((f) => /^scene(_.+)?\.xml$/.test(f)).sort((a, b) => a.length - b.length || a.localeCompare(b));
+    for (const scene of scenes) {
+      const known = byDir.get(dirName) ?? [];
+      const main = includedFile(`${dir}/${scene}`);
+      if (!main || known.some((m) => m.scene === scene || m.main === main)) continue;
+      const base = known[0];
+      if (!base) {  // not in the README table
+        const shot = [`${dirName}.png`, `${stem(main)}.png`].find((f) => pngs.includes(f)) ?? (pngs.length === 1 ? pngs[0] : undefined);
+        add({ name: dirName, dirName, dir, main, scene, group: 'Others', rank: Infinity, screenshot: shot });
+        continue;
+      }
+      const suffix = stem(scene).replace(/^scene_/, '');
+      const name = `${dirName}_${suffix}`;
+      const shot = [`${stem(main)}.png`, `${stem(base.main)}_${suffix}.png`, `${name}.png`].find((f) => pngs.includes(f))
+        ?? (pngs.length === 1 ? pngs[0] : base.screenshot);
+      add({ name, dirName, dir, main, scene, group: base.group, rank: base.rank, screenshot: shot });
+    }
   }
   return models;
 }

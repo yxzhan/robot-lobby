@@ -1,14 +1,32 @@
-// Teleoperation: the Teleop panel picks which robot is driven, by which
-// controller and from which input; every other controllable robot gets a
-// zero command (it stands). For now the only controller is the GR00T
-// locomotion policy (groot.js, on robot.groot) and the only input the
-// keyboard; the selects are where other policies, end-effector control, a
-// ROS bridge or a gamepad would plug in.
+// Teleoperation: the Teleop panel picks which robot is driven, which of its
+// controllers are on (any of them, or none: robot.use, switched by
+// app.setUse) and the input; every other robot gets a zero command (it
+// stands, or holds its base still). Controllers:
+// - Policy (policy.js, robot.policy): a trained model picked from POLICIES,
+//   e.g. GR00T locomotion, on by default for every G1 variant;
+// - Base (base.js, robot.base): a mobile base, set up in the panel (kind,
+//   wheels, radius, speeds, gains) or found in the model;
+// - IK (ik.js, robot.ik): chains whose targets are RViz-style interactive
+//   markers (marker.js) dragged with the mouse; the panel edits them.
+// Locomotion policies and Base take a body twist command `cmd` = [vx, vy, yaw rate] and
+// say how fast the keys drive them (`drive`, null while there is nothing to
+// drive). The only input so far is the keyboard; the Input select is where
+// a ROS bridge or a gamepad would plug in. Setups are saved per robot file.
 
-// Velocity command per held key: [command index (vx, vy, yaw rate), value].
-const DRIVE = { w: [0, 0.5], s: [0, -0.3], a: [1, 0.3], d: [1, -0.3], q: [2, 0.6], e: [2, -0.6] };
+import { dragPose, markerScale, pickMarker, startDrag } from './marker.js';
+import { BaseController, KINDS } from './base.js';
+import { POLICIES, defaultPolicy, policyById } from './policy.js';
+
+// Per held key: [command index (vx, vy, yaw rate), direction, drive speed].
+const DRIVE = {
+  w: [0, 1, 'forward'], s: [0, -1, 'back'], a: [1, 1, 'side'], d: [1, -1, 'side'],
+  q: [2, 1, 'turn'], e: [2, -1, 'turn'],
+};
 const HEIGHT_RATE = 0.15;  // m/s while R/F is held
 const HEIGHT_RANGE = [0.5, 1.0];
+// Marker centers, by chain (at most this many markers are shown).
+export const CHAIN_COLORS = [[0.2, 0.85, 1], [1, 0.35, 0.8], [1, 0.6, 0.15], [0.6, 0.4, 1],
+  [0.3, 1, 0.75], [1, 1, 0.4], [0.55, 0.75, 1], [1, 0.55, 0.55]];
 
 // Keys typed into a text field are not commands.
 function isTyping(target) {
@@ -35,23 +53,52 @@ export class KeyboardInput {
     this.enabled = false;  // only while a robot is being driven
   }
 
-  // {cmd: [vx, vy, yaw rate], dh: height change} for the last `dt` seconds.
-  read(dt) {
+  // {cmd: [vx, vy, yaw rate], dh: height change} for the last `dt` seconds,
+  // with the key speeds of `drive` ({forward, back, side, turn}).
+  read(dt, drive) {
     const cmd = [0, 0, 0];
-    for (const k of this.held) if (DRIVE[k]) cmd[DRIVE[k][0]] += DRIVE[k][1];
+    for (const k of this.held) if (DRIVE[k]) cmd[DRIVE[k][0]] += DRIVE[k][1] * drive[DRIVE[k][2]];
     return { cmd, dh: (this.held.has('r') - this.held.has('f')) * HEIGHT_RATE * dt };
   }
 }
 
+const FOLDED = 'mujoco-filament/teleop-folded';
+const CONTROLLERS = [['policy', 'Policy', 'A trained policy (locomotion, hands, …)'],
+  ['base', 'Base', 'Mobile base: wheels or planar joints'], ['ik', 'IK', 'IK chains with interactive markers']];
+
+// The switched-on controllers of robot `r` that take twist commands.
+function locomotion(r) {
+  return [r?.use?.policy && r.policy?.drive && r.policy, r?.use?.base && r.base?.drive && r.base].filter(Boolean);
+}
+
+const el = (tag, props = {}, ...children) => {
+  const e = Object.assign(document.createElement(tag), props);
+  e.append(...children);
+  return e;
+};
+
 export class TeleopPanel {
-  constructor(app, el) {
+  constructor(app, root) {
     this.app = app;
-    this.el = el;
-    this.body = el.querySelector('.body');
+    this.el = root;
+    this.body = root.querySelector('.body');
     this.active = null;      // the driven robot
     this.known = new Set();  // controllable robots seen so far; a new one gets selected
     this.input = new KeyboardInput();
     this.readout = null;
+    this.errs = [];          // per chain: the span showing its tracking error
+    this.closedChains = new Set();  // "<prefix><chain name>" folded in the panel
+    // Folded sections ('base', 'ik'), kept across robots and page loads.
+    try { this.folded = new Set(JSON.parse(localStorage.getItem(FOLDED) ?? '[]')); } catch { this.folded = new Set(); }
+    this.dragging = null;    // marker.js drag state + {index, chain} while a marker is dragged
+    this.hover = null;       // {index, part} of the marker under the pointer
+    // G opens or closes the gripper of the chain dragged last.
+    window.addEventListener('keydown', (e) => {
+      if (e.key.toLowerCase() !== 'g' || e.ctrlKey || e.metaKey || e.altKey || isTyping(e.target)) return;
+      const ik = this.active?.use?.ik && this.active.ik;
+      const chain = ik?.enabled && ik.chains[ik.focus];
+      if (chain) ik.toggleGripper(chain, this.app.data);
+    });
     let last = performance.now();
     const loop = () => {
       const now = performance.now();
@@ -63,7 +110,7 @@ export class TeleopPanel {
   }
 
   controllable() {
-    return (this.app.robots ?? []).filter((r) => r.groot);
+    return (this.app.robots ?? []).filter((r) => r.use);
   }
 
   // Called for every new world (App.setWorld).
@@ -73,76 +120,420 @@ export class TeleopPanel {
     this.known = new Set(robots);
     if (added.length) this.active = added.at(-1);
     else if (!robots.includes(this.active)) this.active = robots.at(-1) ?? null;
+    this.dragging = this.hover = null;
     this.render();
   }
 
   // Drives `robot` (e.g. double-clicked) if it is controllable; anything
-  // else (null, a robot without a controller) releases control.
+  // else (null, the floor, an object) releases control.
   drive(robot) {
-    const next = robot?.groot ? robot : null;
-    if (next === this.active) return;
+    const next = robot?.use ? robot : null;
+    if (next === this.active) { this.render(); return; }  // the selected body may matter (IK chain editor)
     this.active = next;
     this.render();
   }
+
+  // ---- IK target markers (marker.js, drawn by App.syncMarkers) ----
+
+  // The driven robot's IK targets, by chain: {pos, rot, scale, hot} (hot:
+  // the marker part hovered or dragged), or null for a broken chain.
+  gizmos() {
+    const ik = this.active?.use?.ik && this.active.ik;
+    if (!ik?.enabled || !this.app.data) return [];
+    const g = this.dragging;
+    return ik.chains.slice(0, CHAIN_COLORS.length).map((c, i) => {
+      const pose = ik.targetPose(c, this.app.data);
+      if (!pose) return null;
+      const hot = g ? (g.index === i ? g.part : -1) : (this.hover?.index === i ? this.hover.part : -1);
+      return { ...pose, scale: markerScale(), hot };
+    });
+  }
+
+  // The marker part under the pointer ray: {index, part, depth} or null.
+  pick(ray) {
+    let best = null;
+    this.gizmos().forEach((m, index) => {
+      const hit = m && pickMarker(ray, m, m.scale);
+      if (hit && (!best || hit.depth < best.depth)) best = { index, ...hit };
+    });
+    return best;
+  }
+
+  // Pointer moved with no button down: highlights the part under it.
+  hoverAt(ray) {
+    const hit = this.dragging ? null : this.pick(ray);
+    this.hover = hit;
+    return !!hit;
+  }
+
+  // Starts dragging the marker part under the ray; false if there is none.
+  grab(ray) {
+    const hit = this.pick(ray);
+    if (!hit) return false;
+    const ik = this.active.ik, chain = ik.chains[hit.index];
+    const m = this.gizmos()[hit.index];
+    const state = startDrag(hit.part, ray, m, m.scale, ray.forward);
+    if (!state) return false;
+    ik.focus = hit.index;
+    this.dragging = { ...state, index: hit.index, chain };
+    return true;
+  }
+
+  dragTo(ray) {
+    const g = this.dragging;
+    if (!g || !this.active?.ik) return;
+    const pose = dragPose(g, ray);
+    if (pose) this.active.ik.setTargetPose(g.chain, this.app.data, pose);
+  }
+
+  release() {
+    this.dragging = null;
+  }
+
+  // ---- panel ----
 
   render() {
     const robots = this.controllable();
     this.body.replaceChildren();
     this.readout = null;
+    this.errs = [];
     if (!robots.length) {
-      this.body.innerHTML = '<div class="hint">Nothing to drive: spawn a Unitree G1 (Robots › Humanoids), which walks under the GR00T policy.</div>';
+      this.body.innerHTML = '<div class="hint">Nothing to drive: spawn a robot, e.g. a Unitree G1 (Robots › Humanoids), which walks under the GR00T policy, or Garmi (mecanum base, two arms).</div>';
       return;
     }
-    const field = (label, control) => {
-      const row = document.createElement('label');
-      row.className = 'field';
-      row.append(Object.assign(document.createElement('span'), { textContent: label }), control);
+    const field = (label, ...controls) => {
+      const row = el('label', { className: 'field' }, el('span', { textContent: label }), ...controls);
       this.body.append(row);
-      return control;
+      return controls[0];
     };
-    const select = (options, value, onchange) => {
-      const s = document.createElement('select');
-      for (const [v, text] of options) s.append(new Option(text, v, false, v === value));
-      s.onchange = () => { onchange?.(s.value); s.blur(); };  // blur: keys drive again
-      s.disabled = options.length < 2;
-      return s;
-    };
-    field('Robot', select(
+    field('Robot', this.select(
       [['', 'none'], ...robots.map((r) => [r.prefix, `${r.prefix.slice(0, -1)} · ${r.label}`])],
       this.active?.prefix ?? '',
       (v) => { this.active = robots.find((r) => r.prefix === v) ?? null; this.render(); },
     ));
-    if (!this.active) return;
-    field('Controller', select([['groot', 'GR00T locomotion policy']], 'groot'));
-    field('Input', select([['keyboard', 'Keyboard']], 'keyboard'));
-    const keys = document.createElement('div');
-    keys.className = 'hint';
-    keys.innerHTML = '<kbd>W</kbd><kbd>S</kbd> forward/back · <kbd>A</kbd><kbd>D</kbd> sideways · '
-      + '<kbd>Q</kbd><kbd>E</kbd> turn · hold <kbd>R</kbd><kbd>F</kbd> height';
-    this.body.append(keys);
-    this.readout = document.createElement('div');
-    this.readout.className = 'readout';
-    this.body.append(this.readout);
+    const r = this.active;
+    if (!r) return;
+    // Controllers: any of them on, or none (e.g. GR00T off to pose a G1 by hand).
+    const chips = el('div', { className: 'chips' });
+    for (const [kind, label, title] of CONTROLLERS) {
+      const box = el('input', { type: 'checkbox', checked: !!r.use[kind] });
+      box.onchange = () => {
+        box.disabled = true;
+        // Policy: the one made for this robot, else the last picked, else the first.
+        const on = kind !== 'policy' ? box.checked
+          : box.checked && (defaultPolicy(r.key) || r.lastPolicy || POLICIES[0]?.id || '');
+        this.app.setUse(r, kind, on).finally(() => this.render());
+      };
+      chips.append(el('label', { className: 'chip' + (r.errors?.[kind] ? ' bad' : ''), title: r.errors?.[kind] ?? title }, box, el('span', { textContent: label })));
+    }
+    this.body.append(el('div', { className: 'field' }, el('span', { textContent: 'Controllers' }), chips));
+    const locos = locomotion(r);
+    if (locos.length) {
+      field('Input', this.select([['keyboard', 'Keyboard']], 'keyboard'));
+      const keys = el('div', { className: 'hint' });
+      keys.innerHTML = '<kbd>W</kbd><kbd>S</kbd> forward/back · ' + (locos.some((c) => c.drive.side) ? '<kbd>A</kbd><kbd>D</kbd> sideways · ' : '')
+        + '<kbd>Q</kbd><kbd>E</kbd> turn' + (locos.some((c) => 'height' in c) ? ' · hold <kbd>R</kbd><kbd>F</kbd> height' : '');
+      this.body.append(keys);
+      this.readout = el('div', { className: 'readout' });
+      this.body.append(this.readout);
+    }
+    if (r.use.policy || r.errors?.policy) this.renderPolicy(r);
+    if (r.use.base && r.base) this.renderBase(r.base);
+    if (r.use.ik && r.ik) this.renderIk(r.ik);
+  }
+
+  // Which trained policy runs (POLICIES in policy.js), and its state.
+  renderPolicy(r) {
+    const p = policyById(r.use.policy);
+    const box = this.section('policy', 'Policy', r.errors?.policy ? 'error' : p ? p.name.split(' · ')[0] : 'none');
+    const row = el('div', { className: 'field' }, el('span', { textContent: 'Model' }), el('div', { className: 'ctl' },
+      this.select([['', 'none'], ...POLICIES.map((q) => [q.id, q.name])], r.use.policy ?? '', (v) => {
+        if (v) r.lastPolicy = v;
+        this.app.setUse(r, 'policy', v).finally(() => this.render());
+      })));
+    box.append(row);
+    const hint = el('div', { className: 'hint' });
+    hint.textContent = (p ? `${p.about} ` : '') + 'Untick Policy to give the joints their own actuator gains back.';
+    box.append(hint);
+    if (r.errors?.policy) box.append(el('div', { className: 'error', textContent: r.errors.policy }));
+  }
+
+  // A foldable panel section: <details> with a summary of `title`, a short
+  // `status` and optional leading controls; its fold is remembered by `key`.
+  section(key, title, status, ...lead) {
+    const det = el('details', { className: 'ik', open: !this.folded.has(key) });
+    det.ontoggle = () => {
+      if (det.open) this.folded.delete(key); else this.folded.add(key);
+      try { localStorage.setItem(FOLDED, JSON.stringify([...this.folded])); } catch { /* no storage */ }
+    };
+    det.append(el('summary', { className: 'ik-head' }, ...lead, el('span', { textContent: title }),
+      el('span', { className: 'count', textContent: status })));
+    this.body.append(det);
+    return det;
+  }
+
+  num(value, step, onchange, title = '') {
+    const inp = el('input', { type: 'number', step, value: +(+value).toFixed(4), title });
+    inp.onchange = () => onchange(Number(inp.value) || 0);
+    return inp;
+  }
+
+  // The mobile-base setup of the driven robot (base.js).
+  renderBase(c) {
+    const cfg = c.config ?? {};
+    const box = this.section('base', 'Base', c.error ? 'error' : cfg.kind ? (c.config.kind === 'planar' ? 'planar' : `${cfg.wheels?.length ?? 0} wheels`) : 'none');
+    box.classList.add('base');
+    const row = (label, ...controls) => box.append(el('div', { className: 'field' }, el('span', { textContent: label }), el('div', { className: 'ctl' }, ...controls)));
+    const changed = () => { c.resolve(); c.reset(); this.render(); };
+    const { model } = c;
+    const T = (k) => this.app.mujoco.mjtObj[k].value;
+    const robotActs = [];
+    for (let a = 0; a < model.nu; a++) {
+      const n = this.app.mujoco.mj_id2name(model, T('mjOBJ_ACTUATOR'), a) ?? '';
+      if (n.startsWith(c.prefix)) robotActs.push([a, n.slice(c.prefix.length), BaseController.mode(model, a)]);
+    }
+    row('Kind', this.select(KINDS, cfg.kind ?? '', (v) => {
+      const auto = c.autoConfig();
+      c.config = { ...cfg, ...(auto.kind === v ? auto : {}), kind: v, auto: false };
+      if (v === 'wheels') { c.config.wheels ??= []; c.config.radius ??= 0.05; }
+      changed();
+    }));
+    if (!cfg.kind) {
+      box.append(el('div', { className: 'hint', textContent: 'No mobile base found in this robot; pick a kind to set one up.' }));
+    } else if (cfg.kind === 'planar') {
+      const pos = robotActs.filter(([, , m]) => m === 'position').map(([, n]) => [n, n]);
+      for (const k of ['x', 'y', 'yaw']) {
+        row(k, this.select([['', '—'], ...pos], cfg.planar?.[k] ?? '', (v) => { cfg.planar = { ...cfg.planar, [k]: v }; changed(); }));
+      }
+    } else {
+      const frees = [];
+      for (let j = 0; j < model.njnt; j++) {
+        if (model.jnt_type[j] === 0 && c.inRobot(model.jnt_bodyid[j])) frees.push(c.nameOf('mjOBJ_JOINT', j));
+      }
+      row('Base joint', this.select([['', 'root free joint'], ...frees.filter(Boolean).map((n) => [n, n])], cfg.base ?? '', (v) => { cfg.base = v; changed(); }));
+      const spin = robotActs.filter(([, , m]) => m === 'velocity' || m === 'motor').map(([, n, m]) => [n, `${n} (${m})`]);
+      const rollers = [['0', 'plain wheel'], ['1', 'rollers +45°'], ['-1', 'rollers −45°']];
+      (cfg.wheels ?? []).forEach((w, i) => {
+        row(`Wheel ${i + 1}`,
+          this.select([['', '—'], ...spin], w.actuator, (v) => { w.actuator = v; changed(); }),
+          this.select(rollers, String(w.roller ?? 0), (v) => { w.roller = Number(v); changed(); }),
+          this.button('✕', 'Remove this wheel', () => { cfg.wheels.splice(i, 1); changed(); }));
+      });
+      row('', this.button('+ Wheel', 'Add a driven wheel (a velocity servo or motor on its joint)', () => {
+        const used = new Set(cfg.wheels.map((w) => w.actuator));
+        cfg.wheels.push({ actuator: spin.find(([n]) => !used.has(n))?.[0] ?? '', roller: 0 });
+        changed();
+      }));
+      row('Radius', this.num(cfg.radius, 0.005, (v) => { cfg.radius = v; changed(); }, 'wheel radius (m)'));
+    }
+    if (cfg.kind) {
+      const d = cfg.drive ?? {};
+      row('Speeds', ...['forward', 'back', 'side', 'turn'].map((k) => this.num(d[k] ?? 0, 0.05,
+        (v) => { cfg.drive = { ...d, [k]: v }; changed(); }, `${k} (${k === 'turn' ? 'rad/s' : 'm/s'}) for the keys`)));
+      if (cfg.kind === 'planar') {
+        row('Accel', ...[0, 1, 2].map((i) => this.num(cfg.accel?.[i] ?? 1, 0.1, (v) => { cfg.accel[i] = v; changed(); }, 'acceleration limit (m/s², rad/s²)')));
+      }
+      if (cfg.kind === 'wheels') {
+        const grid = el('div', { className: 'gains' }, el('span'), ...['vx', 'vy', 'ωz'].map((t) => el('span', { textContent: t })));
+        for (const [k, title] of [['ff', 'feedforward'], ['kp', 'P gain'], ['ki', 'I gain'], ['iclamp', 'integral limit'], ['accel', 'acceleration limit (m/s², rad/s²)']]) {
+          grid.append(el('span', { textContent: k, title }), ...[0, 1, 2].map((i) => this.num(cfg[k]?.[i] ?? 0, 0.1, (v) => { cfg[k][i] = v; changed(); }, title)));
+        }
+        box.append(grid);
+        if (c.wheels?.some((w) => w.mode === 'motor')) row('Motor gain', this.num(cfg.kw ?? 1, 0.1, (v) => { cfg.kw = v; changed(); }, 'torque per rad/s of wheel speed error'));
+      }
+    }
+    if (c.error) box.append(el('div', { className: 'error', textContent: c.error }));
+    const note = el('span', { className: 'note', textContent: c.saved ? 'saved' : cfg.auto ? 'automatic' : '' });
+    box.append(el('div', { className: 'bar' },
+      this.button('Save', 'Use this base setup for every spawn of this robot (this browser)', () => { c.save(); this.render(); }),
+      this.button(c.hasDefaults ? 'Defaults' : 'Auto', c.hasDefaults ? 'Back to the built-in base setup' : 'Back to the setup found in the model',
+        () => { c.restoreDefaults(); c.reset(); this.render(); }),
+      this.button('Export', 'Copy the setup as JSON (for BASE_DEFAULTS in base.js)', () => {
+        const json = JSON.stringify({ [c.key]: c.config }, null, 2);
+        navigator.clipboard?.writeText(json).catch(() => {});
+        console.log(json);
+        note.textContent = 'copied (also in the console)';
+      }),
+      note));
+  }
+
+  select(options, value, onchange) {
+    const s = el('select');
+    for (const [v, text] of options) s.append(new Option(text, v, false, v === value));
+    s.onchange = () => { onchange?.(s.value); s.blur(); };  // blur: keys drive again
+    s.disabled = options.length < 2;
+    return s;
+  }
+
+  button(text, title, onclick) {
+    return el('button', { type: 'button', textContent: text, title, onclick: (e) => { e.preventDefault(); onclick(); } });
+  }
+
+  // The selected (double-clicked) body if it belongs to the driven robot.
+  selectedBody(ik) {
+    const b = this.app.perturb.body;
+    return b >= ik.bodies[0] && b < ik.bodies[1] ? b : -1;
+  }
+
+  renderIk(ik) {
+    const box = this.section('ik', 'IK chains', `${ik.chains.length}`);
+    const hint = el('div', { className: 'hint' });
+    hint.innerHTML = ik.chains.length
+      ? 'Drag a marker: arrows move along an axis, rings turn about it, the ball moves in the view plane · '
+        + '<kbd>G</kbd> gripper of the last one dragged. Pick bodies for tip/root by double-clicking them, then ◎.'
+      : 'No IK chains found in this robot: double-click the body to move (e.g. a hand), then + Chain.';
+    box.append(hint);
+
+    const changed = (cfg, keepTarget = false) => {
+      if (!keepTarget) ik.targets.delete(cfg.name);
+      ik.resolve();
+      this.render();
+    };
+    ik.chains.forEach((chain, i) => box.append(this.renderChain(ik, chain, i, changed)));
+
+    const bar = el('div', { className: 'bar' });
+    bar.append(
+      this.button('+ Chain', 'New IK chain: tip = the selected body, root = the robot\'s base', () => {
+        const names = new Set(ik.config.chains.map((c) => c.name));
+        let n = ik.config.chains.length + 1;
+        while (names.has(`chain${n}`)) n++;
+        const sel = this.selectedBody(ik);
+        const list = ik.bodyList();
+        const tip = sel >= 0 ? sel : list.at(-1)[0];
+        const path = ik.ancestors(tip);
+        ik.config.chains.push({
+          name: `chain${n}`, tip: ik.nameOf('mjOBJ_BODY', tip),
+          root: ik.nameOf('mjOBJ_BODY', path[Math.min(path.length - 1, 6)]),  // a few joints up, not the whole tree
+          site: '', offset: [0, 0, 0], locked: [], gripper: '',
+        });
+        ik.enabled = true;
+        changed(ik.config.chains.at(-1));
+      }),
+      this.button('Save', 'Use this IK setup for every spawn of this robot (this browser)', () => { ik.save(); this.render(); }),
+      this.button(ik.hasDefaults ? 'Defaults' : 'Auto', ik.hasDefaults ? 'Back to the built-in IK setup' : 'Back to the chains found in the model', () => { ik.restoreDefaults(); this.render(); }),
+      this.button('Export', 'Copy the setup as JSON (for IK_DEFAULTS in ik.js)', () => {
+        const json = JSON.stringify({ [ik.key]: ik.config }, null, 2);
+        navigator.clipboard?.writeText(json).catch(() => {});
+        console.log(json);
+        exported.textContent = 'copied (also in the console)';
+      }),
+    );
+    const exported = el('span', { className: 'note', textContent: ik.saved ? 'saved' : ik.config.auto ? 'automatic' : '' });
+    bar.append(exported);
+    box.append(bar);
+  }
+
+  renderChain(ik, chain, i, changed) {
+    const { cfg } = chain;
+    const key = this.active.prefix + cfg.name;
+    const det = el('details', { className: 'chain', open: !this.closedChains.has(key) });
+    det.ontoggle = () => (det.open ? this.closedChains.delete(key) : this.closedChains.add(key));
+    const err = el('span', { className: 'err' });
+    this.errs[i] = err;
+    det.append(el('summary', {},
+      el('span', { className: 'dot', style: `background:rgb(${(CHAIN_COLORS[i] ?? [0.5, 0.5, 0.5]).map((v) => v * 255).join(',')})` }),
+      el('span', { className: 'title', textContent: (cfg.tip.startsWith(cfg.name) ? cfg.tip : `${cfg.name} · ${cfg.tip}`) + (cfg.site ? ` › ${cfg.site}` : '') }), err));
+    const row = (label, ...controls) => det.append(el('div', { className: 'field' }, el('span', { textContent: label }), el('div', { className: 'ctl' }, ...controls)));
+
+    const pick = (what) => this.button('◎', `${what} = the selected (double-clicked) body`, () => {
+      const b = this.selectedBody(ik);
+      if (b < 0) { alert('Double-click a body of this robot first.'); return; }
+      cfg[what] = ik.nameOf('mjOBJ_BODY', b);
+      if (what === 'tip') cfg.site = '';
+      if (what === 'tip' && !ik.ancestors(b).some((a) => ik.nameOf('mjOBJ_BODY', a) === cfg.root)) cfg.root = cfg.tip;
+      changed(cfg);
+    });
+    const bodies = ik.bodyList();
+    row('Tip', this.select(bodies.map(([, n]) => [n, n]), cfg.tip, (v) => {
+      cfg.tip = v;
+      cfg.site = '';
+      const anc = ik.ancestors(ik.id('mjOBJ_BODY', v)).map((b) => ik.nameOf('mjOBJ_BODY', b));
+      if (!anc.includes(cfg.root)) cfg.root = v;
+      changed(cfg);
+    }), pick('tip'));
+    const tipId = ik.id('mjOBJ_BODY', cfg.tip);
+    const anc = tipId >= 0 ? ik.ancestors(tipId).map((b) => ik.nameOf('mjOBJ_BODY', b)) : [];
+    row('Root', this.select(anc.map((n) => [n, n]), cfg.root, (v) => { cfg.root = v; changed(cfg); }), pick('root'));
+    // The tip frame: a site fixed to the tip body (a TCP), or the body plus an offset.
+    const sites = tipId >= 0 ? ik.tipSites(tipId) : [];
+    row('TCP site', this.select([['', sites.length ? 'none: body + offset' : 'none on this body'], ...sites.map(([, n]) => [n, n])],
+      cfg.site ?? '', (v) => { cfg.site = v; changed(cfg); }));
+    if (!cfg.site) {
+      const offset = cfg.offset.map((v, k) => {
+        const inp = el('input', { type: 'number', step: 0.01, value: v, title: 'xyz'[k] + ' in the tip body frame (m)' });
+        inp.onchange = () => { cfg.offset[k] = Number(inp.value) || 0; changed(cfg); };
+        return inp;
+      });
+      row('Offset', ...offset);
+    }
+    const acts = [['', 'none']];
+    const chainActs = new Set(chain.active?.map((j) => j.act));
+    for (let a = 0; a < ik.model.nu; a++) {
+      const n = this.app.mujoco.mj_id2name(ik.model, this.app.mujoco.mjtObj.mjOBJ_ACTUATOR.value, a) ?? '';
+      if (n.startsWith(ik.prefix) && !chainActs.has(a)) acts.push([n.slice(ik.prefix.length), n.slice(ik.prefix.length)]);
+    }
+    row('Gripper', this.select(acts, cfg.gripper ?? '', (v) => { cfg.gripper = v; changed(cfg, true); }),
+      ...(chain.gripper >= 0 ? [this.button('open/close', 'Toggle the gripper (G)', () => ik.toggleGripper(chain, this.app.data))] : []));
+
+    if (chain.error) det.append(el('div', { className: 'error', textContent: chain.error }));
+    const joints = el('div', { className: 'joints' });
+    for (const jt of chain.joints) {
+      const can = jt.status === 'ok' || jt.status === 'locked';
+      const box = el('input', { type: 'checkbox', checked: jt.status === 'ok', disabled: !can });
+      box.onchange = () => {
+        cfg.locked = box.checked ? cfg.locked.filter((n) => n !== jt.name) : [...cfg.locked, jt.name];
+        changed(cfg, true);
+      };
+      joints.append(el('label', { className: can ? '' : 'off', title: jt.status },
+        box, el('span', { textContent: jt.name }), el('span', { className: 'why', textContent: jt.status === 'ok' ? '' : jt.status })));
+    }
+    det.append(joints);
+    det.append(el('div', { className: 'bar' },
+      this.button('Reset target', 'Put the marker back on the tip', () => ik.targets.delete(cfg.name)),
+      this.button('Rename', 'Rename this chain', () => {
+        const n = prompt('Chain name', cfg.name)?.trim();
+        if (!n || ik.config.chains.some((c) => c.name === n)) return;
+        ik.targets.delete(cfg.name);
+        cfg.name = n;
+        changed(cfg);
+      }),
+      this.button('Remove', 'Delete this chain', () => {
+        ik.config.chains.splice(i, 1);
+        ik.targets.delete(cfg.name);
+        ik.focus = 0;
+        changed(cfg);
+      })));
+    return det;
   }
 
   // Every frame: the active robot gets the input's command, the others stand.
   tick(dt) {
     const robots = this.controllable();
-    this.input.enabled = !!this.active;
-    const { cmd, dh } = this.input.read(dt);
+    const locos = locomotion(this.active);
+    this.input.enabled = locos.length > 0;
     for (const r of robots) {
-      const c = r.groot;
-      if (r === this.active) {
+      const mine = r === this.active ? locos : [];
+      for (const c of [r.policy, r.base]) {
+        if (!c) continue;
+        if (!mine.includes(c)) { c.cmd = [0, 0, 0]; continue; }
+        const { cmd, dh } = this.input.read(dt, c.drive);
         c.cmd = cmd;
-        c.height = Math.min(HEIGHT_RANGE[1], Math.max(HEIGHT_RANGE[0], c.height + dh));
-      } else {
-        c.cmd = [0, 0, 0];
+        if ('height' in c) c.height = Math.min(HEIGHT_RANGE[1], Math.max(HEIGHT_RANGE[0], c.height + dh));
       }
     }
-    if (this.readout && this.active) {
-      const c = this.active.groot;
-      const text = `vx ${c.cmd[0].toFixed(1)}  vy ${c.cmd[1].toFixed(1)}  ωz ${c.cmd[2].toFixed(1)}  height ${c.height.toFixed(2)} m`;
+    const c = locos[0];
+    if (this.readout && c) {
+      const f = (v) => v.toFixed(2).padStart(5);
+      let text = `cmd  vx ${f(c.cmd[0])}  vy ${f(c.cmd[1])}  ωz ${f(c.cmd[2])}`;
+      if ('height' in c) text += `  height ${c.height.toFixed(2)} m`;
+      if (c.measured) text += `\nmeas vx ${f(c.measured[0])}  vy ${f(c.measured[1])}  ωz ${f(c.measured[2])}`;
       if (this.readout.textContent !== text) this.readout.textContent = text;
     }
+    const ik = this.active?.ik;
+    this.errs.forEach((span, i) => {
+      const e = ik?.enabled && ik.chains[i]?.err;
+      const text = e ? `${(e[0] * 1000).toFixed(0)} mm · ${(e[1] * 57.3).toFixed(0)}°` : '';
+      if (span.textContent !== text) span.textContent = text;
+    });
   }
 }

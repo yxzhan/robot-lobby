@@ -52,9 +52,10 @@ const DOF_VEL_SCALE = 0.05;
 const CMD_SCALE = [2.0, 2.0, 0.25];
 const FRAME = 86, HISTORY = 6;
 
-// The robot file this controller drives: a spawned asset whose path ends in
-// mujoco_menagerie/<G1_MODEL> gets a GrootController (main.js).
-export const G1_MODEL = 'unitree_g1/g1.xml';
+// Robot files the policy is on for by default: every menagerie G1 variant
+// (its POLICIES entry in policy.js). Any robot can switch it on in the
+// Teleop panel; bind() fails if the G1's joints and actuators are not there.
+export const G1_MODELS = /(^|\/)mujoco_menagerie\/unitree_g1\/[^/]+\.xml$/;
 
 // {balance, walk} sessions. `source(name)` returns the .onnx bytes or a URL.
 export async function loadGrootPolicy(ort, source) {
@@ -72,6 +73,8 @@ export class GrootController {
   constructor(policy, prefix = '') {
     this.policy = policy;
     this.prefix = prefix;
+    this.name = 'GR00T locomotion policy';
+    this.drive = { forward: 0.5, back: 0.3, side: 0.3, turn: 0.6 };  // keyboard speeds
     this.cmd = [0, 0, 0];  // vx, vy (m/s), yaw rate (rad/s)
     this.height = 0.74;    // commanded base height
     this.reset();
@@ -94,13 +97,20 @@ export class GrootController {
     this.qadr = new Int32Array(N);
     this.vadr = new Int32Array(N);
     this.act = new Int32Array(N);
+    this.driven = new Set();  // the policy's joints (legs + waist), off limits to arm IK
+    const found = [];
+    for (let i = 0; i < N; i++) { id(T.mjOBJ_JOINT, JOINTS[i]); id(T.mjOBJ_ACTUATOR, JOINTS[i]); }  // all there, or throw first
+    this.model = model;
+    this.savedGains = found;  // [actuator, gainprm[0], biasprm[0..2]] to give back in unbind()
     for (let i = 0; i < N; i++) {
       const j = id(T.mjOBJ_JOINT, JOINTS[i]);
+      if (i < NA) this.driven.add(j);
       this.qadr[i] = model.jnt_qposadr[j];
       this.vadr[i] = model.jnt_dofadr[j];
       const a = id(T.mjOBJ_ACTUATOR, JOINTS[i]);
       this.act[i] = a;
       const gain = model.actuator_gainprm, bias = model.actuator_biasprm;  // mjNGAIN = mjNBIAS = 10
+      found.push([a, gain[10 * a], bias[10 * a], bias[10 * a + 1], bias[10 * a + 2]]);
       gain[10 * a] = KP[i];
       bias[10 * a] = 0;
       bias[10 * a + 1] = -KP[i];
@@ -109,6 +119,22 @@ export class GrootController {
     const base = id(T.mjOBJ_JOINT, 'floating_base_joint');
     this.baseQ = model.jnt_qposadr[base];
     this.baseV = model.jnt_dofadr[base];
+  }
+
+  // Gives the actuators their own gains back (the policy is switched off).
+  unbind() {
+    const gain = this.model?.actuator_gainprm, bias = this.model?.actuator_biasprm;
+    for (const [a, g, b0, b1, b2] of this.savedGains ?? []) {
+      gain[10 * a] = g;
+      bias[10 * a] = b0; bias[10 * a + 1] = b1; bias[10 * a + 2] = b2;
+    }
+    this.savedGains = null;
+    this.driven = new Set();
+  }
+
+  // This controller's name if it drives joint `j` (for ik.js), else null.
+  owns(j) {
+    return this.driven?.has(j) ? 'GR00T' : null;
   }
 
   // Puts the joints in the default pose and holds them there (for a fresh spawn).
