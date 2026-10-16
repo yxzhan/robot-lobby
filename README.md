@@ -44,21 +44,22 @@ Picking uses `mj_ray` on the physics world, so it hits collision geoms.
   `package.json`, laid out as `<category>/<source>/<model>/`: the category
   (`environments`, `robots`, `objects`) is the panel tab, the source
   (`digital_twin`, `mujoco_menagerie`, `robocasa`, …) where the models come
-  from. A model is a directory with a `scene.xml`. `npm install` (or
-  `node scripts/vendor.mjs`) links the library as `public/mjcf_assets` and
-  indexes it into `public/assets.json`; each entry's `main` is the model file
-  `scene.xml` includes, which is what gets spawned (so the scene's own floor
-  and lights stay out), while a `scene.xml` without an `<include>` (a whole
-  environment) is spawned as is. Within a tab, models are listed under their
+  from. Naming convention: a model directory `<name>/` holds `<name>.xml`,
+  the file that gets spawned, and optionally `<name>.png`, its screenshot;
+  directories without `<name>.xml` are skipped with a warning. Upstream
+  `mujoco_menagerie` keeps its own names, so it is indexed from its README's
+  "Menagerie Models" table: one model per row, spawning the model file the
+  row's scene includes (so the scene's floor and lights stay out), with the
+  row's image as screenshot; directories the table does not list go under
+  "Others".
+  `npm install` (or `node scripts/vendor.mjs`) links the library as
+  `public/mjcf_assets` and indexes it into `public/assets.json`. Within a tab, models are listed under their
   source, `digital_twin` first and the others by name; menagerie robots are
-  split by the sections of its README's "Menagerie Models" table
-  (Humanoids, Quadrupeds, Arms, …). An `asset.json` in a model directory,
-  e.g. `{"main": "mug.xml", "thumbnail": "mug.png", "group": "Kitchen"}`,
-  overrides the entry file, screenshot and group. Re-run
+  split by the table's sections (Humanoids, Quadrupeds, Arms, …); `{"group": "…"}` in an `asset.json` in
+  the model directory overrides the group. Re-run
   `node scripts/vendor.mjs` after adding models.
 - **Thumbnails** — `python3 scripts/thumbnails.py` (after `vendor.mjs`)
-  compresses each model's screenshot (the image in its directory named like
-  its entry file, or `"thumbnail"` in `asset.json`) into
+  compresses each model's screenshot (`<name>.png`) into
   `public/thumbs/<category>/<source>/<model>.webp` (≤ 320×240; the 4K
   menagerie renders go from ~84 MB to ~0.4 MB). The originals are untouched;
   models without a screenshot show their initials.
@@ -69,7 +70,7 @@ Picking uses `mj_ray` on the physics world, so it hits collision geoms.
   to group 3. Models without a screenshot get one from
   `node scripts/render_previews.mjs [category[/source]…]`, which spawns each
   alone in headless Chrome (needs the page served, e.g. `npm start`) and
-  writes `preview.png` next to it.
+  writes `<name>.png` next to it.
 - **Loading** — Spawning fetches only the files it
   references — the `<include>` tree, then the mesh/texture/hfield/skin files
   resolved via `<compiler meshdir/texturedir/assetdir>` — into MuJoCo's

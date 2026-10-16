@@ -24,61 +24,94 @@ console.log('vendored', Object.keys(copies).length, 'files into public/vendor');
 // public/mjcf_assets (symlink; the server follows it) and indexed into
 // public/assets.json for the asset panel. <category> is the panel tab
 // (environments, robots, objects); <source> where the models come from
-// (digital_twin, mujoco_menagerie, robocasa, …). A model is a directory with
-// a scene.xml (or an asset.json naming its entry file).
+// (digital_twin, mujoco_menagerie, robocasa, …).
 //
-// Each entry: {name, dir, main, category, source, group, screenshot}, where
-// `dir` is the model directory relative to public/ and `main` the file to
-// spawn in it: the model file scene.xml includes (so the scene's own floor
-// and lights stay out of the shared world), or scene.xml itself if it
-// includes none (a whole environment). `group` is the header the panel lists
-// it under: the section of menagerie's README for menagerie models, the
-// source otherwise. `screenshot` (relative to `dir`) is the image that
-// scripts/thumbnails.py turns into the panel thumbnail: the one named like
-// `main` or the directory, else one with "preview" in its name, else the
-// shortest name. An asset.json in the model directory, e.g.
-// {"main": "mug.xml", "thumbnail": "mug.png", "group": "Kitchen"},
-// overrides these.
+// Naming convention: model directory <name>/ holds <name>.xml (the file that
+// gets spawned) and <name>.png (its screenshot, optional; scripts/
+// thumbnails.py makes the panel thumbnail from it). Directories without
+// <name>.xml are skipped with a warning. The one exception is upstream
+// mujoco_menagerie, which keeps its own file names and is indexed from its
+// README's model table instead (menagerieModels).
+//
+// Each entry: {name, dir, main, category, source, group, screenshot}, `dir`
+// relative to public/, `screenshot` relative to `dir`. `group` is the header
+// the panel lists it under: the section of menagerie's README (or "Others")
+// for menagerie models, the source otherwise; "group" in an optional
+// asset.json in the model directory overrides it.
 //
 // Order (the panel keeps it): digital_twin first, then the other sources by
-// name; menagerie models by README section; then by name.
+// name; menagerie models by README section, "Others" last; then by name.
 const LIBRARY = 'mjcf_assets';
 const CATEGORIES = { environments: 'environment', robots: 'robot', objects: 'object' };
 const FIRST_SOURCES = ['digital_twin'];
+const MENAGERIE = 'mujoco_menagerie';
 
-function pickScreenshot(path, main, name) {
-  const images = readdirSync(path).filter((f) => /\.(png|jpe?g|webp)$/i.test(f));
-  const stem = (f) => f.replace(/\.[^.]*$/, '').toLowerCase();
-  return images.find((f) => stem(f) === stem(main)) ?? images.find((f) => stem(f) === name.toLowerCase())
-    ?? images.find((f) => stem(f).includes('preview'))
-    ?? images.sort((a, b) => a.length - b.length || a.localeCompare(b))[0];
-}
+const includedFile = (path) => readFileSync(path, 'utf8').match(/<include\s+file="([^"]+\.xml)"/)?.[1] ?? null;
 
 // Menagerie's README lists its models by kind ("**Humanoids.**", "**Arms.**",
-// …) in the "## Menagerie Models" section, each row linking to
-// <model dir>/<scene>.xml: model dir -> [group, rank of the group]. A model
-// listed twice (e.g. an arm whose gripper also has its own row) keeps its
-// first group.
-function readmeGroups(dir) {
-  const groups = new Map();
-  const readme = `${dir}/README.md`;
-  if (!existsSync(readme)) return groups;
+// …) in the "## Menagerie Models" table; each row links to <dir>/<file>.xml
+// (a scene, or for a few models the model itself: franka_emika_panda/
+// hand.xml, realsense_d435i/d435i.xml) and shows assets/<…>.png. Returns the
+// rows in order: [{dir, file, img, group, rank (of the group)}].
+function readmeRows(sourceDir) {
+  const readme = `${sourceDir}/README.md`;
+  if (!existsSync(readme)) return [];
   const text = readFileSync(readme, 'utf8');
   const start = text.indexOf('## Menagerie Models');
-  if (start < 0) return groups;
+  if (start < 0) return [];
+  const rows = [];
   let group = null, rank = -1;
   for (const line of text.slice(start).split('\n').slice(1)) {
     if (line.startsWith('## ')) break;
     const heading = line.match(/^\*\*(.+?)\.?\*\*\s*$/);
     if (heading) { group = heading[1]; rank++; continue; }
-    const model = group && line.match(/mujoco_menagerie\/main\/([^/]+)\//)?.[1];
-    if (model && !groups.has(model)) groups.set(model, [group, rank]);
+    const link = group && line.match(/mujoco_menagerie\/main\/([^/]+)\/([^'"]+\.xml)/);
+    if (link) rows.push({ dir: link[1], file: link[2], img: line.match(/<img src='([^']+)'/)?.[1], group, rank });
   }
-  return groups;
+  return rows;
+}
+
+// Menagerie keeps upstream file names, so its models come from the README
+// table, one per row: the entry is the model file the linked scene includes
+// (or the linked file itself if it includes none), the screenshot the row's
+// image. A directory listed twice (an arm and its gripper) gives a second
+// model named <dir>_<file>. Directories the table does not list but that
+// have a scene.xml including a model go under "Others".
+function menagerieModels(sourceDir) {
+  const models = [], listed = new Set();
+  for (const row of readmeRows(sourceDir)) {
+    const dir = `${sourceDir}/${row.dir}`, linked = `${dir}/${row.file}`;
+    if (!existsSync(linked)) { console.warn(`skipping ${linked}: listed in the README but missing`); continue; }
+    const main = includedFile(linked) ?? row.file;
+    const name = listed.has(row.dir) ? `${row.dir}_${row.file.replace(/\.xml$/, '').replace(/^scene_?/, '') || 'scene'}` : row.dir;
+    listed.add(row.dir);
+    const screenshot = row.img && existsSync(`${sourceDir}/${row.img}`) ? `../${row.img}` : undefined;
+    models.push({ name, dir, main, group: row.group, rank: row.rank, screenshot });
+  }
+  for (const name of subdirs(sourceDir)) {
+    const dir = `${sourceDir}/${name}`, scene = `${dir}/scene.xml`;
+    const main = !listed.has(name) && existsSync(scene) && includedFile(scene);
+    if (!main) continue;  // listed, or not a model directory (assets/, test/, …)
+    const shot = [`${name}.png`, main.replace(/\.xml$/, '.png')].find((f) => existsSync(`${dir}/${f}`));
+    models.push({ name, dir, main, group: 'Others', rank: Infinity, screenshot: shot });
+  }
+  return models;
 }
 
 const subdirs = (dir) => readdirSync(dir, { withFileTypes: true })
   .filter((d) => d.isDirectory() && !d.name.startsWith('.')).map((d) => d.name);
+
+// Models following the naming convention: <name>/<name>.xml (+ <name>.png).
+function conventionModels(sourceDir, source) {
+  const models = [];
+  for (const name of subdirs(sourceDir)) {
+    const dir = `${sourceDir}/${name}`;
+    if (!existsSync(`${dir}/${name}.xml`)) { console.warn(`skipping ${dir}: no ${name}.xml`); continue; }
+    const screenshot = existsSync(`${dir}/${name}.png`) ? `${name}.png` : undefined;
+    models.push({ name, dir, main: `${name}.xml`, group: source, rank: 0, screenshot });
+  }
+  return models;
+}
 
 function indexLibrary() {
   if (!existsSync(LIBRARY)) {
@@ -95,19 +128,14 @@ function indexLibrary() {
     if (!category) { console.warn(`skipping ${LIBRARY}/${catDir}: not one of ${Object.keys(CATEGORIES)}`); continue; }
     for (const source of subdirs(`${LIBRARY}/${catDir}`)) {
       const sourceDir = `${LIBRARY}/${catDir}/${source}`;
-      const groups = readmeGroups(sourceDir);
-      for (const name of subdirs(sourceDir)) {
-        const dir = `${sourceDir}/${name}`;
-        const scene = `${dir}/scene.xml`, meta = `${dir}/asset.json`;
+      const found = source === MENAGERIE ? menagerieModels(sourceDir) : conventionModels(sourceDir, source);
+      for (const { name, dir, main, group, rank, screenshot } of found) {
+        const meta = `${dir}/asset.json`;
         const over = existsSync(meta) ? JSON.parse(readFileSync(meta, 'utf8')) : {};
-        if (!existsSync(scene) && !over.main) continue;
-        const included = existsSync(scene) && readFileSync(scene, 'utf8').match(/<include\s+file="([^"]+\.xml)"/)?.[1];
-        const main = over.main ?? included ?? 'scene.xml';
-        const m = { name, dir, main, category, source, group: over.group ?? groups.get(name)?.[0] ?? source };
-        const shot = over.thumbnail ?? pickScreenshot(dir, main, name);
-        if (shot) m.screenshot = shot;
+        const m = { name, dir, main, category, source, group: over.group ?? group };
+        if (screenshot) m.screenshot = screenshot;
         m.rank = [FIRST_SOURCES.includes(source) ? FIRST_SOURCES.indexOf(source) : FIRST_SOURCES.length, source,
-                  over.group ? -1 : groups.get(name)?.[1] ?? Infinity, m.group, name];
+                  over.group ? -1 : rank, m.group, name];
         models.push(m);
       }
     }

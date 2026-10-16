@@ -4,12 +4,14 @@ free-floating assets.
 RoboCasa's object MJCFs (robocasa/models/assets/objects/{lightwheel,objaverse}/
 <category>/<instance>/model.xml) have no joint (RoboCasa adds one in Python),
 are centered on their bounding box, and keep their collision geoms in group
-0. For each picked category this copies one instance and writes object.xml,
-a copy of model.xml with:
+0. For each picked category this copies one instance into <name>/ and writes
+<name>.xml (the naming convention of scripts/vendor.mjs), a copy of
+model.xml with:
   - a free joint on the outer body, raised so its bounding box (the reg_bbox
     geom) sits on z = 0,
   - collision geoms moved to group 3, which the viewer does not draw,
-and an asset.json naming object.xml as the entry file.
+and an asset.json recording where it came from. Screenshots (<name>.png)
+come from scripts/render_previews.mjs.
 
     python3 scripts/import_robocasa.py [/path/to/robocasa]
     node scripts/vendor.mjs   # re-index
@@ -87,10 +89,9 @@ def main():
     if dst.exists():
       shutil.rmtree(dst)
     shutil.copytree(inst, dst)
-    convert(dst / 'model.xml', name).write(dst / 'object.xml', encoding='unicode')
+    convert(dst / 'model.xml', name).write(dst / f'{name}.xml', encoding='unicode')
     (dst / 'model.xml').unlink()
     (dst / 'asset.json').write_text(json.dumps({
-        'category': 'object', 'main': 'object.xml',
         'source': f'robocasa {src}/{cat}/{inst.name}',
     }, indent=1) + '\n')
     done.append((name, size(dst)))

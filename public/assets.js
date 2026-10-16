@@ -169,12 +169,13 @@ export class AssetPanel {
     this.pick();
   }
 
-  // The spawn point under the pointer, on the plane at the spawn height (so
-  // the marker stays under the pointer when raised).
+  // The spawn point: the floor point under the pointer, raised to the spawn
+  // height (changing the height moves only z; the pole marks the floor point).
   pick() {
     const d = this.drag;
     const overCanvas = document.elementFromPoint(d.x, d.y) === this.app.canvas;
-    d.pos = overCanvas ? this.app.pickFloor(d.x, d.y, this.height) : null;
+    const floor = overCanvas ? this.app.pickFloor(d.x, d.y) : null;
+    d.pos = floor && [floor[0], floor[1], this.height];
     d.ghost.classList.toggle('placing', !!d.pos);
     this.show();
   }

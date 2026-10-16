@@ -4,7 +4,7 @@
   "description": "MuJoCo WASM physics rendered with Filament.js",
   "scripts": {
     "postinstall": "node scripts/vendor.mjs",
-    "start": "python3 scripts/serve.py 4004"
+    "start": "python3 scripts/serve.py 4006"
   },
   "license": "ISC",
   "dependencies": {

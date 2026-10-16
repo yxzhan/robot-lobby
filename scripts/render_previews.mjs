@@ -1,7 +1,10 @@
-// Renders a preview.png for every asset (of the given categories or
-// <category>/<source>es of mjcf_assets/) that has no screenshot yet, with the viewer itself in headless Chrome: each asset is
-// spawned alone, framed by its collision geoms' bounds, and captured.
-// scripts/thumbnails.py then turns the previews into panel thumbnails.
+// Renders <name>/<name>.png (the naming convention in scripts/vendor.mjs)
+// for every asset (of the given categories or <category>/<source>es of
+// mjcf_assets/) that has no screenshot yet, with the viewer itself in
+// headless Chrome: each asset is spawned alone, framed by its collision
+// geoms' bounds, and captured.
+// Re-run node scripts/vendor.mjs to pick them up; scripts/thumbnails.py
+// then turns them into panel thumbnails.
 //
 //   npm start &                                   # serves public/ on :4000
 //   node scripts/render_previews.mjs [filter…]    # e.g. objects, robots/digital_twin; default: all
@@ -41,7 +44,7 @@ for (const m of JSON.parse(readFileSync(index, 'utf8'))) {
   // where mjcf_assets is a symlink to the one next to package.json).
   const where = m.dir.split('/').slice(1, 3).join('/');
   if (filters.length && !filters.some((f) => where === f || where.startsWith(`${f}/`))) continue;
-  todo.push({ name: m.name, rel: `${m.dir}/${m.main}`, out: join(m.dir, 'preview.png') });
+  todo.push({ name: m.name, rel: `${m.dir}/${m.main}`, out: join(m.dir, `${m.name}.png`) });
 }
 console.log(`${todo.length} assets to render`);
 if (!todo.length) process.exit(0);
