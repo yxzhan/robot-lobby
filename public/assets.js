@@ -1,7 +1,8 @@
-// The asset panel: the models of every library index (scripts/vendor.mjs)
-// under three tabs, environments / robots / objects, with a name filter;
-// within a tab, models with a `group` (menagerie's README sections) are listed
-// under foldable group headers.
+// The asset panel: the models of the library index (public/assets.json,
+// written by scripts/vendor.mjs from mjcf_assets/) under three tabs,
+// environments / robots / objects, with a name filter; within a tab, models
+// are listed under foldable group headers (their source, or menagerie's
+// README sections), in the index's order.
 // An item is spawned by dragging it onto the floor: while dragging, a marker
 // on the floor shows the spawn point and heading, which starts out along the
 // world +x axis and turns in 15° steps with the mouse wheel or Q/E; Shift+wheel or
@@ -10,27 +11,23 @@
 
 export const CATEGORIES = [['environment', 'Environments'], ['robot', 'Robots'], ['object', 'Objects']];
 
-// Libraries: [index name (public/<name>.json, served at public/<name>/), label].
-export async function loadAssets(libraries) {
-  const assets = [];
-  for (const [lib, label] of libraries) {
-    try {
-      const res = await fetch(`${lib}.json`);
-      if (!res.ok) continue;
-      for (const m of await res.json()) {
-        assets.push({
-          name: m.name, rel: `${lib}/${m.name}/${m.main}`, lib: label, category: m.category ?? 'robot',
-          group: m.group ?? null,  // e.g. menagerie's README sections: Humanoids, Arms, …
-          // Written by scripts/thumbnails.py from the model's screenshot.
-          thumb: m.screenshot ? `thumbs/${lib}/${m.name}.webp` : null,
-        });
-      }
-    } catch (err) {
-      console.warn(`no ${lib} index`, err);
-    }
+// The library index; `rel` is the file to spawn, relative to public/.
+export async function loadAssets(index = 'assets.json') {
+  try {
+    const res = await fetch(index);
+    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+    return (await res.json()).map((m) => ({
+      name: m.name, rel: `${m.dir}/${m.main}`, lib: m.source, category: m.category, group: m.group ?? null,
+      thumb: m.screenshot ? thumbPath(m) : null,  // written by scripts/thumbnails.py
+    }));
+  } catch (err) {
+    console.warn(`no asset index (${index}): run node scripts/vendor.mjs`, err);
+    return [];
   }
-  return assets;
 }
+
+// Where scripts/thumbnails.py puts a model's thumbnail (same rule there).
+export const thumbPath = (m) => `thumbs/${m.category}/${m.source}/${m.name}.webp`;
 
 const STEP = Math.PI / 12, HEIGHT_STEP = 0.05, MAX_HEIGHT = 5;
 
@@ -120,7 +117,7 @@ export class AssetPanel {
       const li = document.createElement('li');
       li.className = 'empty';
       li.textContent = q ? 'No match.'
-        : this.tab === 'object' ? 'No objects yet: put models in my_objects/ (or give one an asset.json with "category": "object") and re-run node scripts/vendor.mjs.'
+        : this.tab === 'object' ? 'No objects yet: put models in mjcf_assets/objects/<source>/ and re-run node scripts/vendor.mjs.'
         : 'Nothing here.';
       this.list.append(li);
     }

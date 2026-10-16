@@ -1,4 +1,5 @@
-"""Copies RoboCasa kitchen objects into my_objects/ as free-floating assets.
+"""Copies RoboCasa kitchen objects into mjcf_assets/objects/robocasa/ as
+free-floating assets.
 
 RoboCasa's object MJCFs (robocasa/models/assets/objects/{lightwheel,objaverse}/
 <category>/<instance>/model.xml) have no joint (RoboCasa adds one in Python),
@@ -8,7 +9,7 @@ a copy of model.xml with:
   - a free joint on the outer body, raised so its bounding box (the reg_bbox
     geom) sits on z = 0,
   - collision geoms moved to group 3, which the viewer does not draw,
-and an asset.json putting it in the asset panel's Objects tab.
+and an asset.json naming object.xml as the entry file.
 
     python3 scripts/import_robocasa.py [/path/to/robocasa]
     node scripts/vendor.mjs   # re-index
@@ -21,7 +22,7 @@ import sys
 import xml.etree.ElementTree as ET
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-OUT = ROOT / 'my_objects'
+OUT = ROOT / 'mjcf_assets' / 'objects' / 'robocasa'
 MAX_BYTES = 15 * 2**20  # skip instances bigger than this, try the next one
 
 # (source, category); the asset is named after the category, suffixed with
@@ -73,7 +74,7 @@ def main():
   cats = {}
   for src, cat in PICKS:
     cats.setdefault(cat, []).append(src)
-  OUT.mkdir(exist_ok=True)
+  OUT.mkdir(parents=True, exist_ok=True)
   done = []
   for src, cat in PICKS:
     name = cat if len(cats[cat]) == 1 or src == 'objaverse' else f'{cat}_{src}'

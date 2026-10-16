@@ -1007,14 +1007,12 @@ try {
   (function drawGizmo() { gizmo.draw(); requestAnimationFrame(drawGizmo); })();
   window.app = app;  // handy for poking at it from devtools
 
-  // Model library indexes written by scripts/vendor.mjs; absent if the
-  // library is not checked out.
-  const assets = await loadAssets([
-    // In this order in the asset panel: your own robots first.
-    ['my_robot', 'my_robot'], ['menagerie', 'mujoco_menagerie'], ['my_environment', 'my_environment'], ['my_objects', 'my_objects'],
-  ]);
+  // The model library index written by scripts/vendor.mjs (empty without
+  // mjcf_assets/).
+  const assets = await loadAssets();
 
-  // Asset paths (`rel`) are under public/: '<library>/<model>/<file>.xml'.
+  // Asset paths (`rel`) are under public/:
+  // 'mjcf_assets/<category>/<source>/<model>/<file>.xml'.
   // Every rebuild writes the robots' files into a fresh MuJoCo FS, so keep
   // them in memory.
   const fetched = new Map();
@@ -1163,7 +1161,7 @@ try {
   async function makeRobot(rel, label, pos, yaw, progress) {
     const visual = await robotVisual(rel, label, progress);
     const robot = { label, visual, prefix: `r${nextId++}/`, pos, yaw };
-    if (rel === `menagerie/${G1_MODEL}`) {
+    if (rel.endsWith(`/mujoco_menagerie/${G1_MODEL}`)) {
       const policy = await grootPolicy(progress);
       if (policy) robot.groot = new GrootController(policy, robot.prefix);
     }

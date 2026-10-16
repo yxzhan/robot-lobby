@@ -20,23 +20,32 @@ for (const [from, to] of Object.entries(copies)) {
 }
 console.log('vendored', Object.keys(copies).length, 'files into public/vendor');
 
-// Model libraries checked out next to package.json: each is exposed as
-// public/<name> (symlink; http.server follows it) and its models are listed
-// in public/<name>.json for the asset panel, one entry per model directory
-// with a scene.xml.
+// The model library: mjcf_assets/<category>/<source>/<model>/, exposed as
+// public/mjcf_assets (symlink; the server follows it) and indexed into
+// public/assets.json for the asset panel. <category> is the panel tab
+// (environments, robots, objects); <source> where the models come from
+// (digital_twin, mujoco_menagerie, robocasa, …). A model is a directory with
+// a scene.xml (or an asset.json naming its entry file).
 //
-// `main` is the model file scene.xml includes: spawning that instead of the
-// scene keeps the scene's own floor and lights out of the shared world. A
-// scene.xml without includes (a whole environment, say) is spawned as is.
-//
-// `category` (the asset panel tab: environment, robot or object) is the
-// library's default, or for 'auto' "robot" if scene.xml includes a model file
-// and "environment" otherwise. `screenshot` is the image in the model
-// directory that scripts/thumbnails.py turns into the panel thumbnail: the one
-// named like `main` or the directory, else one with "preview" in its name,
-// else the shortest name. An asset.json in the model directory, e.g.
-// {"category": "object", "main": "mug.xml", "thumbnail": "mug.png"},
+// Each entry: {name, dir, main, category, source, group, screenshot}, where
+// `dir` is the model directory relative to public/ and `main` the file to
+// spawn in it: the model file scene.xml includes (so the scene's own floor
+// and lights stay out of the shared world), or scene.xml itself if it
+// includes none (a whole environment). `group` is the header the panel lists
+// it under: the section of menagerie's README for menagerie models, the
+// source otherwise. `screenshot` (relative to `dir`) is the image that
+// scripts/thumbnails.py turns into the panel thumbnail: the one named like
+// `main` or the directory, else one with "preview" in its name, else the
+// shortest name. An asset.json in the model directory, e.g.
+// {"main": "mug.xml", "thumbnail": "mug.png", "group": "Kitchen"},
 // overrides these.
+//
+// Order (the panel keeps it): digital_twin first, then the other sources by
+// name; menagerie models by README section; then by name.
+const LIBRARY = 'mjcf_assets';
+const CATEGORIES = { environments: 'environment', robots: 'robot', objects: 'object' };
+const FIRST_SOURCES = ['digital_twin'];
+
 function pickScreenshot(path, main, name) {
   const images = readdirSync(path).filter((f) => /\.(png|jpe?g|webp)$/i.test(f));
   const stem = (f) => f.replace(/\.[^.]*$/, '').toLowerCase();
@@ -68,41 +77,50 @@ function readmeGroups(dir) {
   return groups;
 }
 
-function indexLibrary(dir, name, category, defaultGroup = null) {
-  if (!existsSync(dir)) return;
-  const link = `public/${name}`;
-  if (!existsSync(link) && !lstatSync(link, { throwIfNoEntry: false })) symlinkSync(`../${dir}`, link);
+const subdirs = (dir) => readdirSync(dir, { withFileTypes: true })
+  .filter((d) => d.isDirectory() && !d.name.startsWith('.')).map((d) => d.name);
 
-  const groups = readmeGroups(dir);
-  const models = [];
-  for (const d of readdirSync(dir, { withFileTypes: true })) {
-    if (!d.isDirectory() || d.name.startsWith('.')) continue;
-    const scene = `${dir}/${d.name}/scene.xml`, meta = `${dir}/${d.name}/asset.json`;
-    const over = existsSync(meta) ? JSON.parse(readFileSync(meta, 'utf8')) : {};
-    if (!existsSync(scene) && !over.main) continue;
-    const included = existsSync(scene) && readFileSync(scene, 'utf8').match(/<include\s+file="([^"]+\.xml)"/)?.[1];
-    models.push({
-      name: d.name,
-      main: over.main ?? included ?? 'scene.xml',
-      category: over.category ?? (category === 'auto' ? (included ? 'robot' : 'environment') : category),
-    });
-    const shot = over.thumbnail ?? pickScreenshot(`${dir}/${d.name}`, models.at(-1).main, d.name);
-    if (shot) models.at(-1).screenshot = shot;
-    const group = over.group ?? groups.get(d.name)?.[0] ?? defaultGroup;
-    if (group) models.at(-1).group = group;
-    models.at(-1).rank = over.group || defaultGroup ? -1 : groups.get(d.name)?.[1] ?? Infinity;
+function indexLibrary() {
+  if (!existsSync(LIBRARY)) {
+    console.warn(`no ${LIBRARY}/: the asset panel will be empty`);
+    writeFileSync('public/assets.json', '[]');
+    return;
   }
-  // By group (in README order; asset.json groups first, ungrouped last), then
-  // name: the asset panel lists groups in the order they first appear.
-  models.sort((a, b) => a.rank - b.rank || (a.group ?? '').localeCompare(b.group ?? '') || a.name.localeCompare(b.name));
+  const link = `public/${LIBRARY}`;
+  if (!existsSync(link) && !lstatSync(link, { throwIfNoEntry: false })) symlinkSync(`../${LIBRARY}`, link);
+
+  const models = [];
+  for (const catDir of subdirs(LIBRARY)) {
+    const category = CATEGORIES[catDir];
+    if (!category) { console.warn(`skipping ${LIBRARY}/${catDir}: not one of ${Object.keys(CATEGORIES)}`); continue; }
+    for (const source of subdirs(`${LIBRARY}/${catDir}`)) {
+      const sourceDir = `${LIBRARY}/${catDir}/${source}`;
+      const groups = readmeGroups(sourceDir);
+      for (const name of subdirs(sourceDir)) {
+        const dir = `${sourceDir}/${name}`;
+        const scene = `${dir}/scene.xml`, meta = `${dir}/asset.json`;
+        const over = existsSync(meta) ? JSON.parse(readFileSync(meta, 'utf8')) : {};
+        if (!existsSync(scene) && !over.main) continue;
+        const included = existsSync(scene) && readFileSync(scene, 'utf8').match(/<include\s+file="([^"]+\.xml)"/)?.[1];
+        const main = over.main ?? included ?? 'scene.xml';
+        const m = { name, dir, main, category, source, group: over.group ?? groups.get(name)?.[0] ?? source };
+        const shot = over.thumbnail ?? pickScreenshot(dir, main, name);
+        if (shot) m.screenshot = shot;
+        m.rank = [FIRST_SOURCES.includes(source) ? FIRST_SOURCES.indexOf(source) : FIRST_SOURCES.length, source,
+                  over.group ? -1 : groups.get(name)?.[1] ?? Infinity, m.group, name];
+        models.push(m);
+      }
+    }
+  }
+  const cmp = (a, b) => (typeof a === 'string' ? a.localeCompare(b) : a - b);
+  models.sort((a, b) => a.rank.reduce((c, v, k) => c || cmp(v, b.rank[k]), 0));
   for (const m of models) delete m.rank;
-  writeFileSync(`public/${name}.json`, JSON.stringify(models, null, 1));
-  console.log('indexed', models.length, `${dir} models into public/${name}.json`);
+  writeFileSync('public/assets.json', JSON.stringify(models, null, 1));
+  const count = {};
+  for (const m of models) count[`${m.category}/${m.source}`] = (count[`${m.category}/${m.source}`] ?? 0) + 1;
+  console.log('indexed', models.length, `models of ${LIBRARY}/ into public/assets.json:`, count);
 }
-indexLibrary('my_robot', 'my_robot', 'robot', 'My robots');  // your own robots: listed first
-indexLibrary('mujoco_menagerie', 'menagerie', 'robot');
-indexLibrary('my_environment', 'my_environment', 'auto');  // your own models
-indexLibrary('my_objects', 'my_objects', 'object');        // your own objects, if any
+indexLibrary();
 
 // If the GR00T policies (huggingface.co/nepyope/GR00T-WholeBodyControl_g1) are
 // checked out next to package.json, expose them as public/groot: spawned

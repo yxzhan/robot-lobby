@@ -7,8 +7,11 @@
 //
 // - Two ONNX MLPs (516 -> 15), Balance for |cmd| < 0.05 and Walk otherwise,
 //   run at 50 Hz on 6 stacked 86-D observation frames.
-// - The policy outputs targets for joints 0-14 (legs + waist). The arms are
-//   held at the default pose, which the policy observes as if they were.
+// - The policy outputs targets for joints 0-14 (legs + waist) only. The arm
+//   actuators keep whatever target they have (the default pose from pose(),
+//   or what the Stage panel's control sliders set), PD-held with the
+//   policy's gains, like g1_mujoco's arm holds. The policy observes the arms
+//   where they actually are.
 // - Joints are PD-controlled with the robot's per-joint kp/kd (lerobot's
 //   config_unitree_g1). Menagerie's position actuators are exactly a PD loop
 //   (force = kp*(ctrl - q) - kd*qdot), so their gains are overwritten in place
@@ -49,7 +52,8 @@ const DOF_VEL_SCALE = 0.05;
 const CMD_SCALE = [2.0, 2.0, 0.25];
 const FRAME = 86, HISTORY = 6;
 
-// The robot file this controller drives (a picker value in main.js).
+// The robot file this controller drives: a spawned asset whose path ends in
+// mujoco_menagerie/<G1_MODEL> gets a GrootController (main.js).
 export const G1_MODEL = 'unitree_g1/g1.xml';
 
 // {balance, walk} sessions. `source(name)` returns the .onnx bytes or a URL.
@@ -149,11 +153,10 @@ export class GrootController {
     return this.action;
   }
 
-  // Writes the joint targets for `action` (legs + waist) and the arm holds.
+  // Writes the joint targets for `action` (legs + waist); the arm targets
+  // are left to the user.
   apply(data, action = this.action) {
-    for (let i = 0; i < N; i++) {
-      data.ctrl[this.act[i]] = DEFAULT_ANGLES[i] + (i < NA ? action[i] * ACTION_SCALE : 0);
-    }
+    for (let i = 0; i < NA; i++) data.ctrl[this.act[i]] = DEFAULT_ANGLES[i] + action[i] * ACTION_SCALE;
   }
 
   // One control tick: observe, infer, apply. `valid()` is checked after the

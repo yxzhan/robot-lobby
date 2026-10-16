@@ -1,10 +1,10 @@
-// Renders a preview.png for every asset of the given libraries that has no
-// screenshot yet, with the viewer itself in headless Chrome: each asset is
+// Renders a preview.png for every asset (of the given categories or
+// <category>/<source>es of mjcf_assets/) that has no screenshot yet, with the viewer itself in headless Chrome: each asset is
 // spawned alone, framed by its collision geoms' bounds, and captured.
 // scripts/thumbnails.py then turns the previews into panel thumbnails.
 //
 //   npm start &                                   # serves public/ on :4000
-//   node scripts/render_previews.mjs [library…]   # default: my_objects
+//   node scripts/render_previews.mjs [filter…]    # e.g. objects, robots/digital_twin; default: all
 //   node scripts/vendor.mjs && python3 scripts/thumbnails.py
 //
 // Options (env): CHROME=/path/to/chrome (default: Playwright's headless
@@ -15,8 +15,7 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSy
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-const LIBRARY_DIRS = { my_robot: 'my_robot', menagerie: 'mujoco_menagerie', my_environment: 'my_environment', my_objects: 'my_objects' };
-const libraries = process.argv.slice(2).length ? process.argv.slice(2) : ['my_objects'];
+const filters = process.argv.slice(2);
 const url = process.env.URL ?? 'http://127.0.0.1:4000/';
 
 function findChrome() {
@@ -33,14 +32,16 @@ function findChrome() {
   throw new Error('no Chrome found: set CHROME=/path/to/chrome');
 }
 
+const index = 'public/assets.json';
+if (!existsSync(index)) throw new Error(`no ${index}: run node scripts/vendor.mjs`);
 const todo = [];
-for (const lib of libraries) {
-  const index = `public/${lib}.json`;
-  if (!existsSync(index)) { console.warn(`no ${index}: run node scripts/vendor.mjs`); continue; }
-  for (const m of JSON.parse(readFileSync(index, 'utf8'))) {
-    if (m.screenshot && !process.env.FORCE) continue;
-    todo.push({ name: m.name, rel: `${lib}/${m.name}/${m.main}`, out: join(LIBRARY_DIRS[lib], m.name, 'preview.png') });
-  }
+for (const m of JSON.parse(readFileSync(index, 'utf8'))) {
+  if (m.screenshot && !process.env.FORCE) continue;
+  // m.dir is 'mjcf_assets/<category dir>/<source>/<name>' (relative to public/,
+  // where mjcf_assets is a symlink to the one next to package.json).
+  const where = m.dir.split('/').slice(1, 3).join('/');
+  if (filters.length && !filters.some((f) => where === f || where.startsWith(`${f}/`))) continue;
+  todo.push({ name: m.name, rel: `${m.dir}/${m.main}`, out: join(m.dir, 'preview.png') });
 }
 console.log(`${todo.length} assets to render`);
 if (!todo.length) process.exit(0);

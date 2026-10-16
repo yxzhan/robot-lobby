@@ -40,35 +40,36 @@ localStorage; the next page load spawns it all again in one compile (Forget
 starts from an empty floor again).
 Picking uses `mj_ray` on the physics world, so it hits collision geoms.
 
-- **Asset list** — one entry per model directory with a `scene.xml` in each
-  library checked out next to `package.json`: `my_robot/` (Robots, listed
-  first under "My robots"), `mujoco_menagerie/` (Robots),
-  `my_environment/` (Robots if its `scene.xml` includes a model file,
-  Environments otherwise) and `my_objects/` (Objects). `npm install` (or
-  `node scripts/vendor.mjs`) symlinks each into `public/` and writes
-  `public/<name>.json`, whose `main` is the model file `scene.xml` includes;
-  that file is what gets spawned, so the scene's own floor and lights stay
-  out, while a `scene.xml` without an `<include>` (a whole environment) is
-  spawned as is. An `asset.json` in a model directory, e.g.
-  `{"category": "object", "main": "mug.xml"}`, overrides the tab and entry
-  file. Menagerie robots are grouped (Humanoids, Quadrupeds, Arms, …) as in
-  the "Menagerie Models" section of `mujoco_menagerie/README.md`, read by
-  `vendor.mjs`; `"group": "…"` in `asset.json` sets one for any model, and
-  ungrouped models in a grouped tab go under "Other". Re-run
+- **Asset list** — the model library is `mjcf_assets/` next to
+  `package.json`, laid out as `<category>/<source>/<model>/`: the category
+  (`environments`, `robots`, `objects`) is the panel tab, the source
+  (`digital_twin`, `mujoco_menagerie`, `robocasa`, …) where the models come
+  from. A model is a directory with a `scene.xml`. `npm install` (or
+  `node scripts/vendor.mjs`) links the library as `public/mjcf_assets` and
+  indexes it into `public/assets.json`; each entry's `main` is the model file
+  `scene.xml` includes, which is what gets spawned (so the scene's own floor
+  and lights stay out), while a `scene.xml` without an `<include>` (a whole
+  environment) is spawned as is. Within a tab, models are listed under their
+  source, `digital_twin` first and the others by name; menagerie robots are
+  split by the sections of its README's "Menagerie Models" table
+  (Humanoids, Quadrupeds, Arms, …). An `asset.json` in a model directory,
+  e.g. `{"main": "mug.xml", "thumbnail": "mug.png", "group": "Kitchen"}`,
+  overrides the entry file, screenshot and group. Re-run
   `node scripts/vendor.mjs` after adding models.
 - **Thumbnails** — `python3 scripts/thumbnails.py` (after `vendor.mjs`)
   compresses each model's screenshot (the image in its directory named like
   its entry file, or `"thumbnail"` in `asset.json`) into
-  `public/thumbs/<library>/<model>.webp` (≤ 320×240; the 4K menagerie renders
-  go from ~84 MB to ~0.4 MB). The originals are untouched; models without a
-  screenshot show their initials.
+  `public/thumbs/<category>/<source>/<model>.webp` (≤ 320×240; the 4K
+  menagerie renders go from ~84 MB to ~0.4 MB). The originals are untouched;
+  models without a screenshot show their initials.
 - **Objects from RoboCasa** — `python3 scripts/import_robocasa.py
   [/path/to/robocasa]` copies one instance of each picked kitchen category
-  (`PICKS` in the script) into `my_objects/`, adding a free joint (raised so
-  the object rests on the floor) and moving collision geoms to group 3. Assets
-  without a screenshot get one from `node scripts/render_previews.mjs
-  [library…]`, which spawns each alone in headless Chrome (needs the page
-  served, e.g. `npm start`) and writes `preview.png` next to it.
+  (`PICKS` in the script) into `mjcf_assets/objects/robocasa/`, adding a free
+  joint (raised so the object rests on the floor) and moving collision geoms
+  to group 3. Models without a screenshot get one from
+  `node scripts/render_previews.mjs [category[/source]…]`, which spawns each
+  alone in headless Chrome (needs the page served, e.g. `npm start`) and
+  writes `preview.png` next to it.
 - **Loading** — Spawning fetches only the files it
   references — the `<include>` tree, then the mesh/texture/hfield/skin files
   resolved via `<compiler meshdir/texturedir/assetdir>` — into MuJoCo's
@@ -135,7 +136,9 @@ text field are ignored). `public/groot.js` is a port of lerobot's
 `GrootLocomotionController` running on onnxruntime-web (WASM, one thread,
 ~0.2 ms per inference): two MLPs (Balance when the command is ~0, Walk
 otherwise) at 50 Hz on 6 stacked 86-D observations, driving legs and waist,
-with the arms held at the default pose. The policy's PD gains are written
+while the arms hold whatever target their actuators have (the default pose
+at spawn; set them with the Stage panel's control sliders, as in
+g1_mujoco). The policy's PD gains are written
 into the menagerie position actuators (`gainprm`/`biasprm`), and the IMU is
 the floating base (`qpos[3:7]`, `qvel[3:6]`), as in lerobot's G1 sim.
 Inference is async, so `App.advance()` awaits it every 0.02 s of sim time.
