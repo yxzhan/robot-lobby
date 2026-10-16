@@ -1,13 +1,13 @@
 // Copies the MuJoCo and Filament runtime files out of node_modules so that
 // public/ is a self-contained static site (no bundler needed).
-import { cpSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 
 const copies = {
   'node_modules/@mujoco/mujoco/mujoco.js': 'public/vendor/mujoco/mujoco.js',
   'node_modules/@mujoco/mujoco/mujoco.wasm': 'public/vendor/mujoco/mujoco.wasm',
   'node_modules/filament/filament.js': 'public/vendor/filament/filament.js',
   'node_modules/filament/filament.wasm': 'public/vendor/filament/filament.wasm',
-  // onnxruntime-web, WASM backend only (runs the GR00T policy, public/groot.js).
+  // onnxruntime-web, WASM backend only (runs the ONNX policies, public/policy.js).
   'node_modules/onnxruntime-web/dist/ort.wasm.min.mjs': 'public/vendor/onnxruntime/ort.wasm.min.mjs',
   'node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.mjs': 'public/vendor/onnxruntime/ort-wasm-simd-threaded.mjs',
   'node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.wasm': 'public/vendor/onnxruntime/ort-wasm-simd-threaded.wasm',
@@ -181,12 +181,27 @@ function indexLibrary() {
 }
 indexLibrary();
 
-// If the GR00T policies (huggingface.co/nepyope/GR00T-WholeBodyControl_g1) are
-// checked out next to package.json, expose them as public/groot: spawned
-// unitree_g1 robots then walk under that policy (public/groot.js).
-const GROOT = 'GR00T-WholeBodyControl_g1';
-if (existsSync(GROOT)) {
-  const link = 'public/groot';
-  if (!existsSync(link) && !lstatSync(link, { throwIfNoEntry: false })) symlinkSync(`../${GROOT}`, link);
-  console.log('linked', GROOT, 'as', link);
+// Pretrained policies: pretrained_policies/<name>/ (one checkout per model,
+// e.g. git clone https://huggingface.co/nepyope/GR00T-WholeBodyControl_g1),
+// exposed as public/pretrained_policies (symlink) and listed in
+// public/policies.json ({<name>: [its files]}) so the page knows which of
+// the policies it registers (POLICIES in public/policy.js) are installed.
+const POLICY_DIR = 'pretrained_policies';
+function indexPolicies() {
+  const stale = lstatSync('public/groot', { throwIfNoEntry: false });  // the old single-policy link
+  if (stale?.isSymbolicLink()) unlinkSync('public/groot');
+  const index = {};
+  if (existsSync(POLICY_DIR)) {
+    const link = `public/${POLICY_DIR}`;
+    if (!existsSync(link) && !lstatSync(link, { throwIfNoEntry: false })) symlinkSync(`../${POLICY_DIR}`, link);
+    for (const name of subdirs(POLICY_DIR)) {
+      index[name] = readdirSync(`${POLICY_DIR}/${name}`, { withFileTypes: true })
+        .filter((f) => f.isFile() && !f.name.startsWith('.')).map((f) => f.name).sort();
+    }
+  } else {
+    console.warn(`no ${POLICY_DIR}/: no policy can run`);
+  }
+  writeFileSync('public/policies.json', JSON.stringify(index, null, 1));
+  console.log('indexed', Object.keys(index).length, `policies of ${POLICY_DIR}/ into public/policies.json:`, Object.keys(index));
 }
+indexPolicies();

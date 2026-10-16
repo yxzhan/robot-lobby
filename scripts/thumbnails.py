@@ -5,7 +5,9 @@ not touched.
 
 Reads the library index written by scripts/vendor.mjs (public/assets.json,
 whose `screenshot` names the image in the model's `dir`), so run that first.
-Thumbnails newer than their screenshot are kept.
+A model the index has no screenshot for still gets one from `<dir>/<name>.png`
+(the naming convention) if that image was added after indexing; models with
+no image at all are listed. Thumbnails newer than their screenshot are kept.
 
     python3 scripts/thumbnails.py
 """
@@ -22,12 +24,16 @@ QUALITY = 80
 
 def main():
   total_in = total_out = made = 0
+  missing = []
   index = PUBLIC / 'assets.json'
   if not index.exists():
     raise SystemExit(f'no {index}: run node scripts/vendor.mjs first')
   for model in json.loads(index.read_text()):
     shot = model.get('screenshot')
+    if not shot and (PUBLIC / model['dir'] / f"{model['name']}.png").exists():
+      shot = f"{model['name']}.png"  # added after the index was written
     if not shot:
+      missing.append(f"{model['category']}/{model['source']}/{model['name']}")
       continue
     src = PUBLIC / model['dir'] / shot
     dst = PUBLIC / 'thumbs' / model['category'] / model['source'] / f"{model['name']}.webp"
@@ -45,6 +51,8 @@ def main():
     total_out += dst.stat().st_size
   print(f'{made} thumbnails written; screenshots {total_in / 2**20:.1f} MB -> '
         f'thumbnails {total_out / 2**20:.2f} MB in {PUBLIC / "thumbs"}')
+  if missing:
+    print(f'{len(missing)} without a screenshot: {", ".join(missing)}')
 
 
 if __name__ == '__main__':

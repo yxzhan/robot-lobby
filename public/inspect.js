@@ -5,6 +5,21 @@
 // controls at any time) and buttons to reset or remove it.
 
 const sub = (a, b) => a.map((v, i) => v - b[i]);
+const DEG = 180 / Math.PI;
+
+// Unit quaternion (w, x, y, z) <-> roll, pitch, yaw (rad): R = Rz(yaw) Ry(pitch) Rx(roll).
+function quatToRpy([w, x, y, z]) {
+  return [
+    Math.atan2(2 * (w * x + y * z), 1 - 2 * (x * x + y * y)),
+    Math.asin(Math.max(-1, Math.min(1, 2 * (w * y - z * x)))),
+    Math.atan2(2 * (w * z + x * y), 1 - 2 * (y * y + z * z)),
+  ];
+}
+function rpyToQuat([roll, pitch, yaw]) {
+  const [cr, sr] = [Math.cos(roll / 2), Math.sin(roll / 2)], [cp, sp] = [Math.cos(pitch / 2), Math.sin(pitch / 2)];
+  const [cy, sy] = [Math.cos(yaw / 2), Math.sin(yaw / 2)];
+  return [cr * cp * cy + sr * sp * sy, sr * cp * cy - cr * sp * sy, cr * sp * cy + sr * cp * sy, cr * cp * sy - sr * sp * cy];
+}
 const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
 
@@ -102,12 +117,16 @@ export class Perturb {
 // buttons, a slider per hinge/slide joint (qpos) and per actuator (ctrl).
 // Rebuilt for every world, refreshed ~10 times a second for the expanded
 // robots. `onRemove(robot)` removes a robot (the page rebuilds the world);
-// the Save / Forget buttons call `onSave()` / `onForget()`.
+// the Save / Forget buttons call `onSave()` / `onForget()`. Each robot's
+// Pose section places it: on a free joint at once (App.placeFree), a fixed
+// base through `onMove(robot, pos, yaw)` (a rebuild).
 export class StagePanel {
-  constructor(app, el, { onRemove = () => {}, onSave = () => {}, onForget = () => {} } = {}) {
+  constructor(app, el, { onRemove = () => {}, onSave = () => {}, onForget = () => {}, onMove = async () => false } = {}) {
     this.app = app;
     this.el = el;
     this.onRemove = onRemove;
+    this.onMove = onMove;
+    this.poses = [];        // {inputs, read(), sub} per robot's Pose section
     el.querySelector('.save').onclick = onSave;
     el.querySelector('.forget').onclick = onForget;
     this.savedEl = el.querySelector('.saved');
@@ -125,6 +144,7 @@ export class StagePanel {
     this.el.querySelectorAll('details details').forEach((d) => keep(this.closed, d, !d.open));
     this.el.querySelectorAll(':scope > details').forEach((d) => { keep(this.open, d, d.open); d.remove(); });
     this.rows = [];
+    this.poses = [];
     const robotOfBody = (b) => robots.find((r) => b >= r.bodyOffset && b < r.bodyOffset + r.visual.inertia.nbody - 1);
     const groups = new Map(robots.map((r) => [r, { joints: [], ctrls: [] }]));
 
@@ -183,6 +203,7 @@ export class StagePanel {
         det.append(none);
       }
       det.ontoggle = () => { this.lastUpdate = 0; };
+      det.append(this.poseSection(r));
       for (const [title, list] of [['Joints', joints], ['Controls', ctrls]]) {
         if (!list.length) continue;
         const sub = document.createElement('details');
@@ -197,6 +218,49 @@ export class StagePanel {
     }
     if (this.empty) this.empty.hidden = robots.length > 0;
     this.lastUpdate = 0;
+  }
+
+  // Position (m) and roll / pitch / yaw (deg, about x, y, z: yaw first) of
+  // the robot's root: its free joint, live; or its attach frame (heading
+  // only), which rebuilds the world.
+  poseSection(r) {
+    const sub = document.createElement('details');
+    sub.dataset.key = r.prefix + 'Pose';
+    sub.open = !this.closed.has(sub.dataset.key);
+    const free = this.app.rootFreeJoint(r) >= 0;
+    sub.innerHTML = `<summary>Pose <span class="count">${free ? 'free joint · live' : 'fixed base · rebuilds the world'}</span></summary>`;
+    sub.ontoggle = () => { this.lastUpdate = 0; };
+    const read = () => {
+      const j = this.app.rootFreeJoint(r);
+      if (j < 0) return [...r.pos, 0, 0, (r.yaw ?? 0) * DEG];
+      const q = this.app.data.qpos, a = this.app.model.jnt_qposadr[j];
+      return [q[a], q[a + 1], q[a + 2], ...quatToRpy(q.subarray(a + 3, a + 7)).map((v) => v * DEG)];
+    };
+    const inputs = [];
+    const apply = async () => {
+      const v = inputs.map((inp) => Number(inp.value));
+      if (v.some((x) => !Number.isFinite(x))) return;
+      const pos = v.slice(0, 3);
+      if (this.app.rootFreeJoint(r) >= 0) this.app.placeFree(r, pos, rpyToQuat(v.slice(3).map((x) => x / DEG)));
+      else if (!(await this.onMove(r, pos, v[5] / DEG))) inputs.forEach((inp, i) => { inp.value = +read()[i].toFixed(i < 3 ? 3 : 1); });
+    };
+    for (const [label, names, step] of [['Position', ['x', 'y', 'z'], 0.01], ['Rotation', ['roll', 'pitch', 'yaw'], 1]]) {
+      const row = document.createElement('div');
+      row.className = 'pose';
+      row.append(Object.assign(document.createElement('span'), { textContent: label }));
+      for (const n of names) {
+        const inp = Object.assign(document.createElement('input'), { type: 'number', step, title: `${n} (${step === 1 ? 'deg' : 'm'})` });
+        inp.disabled = !free && (n === 'roll' || n === 'pitch');  // an attach frame takes a heading only
+        inp.onchange = apply;
+        inputs.push(inp);
+        row.append(inp);
+      }
+      sub.append(row);
+    }
+    const v = read();
+    inputs.forEach((inp, i) => { inp.value = +v[i].toFixed(i < 3 ? 3 : 1); });
+    this.poses.push({ inputs, read, sub });
+    return sub;
   }
 
   // Shows when the stage was saved (`stage`: {saved, items}, or null).
@@ -251,6 +315,11 @@ export class StagePanel {
       const v = row.read();
       row.input.value = v;
       row.out.textContent = v.toFixed(3);
+    }
+    for (const p of this.poses) {
+      if (!p.sub.open || !p.sub.parentElement.open || p.inputs.includes(document.activeElement)) continue;
+      const v = p.read();
+      p.inputs.forEach((inp, i) => { inp.value = +v[i].toFixed(i < 3 ? 3 : 1); });
     }
   }
 }

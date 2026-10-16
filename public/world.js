@@ -1,7 +1,9 @@
+import { geomOverrides, optionAttrs } from './physics.js';
+
 // The shared world: an empty floor that robots are spawned into.
 //
 // MuJoCo cannot add bodies to a compiled MjModel, so every spawn rebuilds an
-// MjSpec from BASE_XML, attaches each robot's own spec (mjs_attach) under a
+// MjSpec from the base XML, attaches each robot's own spec (mjs_attach) under a
 // frame at its spawn point with a unique name prefix, and compiles the lot.
 // Rebuilding from scratch (instead of editing one long-lived spec) also makes
 // a failed spawn or an undo trivial: just compile a different robot list.
@@ -12,28 +14,34 @@
 // convex hulls) costs hundreds of MB of the 2 GB WASM heap per robot; the
 // renderer gets them from a separate per-robot compile instead (main.js).
 
-export const BASE_XML = `
+// The world spec: the global options (physics.js: gravity, wind, …) and the
+// default geom properties, which here only reach the floor.
+export function baseXml(physics) {
+  const geom = Object.entries(geomOverrides(physics)).map(([k, v]) => `${k}="${v}"`).join(' ');
+  return `
 <mujoco model="world">
-  <option timestep="0.002" integrator="implicitfast"/>
+  <option timestep="0.002" integrator="implicitfast" ${optionAttrs(physics)}/>
+  <default><geom ${geom}/></default>
   <worldbody>
     <geom name="floor" type="plane" size="0 0 0.05"/>
     <frame name="spawn_root"/>
   </worldbody>
 </mujoco>`;
+}
 
 // robots: [{path, prefix, pos, yaw, strip}] where `path` is the robot's MJCF
 // in the MuJoCo FS (with its includes and assets already there, see vfs.js)
 // and `yaw` (rad, about +z) its heading at the spawn point `pos`.
 // `strip` ({refs, inertia}, or null to keep the visual geoms) gives the names
 // referenced elsewhere in the robot (referencedNames) and the body inertias
-// of its full compile (bodyInertia). Returns the compiled MjModel; throws on
-// parse/compile errors.
-export function compileWorld(mujoco, robots) {
-  const world = mujoco.parseXMLString(BASE_XML);
+// of its full compile (bodyInertia). `physics` are the world settings
+// (physics.js). Returns the compiled MjModel; throws on parse/compile errors.
+export function compileWorld(mujoco, robots, physics) {
+  const world = mujoco.parseXMLString(baseXml(physics));
   try {
     const worldbody = mujoco.mjs_findBody(world, 'world');
     // The bindings do not accept null for mjs_addFrame's parent frame, so new
-    // frames hang off an identity frame declared in BASE_XML.
+    // frames hang off an identity frame declared in the base XML.
     const root = mujoco.mjs_findFrame(world, 'spawn_root');
     for (const r of robots) {
       const dir = r.path.slice(0, r.path.lastIndexOf('/') + 1);

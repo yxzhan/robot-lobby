@@ -63,11 +63,13 @@ function isPlainImageTexture(el) {
 
 // Copies `entry` (a path in `read`'s namespace) and every file it references
 // into the MuJoCo FS under `fsRoot`. Asset files already in the FS are not
-// read again; XML files always are (they are rewritten, see above).
+// read again; XML files always are (they are rewritten, see above);
+// `edit(docs)`, if given, may change the parsed include tree (entry file
+// first) before it is written.
 // Returns {path, images, docs}: the FS path of the entry file, a Map from
 // texture name to candidate image paths for the textures replaced by
 // placeholders, and the parsed XML documents of the include tree.
-export async function loadModelFiles(mujoco, read, fsRoot, entry, onProgress = () => {}) {
+export async function loadModelFiles(mujoco, read, fsRoot, entry, onProgress = () => {}, edit = null) {
   const modelDir = entry.includes('/') ? entry.slice(0, entry.lastIndexOf('/')) : '.';
   const images = new Map();
 
@@ -129,6 +131,7 @@ export async function loadModelFiles(mujoco, read, fsRoot, entry, onProgress = (
       }
     }
   }
+  edit?.(docs.map((d) => d.doc));  // e.g. physics.js's default geom properties
   for (const { doc, rel } of docs) {
     writeFile(mujoco, joinPath(fsRoot, rel), new TextEncoder().encode(new XMLSerializer().serializeToString(doc)));
   }

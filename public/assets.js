@@ -18,7 +18,9 @@ export async function loadAssets(index = 'assets.json') {
     if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
     return (await res.json()).map((m) => ({
       name: m.name, rel: `${m.dir}/${m.main}`, lib: m.source, category: m.category, group: m.group ?? null,
-      thumb: m.screenshot ? thumbPath(m) : null,  // written by scripts/thumbnails.py
+      // Written by scripts/thumbnails.py, also for a <name>.png the index has
+      // not seen yet; a missing one falls back to initials (img.onerror).
+      thumb: thumbPath(m),
     }));
   } catch (err) {
     console.warn(`no asset index (${index}): run node scripts/vendor.mjs`, err);

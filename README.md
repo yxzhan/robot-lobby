@@ -35,7 +35,12 @@ floor to deselect) and Shift+drag to pull it with a spring
 on `xfrc_applied`. The Stage panel lists everything spawned, each with its
 joint positions (settable while paused), actuator controls, a Reset button
 (back to its spawn pose, at rest, while the rest keeps going) and a remove
-button (`public/inspect.js`). Save stage remembers what is spawned, with
+button (`public/inspect.js`). Its **Pose** section places it: position (m)
+and roll / pitch / yaw (deg) of its root. On a free joint that is its
+qpos, set at once with no rebuild (Reset and a saved stage then use the new
+pose); a fixed base (an arm, an environment) is placed by its attach frame,
+heading only, so the world is rebuilt with its state kept and its mocap
+bodies carried along. Save stage remembers what is spawned, with
 its spawn position and heading (not its joint state), in the browser's
 localStorage; the next page load spawns it all again in one compile (Forget
 starts from an empty floor again).
@@ -69,7 +74,9 @@ Picking uses `mj_ray` on the physics world, so it hits collision geoms.
   compresses each model's screenshot (`<name>.png`) into
   `public/thumbs/<category>/<source>/<model>.webp` (≤ 320×240; the 4K
   menagerie renders go from ~84 MB to ~0.4 MB). The originals are untouched;
-  models without a screenshot show their initials.
+  models without a screenshot show their initials. A `<name>.png` added after
+  the index was written is picked up too, and models with no image at all
+  are listed at the end.
 - **Objects from RoboCasa** — `python3 scripts/import_robocasa.py
   [/path/to/robocasa]` copies one instance of each picked kitchen category
   (`PICKS` in the script) into `mjcf_assets/objects/robocasa/`, adding a free
@@ -137,6 +144,27 @@ does not ship; `iit_softfoot` (an `<asset><model>` sub-model) fails to attach;
 (spawning reports the mismatch). Skyboxes, cube textures and hfields are not
 drawn.
 
+## World physics
+
+The World panel (`public/worldpanel.js`, settings in `public/physics.js`,
+saved in this browser) sets MuJoCo's global options and default geom
+properties:
+- **Gravity, wind, magnetic field, medium density and viscosity,
+  impratio** go into the world spec's `<option>` at every rebuild and onto
+  the live `model.opt`, so they act at once. Wind and fluid drag need a
+  medium (density or viscosity > 0).
+- **Default geom density, mass and friction** apply to geoms that do not
+  set them themselves or through their own default classes, as a top-level
+  `<default><geom/></default>` would: density and friction are written into
+  each spawned model's root default class (only what it does not set), and
+  into the world's, so the floor takes the friction; a default mass is
+  written onto each geom whose element and class chain set neither mass
+  nor density (an inherited mass would override a geom's own density).
+  They change masses, so **Apply** recompiles the spawned models' inertias
+  (`withPhysics` in main.js) and rebuilds the world, keeping its state.
+  Most models set their own masses (menagerie robots have explicit
+  inertials), so these mostly reach plain objects and the floor.
+
 ## Teleop panel and controllers
 
 The Teleop panel (`public/teleop.js`, open by default) picks which robot is
@@ -154,9 +182,15 @@ gets leg chains). Keyboard: **WASD** walk / drive, **QE** turn, hold
 **R**/**F** to raise or lower a locomotion policy's base height (keys typed
 into a text field are ignored); the sections fold.
 
-Policies are listed in `POLICIES` (`public/policy.js`): each entry has an
-id, a name, the robot files it starts on for (`defaultFor`), `load()` for
-its weights (shared, loaded on first use; onnxruntime-web is there as
+Pretrained policies live in `pretrained_policies/<dir>/`, one checkout per
+model (not tracked by git). `npm install` (or `node scripts/vendor.mjs`)
+links the folder as `public/pretrained_policies` and lists what is there in
+`public/policies.json`; a registered policy whose directory is missing is
+shown as "not installed" and never switched on by default. Policies are
+registered in `POLICIES` (`public/policy.js`): each entry has an id, a
+name, its `dir`, the robot files it starts on for (`defaultFor`),
+`load(file)` for its weights (`file(name)` is the URL of a file in its
+directory; shared, loaded on first use; onnxruntime-web is there as
 `onnxRuntime()`) and `create(weights, prefix)` for a controller with
 `bind` / `unbind` / `owns` / `pose` / `reset` / async `step`, plus `cmd` /
 `drive` (and `height`) for a locomotion policy driven by the keys. The
@@ -165,9 +199,9 @@ more entry.
 
 ## Walking G1 (GR00T policy)
 
-If the GR00T locomotion policies are checked out next to `package.json`
-(`git clone https://huggingface.co/nepyope/GR00T-WholeBodyControl_g1`),
-`npm install` links them as `public/groot`; they load the first time a
+If the GR00T locomotion policies are checked out into `pretrained_policies/`
+(`git clone https://huggingface.co/nepyope/GR00T-WholeBodyControl_g1
+pretrained_policies/GR00T-WholeBodyControl_g1`), they load the first time a
 robot runs the `groot-g1` policy. `public/groot.js` is a port of lerobot's
 `GrootLocomotionController` running on onnxruntime-web (WASM, one thread,
 ~0.2 ms per inference): two MLPs (Balance when the command is ~0, Walk
@@ -198,8 +232,13 @@ Kinds:
   center's velocity for the commanded twist, `d` its rolling direction and
   `g` the direction it pushes: `d` for a plain wheel (differential, skid
   steer; no sideways motion), `d ± axis` for mecanum rollers at ±45°.
-  Configurable: base joint, wheels (actuator, roller), radius, key speeds,
-  feedforward / P / I / integral limit / acceleration per axis.
+  A wheel given as a joint instead of an actuator runs on a software
+  velocity servo (every physics step, a joint force with feedforward
+  against its damping and friction loss), and an actuator on that joint is
+  switched off meanwhile; when no wheel has an actuator, `autoConfig()`
+  takes the unactuated level hinges hanging right off the base this way.
+  Configurable: base joint, wheels (actuator or joint, roller), radius, key
+  speeds, feedforward / P / I / integral limit / acceleration per axis.
 - **planar**: x / y / yaw position servos on the root body (TidyBot): the
   pose target is integrated from the command.
 
@@ -212,8 +251,10 @@ yaw a lever of only |x − y| = 4 cm, hence a yaw feedforward of 3). Checked:
 Garmi, TIAGo (position / velocity / motor variants: forward to 0.01 m/s),
 TidyBot (planar). Model limits: RB-Y1's base mesh rests on the floor (no
 casters), so its wheels cannot move it; TIAGo++'s omni base has no rollers
-(no sideways motion, a skid-steer box); Stretch 3's left wheel does not
-follow its servo.
+(no sideways motion, a skid-steer box). Stretch 3's wheel velocity servos
+chatter (the left one flips ±2.3 rad/s every step, in plain MuJoCo too), so
+its built-in setup drives the wheel joints with software servos (0.3 m/s
+and 1 rad/s tracked).
 
 ## IK chains
 
@@ -231,11 +272,18 @@ A chain is only `{root, tip}`, plus the tip frame: a site rigidly attached
 to the tip body (a TCP) or the body moved by an offset (Franka's 0.1034 m):
 its joints are the ones on the body path from the tip up to the root,
 root's own joints included, so moving the root to the elbow or down to
-Garmi's lift changes which joints take part. Joints without a position
-actuator, joints another controller drives (G1's waist and legs under
-GR00T), free joints and joints the user unticks stay still; a joint
-coupled to another by a joint equality (Garmi's second lift stage) adds its
-motion to its leader's Jacobian column.
+Garmi's lift changes which joints take part. What moves a joint, in
+order: its own position servo; a position servo on a fixed tendon through
+it (Stretch 3's telescoping arm: one IK dof for the tendon's length, the
+joints sharing the motion); else, with no actuator at all, a software
+servo of IK's own (every physics step, a critically damped PD force on the
+joint scaled by its inertia, plus gravity compensation, in
+`qfrc_applied`). Joints another controller drives (G1's waist and legs
+under GR00T), free joints and joints the user unticks stay still; a joint
+coupled to another by a joint equality (Garmi's second lift stage,
+Stretch's telescope) adds its motion to its leader's Jacobian column. On a
+robot with no position servos at all, automatic chains also take its
+joints that have a range.
 
 Configs come from, in order: the one saved in the panel, `IK_DEFAULTS`
 (Garmi: both arms, root `*_fr3_link1`, tip `*_fr3_hand` + 0.1034 m), or

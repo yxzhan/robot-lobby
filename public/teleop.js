@@ -15,7 +15,7 @@
 
 import { dragPose, markerScale, pickMarker, startDrag } from './marker.js';
 import { BaseController, KINDS } from './base.js';
-import { POLICIES, defaultPolicy, policyById } from './policy.js';
+import { POLICIES, POLICY_ROOT, defaultPolicy, isInstalled, policyById } from './policy.js';
 
 // Per held key: [command index (vx, vy, yaw rate), direction, drive speed].
 const DRIVE = {
@@ -221,7 +221,7 @@ export class TeleopPanel {
         box.disabled = true;
         // Policy: the one made for this robot, else the last picked, else the first.
         const on = kind !== 'policy' ? box.checked
-          : box.checked && (defaultPolicy(r.key) || r.lastPolicy || POLICIES[0]?.id || '');
+          : box.checked && (defaultPolicy(r.key) || r.lastPolicy || POLICIES.find(isInstalled)?.id || POLICIES[0]?.id || '');
         this.app.setUse(r, kind, on).finally(() => this.render());
       };
       chips.append(el('label', { className: 'chip' + (r.errors?.[kind] ? ' bad' : ''), title: r.errors?.[kind] ?? title }, box, el('span', { textContent: label })));
@@ -246,11 +246,16 @@ export class TeleopPanel {
   renderPolicy(r) {
     const p = policyById(r.use.policy);
     const box = this.section('policy', 'Policy', r.errors?.policy ? 'error' : p ? p.name.split(' · ')[0] : 'none');
-    const row = el('div', { className: 'field' }, el('span', { textContent: 'Model' }), el('div', { className: 'ctl' },
-      this.select([['', 'none'], ...POLICIES.map((q) => [q.id, q.name])], r.use.policy ?? '', (v) => {
+    const models = this.select([['', 'none'], ...POLICIES.map((q) => [q.id, q.name + (isInstalled(q) ? '' : ' (not installed)')])],
+      r.use.policy ?? '', (v) => {
         if (v) r.lastPolicy = v;
         this.app.setUse(r, 'policy', v).finally(() => this.render());
-      })));
+      });
+    for (const o of models.options) {
+      const q = policyById(o.value);
+      if (q && !isInstalled(q)) { o.disabled = true; o.title = `put it in ${POLICY_ROOT}/${q.dir}/`; }
+    }
+    const row = el('div', { className: 'field' }, el('span', { textContent: 'Model' }), el('div', { className: 'ctl' }, models));
     box.append(row);
     const hint = el('div', { className: 'hint' });
     hint.textContent = (p ? `${p.about} ` : '') + 'Untick Policy to give the joints their own actuator gains back.';
@@ -312,16 +317,24 @@ export class TeleopPanel {
       }
       row('Base joint', this.select([['', 'root free joint'], ...frees.filter(Boolean).map((n) => [n, n])], cfg.base ?? '', (v) => { cfg.base = v; changed(); }));
       const spin = robotActs.filter(([, , m]) => m === 'velocity' || m === 'motor').map(([, n, m]) => [n, `${n} (${m})`]);
+      // Hinge joints too, for a software servo (no actuator, or a broken one).
+      for (let j = 0; j < model.njnt; j++) {
+        if (model.jnt_type[j] === 3 && c.inRobot(model.jnt_bodyid[j])) spin.push([`joint:${c.nameOf('mjOBJ_JOINT', j)}`, `joint ${c.nameOf('mjOBJ_JOINT', j)} (software servo)`]);
+      }
       const rollers = [['0', 'plain wheel'], ['1', 'rollers +45°'], ['-1', 'rollers −45°']];
       (cfg.wheels ?? []).forEach((w, i) => {
         row(`Wheel ${i + 1}`,
-          this.select([['', '—'], ...spin], w.actuator, (v) => { w.actuator = v; changed(); }),
+          this.select([['', '—'], ...spin], w.joint ? `joint:${w.joint}` : w.actuator, (v) => {
+            if (v.startsWith('joint:')) { w.joint = v.slice(6); delete w.actuator; } else { w.actuator = v; delete w.joint; }
+            changed();
+          }),
           this.select(rollers, String(w.roller ?? 0), (v) => { w.roller = Number(v); changed(); }),
           this.button('✕', 'Remove this wheel', () => { cfg.wheels.splice(i, 1); changed(); }));
       });
       row('', this.button('+ Wheel', 'Add a driven wheel (a velocity servo or motor on its joint)', () => {
-        const used = new Set(cfg.wheels.map((w) => w.actuator));
-        cfg.wheels.push({ actuator: spin.find(([n]) => !used.has(n))?.[0] ?? '', roller: 0 });
+        const used = new Set(cfg.wheels.map((w) => (w.joint ? `joint:${w.joint}` : w.actuator)));
+        const pick = spin.find(([n]) => !used.has(n))?.[0] ?? '';
+        cfg.wheels.push(pick.startsWith('joint:') ? { joint: pick.slice(6), roller: 0 } : { actuator: pick, roller: 0 });
         changed();
       }));
       row('Radius', this.num(cfg.radius, 0.005, (v) => { cfg.radius = v; changed(); }, 'wheel radius (m)'));
@@ -467,7 +480,7 @@ export class TeleopPanel {
       row('Offset', ...offset);
     }
     const acts = [['', 'none']];
-    const chainActs = new Set(chain.active?.map((j) => j.act));
+    const chainActs = new Set(chain.active?.map((d) => d.act));
     for (let a = 0; a < ik.model.nu; a++) {
       const n = this.app.mujoco.mj_id2name(ik.model, this.app.mujoco.mjtObj.mjOBJ_ACTUATOR.value, a) ?? '';
       if (n.startsWith(ik.prefix) && !chainActs.has(a)) acts.push([n.slice(ik.prefix.length), n.slice(ik.prefix.length)]);
@@ -478,8 +491,8 @@ export class TeleopPanel {
     if (chain.error) det.append(el('div', { className: 'error', textContent: chain.error }));
     const joints = el('div', { className: 'joints' });
     for (const jt of chain.joints) {
-      const can = jt.status === 'ok' || jt.status === 'locked';
-      const box = el('input', { type: 'checkbox', checked: jt.status === 'ok', disabled: !can });
+      const can = jt.active || !!jt.dof;  // movable, maybe locked
+      const box = el('input', { type: 'checkbox', checked: jt.active, disabled: !can });
       box.onchange = () => {
         cfg.locked = box.checked ? cfg.locked.filter((n) => n !== jt.name) : [...cfg.locked, jt.name];
         changed(cfg, true);

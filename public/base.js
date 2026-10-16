@@ -9,6 +9,10 @@
 //   rolling direction (axis × z) and g the direction the wheel pushes: d
 //   for a plain wheel (differential and skid steer: no sideways motion),
 //   d ± axis for a mecanum wheel whose rollers sit at ±45° (`roller`).
+//   A wheel is driven by its actuator (a velocity servo, or a motor with a
+//   P loop on its speed), or, given as `joint` instead (no actuator, or one
+//   that misbehaves), by a software velocity servo of this controller's own:
+//   a joint force every physics step (substep).
 // - 'planar': x / y / yaw joints with position servos on the robot's root
 //   body (TidyBot): the pose target is integrated from the command.
 //
@@ -33,10 +37,21 @@ export const BASE_DEFAULTS = {
     ff: [1.0, 1.0, 3.0], kp: [1.6, 1.6, 4.0], ki: [0.0, 0.0, 4.0], iclamp: [0.5, 0.5, 2.0],
     accel: [2, 2, 4],
   },
+  // Its wheel velocity servos chatter (the left one flips ±2.3 rad/s every
+  // step, in MuJoCo too), so the wheels run on software servos.
+  'mujoco_menagerie/hello_robot_stretch_3/stretch.xml': {
+    kind: 'wheels',
+    base: '',
+    wheels: [{ joint: 'joint_left_wheel', roller: 0 }, { joint: 'joint_right_wheel', roller: 0 }],
+    radius: 0.0508,
+    drive: { forward: 0.3, back: 0.2, side: 0, turn: 1.0 },
+    ff: [1, 1, 1], kp: [0.5, 0.5, 0.3], ki: [0.3, 0.3, 0.2], iclamp: [0.2, 0.2, 0.2], accel: [0.5, 0.5, 1.0],
+  },
 };
 
 export const KINDS = [['', 'none'], ['wheels', 'wheels (differential, skid, mecanum)'], ['planar', 'planar joints (x, y, yaw)']];
 const STORE = 'mujoco-filament/base/';
+const WHEEL_RATE = 50;  // software wheel servo: 1/s (speed error -> angular acceleration)
 // Per axis (vx, vy, yaw rate): feedforward, P, I, integral limit, and the
 // command's acceleration limit (m/s², rad/s²): a step to full speed tips a
 // tall robot over (TIAGo, RB-Y1).
@@ -76,6 +91,7 @@ export class BaseController {
   reset() {
     this.integ = [0, 0, 0];
     this.ref = [0, 0, 0];  // the command after the acceleration limit
+    this.wheelTargets = null;  // software-servo wheels: target speeds (rad/s)
     this.goal = null;  // planar: the commanded [x, y, yaw]
   }
 
@@ -93,6 +109,7 @@ export class BaseController {
   }
 
   bind(mujoco, model, owner = () => null, bodies = [1, model.nbody]) {
+    this.muted = null;  // a fresh model: nothing muted in it
     this.mujoco = mujoco;
     this.model = model;
     this.owner = owner;
@@ -188,12 +205,26 @@ export class BaseController {
         }
         wheels.push({ actuator: this.nameOf('mjOBJ_ACTUATOR', a), roller, z: d.xanchor[3 * j + 2], j, a });
       }
+      // No driven wheels: unactuated, unlimited hinges with a level, low axle
+      // hanging right off the base (caster wheels hang off a swivel), on
+      // software servos.
+      if (wheels.length < 2) {
+        wheels.length = 0;
+        for (let j = 0; j < model.njnt; j++) {
+          const b = model.jnt_bodyid[j];
+          if (model.jnt_type[j] !== 3 || acts.has(j) || model.jnt_limited[j] || model.body_parentid[b] !== root || this.owner(j)) continue;
+          const { axis } = this.inBase(d, root, j);
+          if (Math.abs(axis[2]) > 0.3 || d.xanchor[3 * j + 2] > 0.5) continue;
+          wheels.push({ joint: this.nameOf('mjOBJ_JOINT', j), roller: 0, z: d.xanchor[3 * j + 2], j, a: -1 });
+        }
+      }
       if (wheels.length < 2) return { kind: '', auto: true };
       // Radius: the wheel axle's height in the default pose (the robot stands on z = 0).
       const radius = +Math.min(...wheels.map((w) => w.z)).toFixed(4);
       const mecanum = wheels.every((w) => w.roller);
       // Speeds within the slowest wheel's ctrlrange.
-      const wmax = Math.min(...wheels.map(({ a, j }) => {
+      const wmax = Math.min(...wheels.map(({ a }) => {
+        if (a < 0) return 10;  // software servo
         const hi = model.actuator_ctrllimited[a] ? Math.abs(model.actuator_ctrlrange[2 * a + 1] / model.actuator_gear[6 * a]) : 10;
         return BaseController.mode(model, a) === 'velocity' ? hi : 10;
       }));
@@ -202,7 +233,7 @@ export class BaseController {
       const baseName = this.nameOf('mjOBJ_JOINT', free);
       return {
         kind: 'wheels', base: this.id('mjOBJ_JOINT', baseName) === free ? baseName : '',
-        wheels: wheels.map(({ actuator, roller }) => ({ actuator, roller })),
+        wheels: wheels.map(({ actuator, joint, roller }) => (joint ? { joint, roller } : { actuator, roller })),
         radius, drive: { forward, back: +(0.6 * forward).toFixed(2), side: mecanum ? +(0.6 * forward).toFixed(2) : 0, turn: 0.8 },
         ...structuredClone(GAINS), kw: 1, auto: true,
       };
@@ -214,6 +245,7 @@ export class BaseController {
   // Rebuilds the resolved setup from this.config (after bind or an edit).
   resolve() {
     const { model, config: cfg } = this;
+    this.unmute();
     this.ready = false;
     this.error = null;
     this.joints = new Set();
@@ -243,8 +275,17 @@ export class BaseController {
         const d = this.rest();
         try {
           this.wheels = cfg.wheels.map((w) => {
-            const info = actuator(w.actuator);
-            if (info.mode === 'position') throw new Error(`${w.actuator} is a position servo`);
+            let info;
+            if (w.joint) {
+              const j = this.id('mjOBJ_JOINT', w.joint);
+              if (j < 0 || model.jnt_type[j] !== 3) throw new Error(`no hinge joint ${w.joint}`);
+              this.joints.add(j);
+              info = { j, mode: 'force', qadr: model.jnt_qposadr[j], dadr: model.jnt_dofadr[j] };
+              this.mute(j);  // an actuator on it would fight the software servo
+            } else {
+              info = actuator(w.actuator);
+              if (info.mode === 'position') throw new Error(`${w.actuator} is a position servo`);
+            }
             const { anchor, axis } = this.inBase(d, this.baseBody, info.j);
             const dir = [axis[1], -axis[0]], l = Math.hypot(...dir) || 1;
             const dn = [dir[0] / l, dir[1] / l], an = [axis[0] / l, axis[1] / l];
@@ -309,7 +350,11 @@ export class BaseController {
     // the loop would only chase caster and contact jitter.
     if (this.ref.every((r) => Math.abs(r) < 1e-3)) {
       this.integ = [0, 0, 0];
-      for (const wh of this.wheels) data.ctrl[wh.a] = wh.mode === 'velocity' ? 0 : clamp(-(cfg.kw ?? 1) * data.qvel[wh.dadr], wh.range);
+      this.wheelTargets = this.wheels.map(() => 0);
+      for (const wh of this.wheels) {
+        if (wh.mode === 'force') continue;  // substep holds it at 0
+        data.ctrl[wh.a] = wh.mode === 'velocity' ? 0 : clamp(-(cfg.kw ?? 1) * data.qvel[wh.dadr], wh.range);
+      }
       return;
     }
     const twist = [0, 1, 2].map((k) => {
@@ -317,11 +362,57 @@ export class BaseController {
       this.integ[k] = Math.max(-cfg.iclamp[k], Math.min(cfg.iclamp[k], this.integ[k] + cfg.ki[k] * e * dt));
       return cfg.ff[k] * this.ref[k] + cfg.kp[k] * e + this.integ[k];
     });
-    this.wheelSpeeds(twist).forEach((w, i) => {
+    this.wheelTargets = this.wheelSpeeds(twist);
+    this.wheelTargets.forEach((w, i) => {
       const wh = this.wheels[i];
+      if (wh.mode === 'force') return;  // substep
       // A velocity servo holds qdot = ctrl / gear; a motor gets a P loop on the wheel speed.
       const u = wh.mode === 'velocity' ? w * wh.gear : (cfg.kw ?? 1) * (w - data.qvel[wh.dadr]);
       data.ctrl[wh.a] = clamp(u, wh.range);
     });
+  }
+
+  // Every physics step (App.advance): the software-servo wheels' joint
+  // forces: a speed loop (gain from the wheel's inertia and WHEEL_RATE, at
+  // least its own damping, at most what an explicit force keeps stable)
+  // plus feedforward against the joint's damping and friction loss.
+  substep(data) {
+    if (!this.ready || this.config.kind !== 'wheels' || !this.wheelTargets) return;
+    const m = this.model, dt = m.opt.timestep;
+    this.wheels.forEach((wh, i) => {
+      if (wh.mode !== 'force') return;
+      const d = wh.dadr, w = this.wheelTargets[i], inertia = m.dof_M0[d];
+      const kv = Math.min(Math.max(inertia * WHEEL_RATE, m.dof_damping[d]), (1.5 * inertia) / dt);
+      data.qfrc_applied[d] = kv * (w - data.qvel[d]) + m.dof_damping[d] * w + m.dof_frictionloss[d] * Math.sign(w) + data.qfrc_bias[d];
+    });
+  }
+
+  // Stops the software-servo wheels (the base switched off) and gives their
+  // actuators back.
+  release(data) {
+    for (const wh of this.wheels ?? []) if (wh.mode === 'force') data.qfrc_applied[wh.dadr] = 0;
+    this.wheelTargets = null;
+    this.unmute();
+  }
+
+  // Switches off the actuators on joint j (gain and bias 0), remembering them.
+  mute(j) {
+    const { model } = this, g = model.actuator_gainprm, b = model.actuator_biasprm;
+    this.muted ??= [];
+    for (let a = 0; a < model.nu; a++) {
+      if (model.actuator_trntype[a] !== 0 || model.actuator_trnid[2 * a] !== j) continue;
+      this.muted.push([a, g.slice(10 * a, 10 * a + 3), b.slice(10 * a, 10 * a + 3)]);
+      g.fill(0, 10 * a, 10 * a + 3);
+      b.fill(0, 10 * a, 10 * a + 3);
+    }
+  }
+
+  unmute() {
+    if (!this.muted || !this.model) return;
+    for (const [a, g, b] of this.muted) {
+      this.model.actuator_gainprm.set(g, 10 * a);
+      this.model.actuator_biasprm.set(b, 10 * a);
+    }
+    this.muted = null;
   }
 }

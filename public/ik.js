@@ -17,10 +17,17 @@
 // the *commanded* joint positions (forward kinematics in a scratch MjData),
 // not the measured ones: sag under gravity does not wind the targets up.
 //
+// What moves a chain's joints, per joint: its own position servo; else a
+// position servo on a fixed tendon through it (one dof for the tendon's
+// length, e.g. Stretch's telescoping arm, whose joints share the motion);
+// else, with no actuator at all, a software servo of IK's own (a PD force
+// on the joint every physics step, substep). A dof is a joint position, a
+// tendon length or a software servo target.
+//
 // Configs, first found: one saved in localStorage from the Teleop panel,
 // IK_DEFAULTS per robot file (keyed like base.js's BASE_DEFAULTS), or one
 // made from the model (autoConfig): every serial run of at least MIN_CHAIN
-// free position-servo joints that ends a branch of the tree (an arm, a leg,
+// free movable joints that ends a branch of the tree (an arm, a leg,
 // a neck with enough joints), gripper/finger joints left out and their
 // actuator taken as the chain's gripper, and the tip put on the model's
 // TCP site when it has one (TCP_SITES).
@@ -55,6 +62,7 @@ const MAX_STEP = [0.03, 0.15];         // per tick: position error (m), rotation
 const MAX_SPEED = { 2: 0.15, 3: 2.0 }; // joint speed by type: slide (m/s), hinge (rad/s)
 const NULL_GAIN = 0.5;                 // pull towards the home posture (1/s), in the null space
 const ROT_WEIGHT = 0.3;                // m per rad: orientation error against position error
+const SERVO_OMEGA = 20;                // software servo bandwidth (rad/s), for joints no actuator moves
 
 const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
 const mulMV = (R, v) => [0, 3, 6].map((r) => R[r] * v[0] + R[r + 1] * v[1] + R[r + 2] * v[2]);
@@ -111,6 +119,8 @@ export class IkController {
     this.enabled = true; // holds every chain where it is until its marker moves
     this.chains = [];
     this.targets = new Map();  // chain name -> {pos, rot} in the root parent's frame
+    this.servoTargets = new Map();  // joint -> software servo target (joints no actuator moves)
+    this.applied = new Set();  // dofs the software servos push (qfrc_applied)
   }
 
   get hasDefaults() { return !!IK_DEFAULTS[this.key]; }
@@ -130,6 +140,7 @@ export class IkController {
   // Next tick, every target restarts where its tip is (after a reset).
   reset() {
     this.targets.clear();
+    this.servoTargets.clear();
   }
 
   pose() {}
@@ -159,15 +170,21 @@ export class IkController {
 
   // Chains found in the model (see the top of the file).
   autoConfig() {
-    const { model } = this, [b0, b1] = this.bodies, servo = this.servos();
+    const { model } = this, [b0, b1] = this.bodies, { servo, tendon } = this.drives();
     const inRobot = (b) => b >= b0 && b < b1;
+    // Movable: a position servo moves it, directly or through a tendon; on
+    // a robot with no position servos at all, any joint with a range
+    // (software servo; unlimited ones are wheels, casters, rollers).
+    let robotServos = false;
+    for (const j of [...servo.keys(), ...tendon.keys()]) if (inRobot(model.jnt_bodyid[j])) robotServos = true;
+    const movable = (j) => servo.has(j) || tendon.has(j) || (!robotServos && !!model.jnt_limited[j]);
     const own = new Map(), children = new Map();
     for (let b = b0; b < b1; b++) {
       let n = 0;
       // The robot's own root body (its base, free or on planar joints) stays out.
       for (let j = model.body_jntadr[b], e = b === b0 ? j : j + model.body_jntnum[b]; j >= 0 && j < e; j++) {
         const type = model.jnt_type[j];
-        if ((type === 2 || type === 3) && servo.has(j) && !this.owner(j) && !GRIPPER_JOINT.test(this.nameOf('mjOBJ_JOINT', j))) n++;
+        if ((type === 2 || type === 3) && movable(j) && !this.owner(j) && !GRIPPER_JOINT.test(this.nameOf('mjOBJ_JOINT', j))) n++;
       }
       own.set(b, n);
       children.set(b, []);
@@ -290,13 +307,20 @@ export class IkController {
   resolve() {
     const { model } = this;
     if (!model) return;
-    const servo = this.servos();
+    const { servo, tendon } = this.drives();
     // Joint equalities: follower -> [leader, coefficient] (q_f = c0 + c1 q_l + …).
     const follows = new Map();
     for (let e = 0; e < model.neq; e++) {
       if (model.eq_type[e] !== this.mujoco.mjtEq.mjEQ_JOINT.value || model.eq_obj2id[e] < 0) continue;
       follows.set(model.eq_obj1id[e], [model.eq_obj2id[e], model.eq_data[11 * e + 1]]);
     }
+    const ctrlRange = (a, gear, range) => {
+      if (!model.actuator_ctrllimited[a]) return range;
+      const [lo, hi] = [model.actuator_ctrlrange[2 * a], model.actuator_ctrlrange[2 * a + 1]].map((v) => v / gear).sort((x, y) => x - y);
+      return [Math.max(range[0], lo), Math.min(range[1], hi)];
+    };
+    const jointRange = (j) => (model.jnt_limited[j] ? [model.jnt_range[2 * j], model.jnt_range[2 * j + 1]] : [-Infinity, Infinity]);
+    const info = (j, c = 1) => ({ j, c, qadr: model.jnt_qposadr[j], dadr: model.jnt_dofadr[j] });
     this.chains = this.config.chains.map((cfg) => {
       const chain = { cfg, joints: [], active: [], followers: [], error: null };
       chain.tip = this.id('mjOBJ_BODY', cfg.tip);
@@ -311,42 +335,104 @@ export class IkController {
       const at = path.indexOf(chain.root);
       if (at < 0) { chain.error = `${cfg.root} is not ${cfg.tip} or above it`; return chain; }
       chain.gripper = cfg.gripper ? this.id('mjOBJ_ACTUATOR', cfg.gripper) : -1;
+      const byTendon = new Map();  // actuator -> its dof, shared by the tendon's joints in the chain
       for (const b of path.slice(0, at + 1).reverse()) {
         for (let j = model.body_jntadr[b], n = j + model.body_jntnum[b]; j >= 0 && j < n; j++) {
           const type = model.jnt_type[j], name = this.nameOf('mjOBJ_JOINT', j);
-          const joint = { j, name, type, qadr: model.jnt_qposadr[j], status: 'ok' };
-          const a = servo.get(j), own = this.owner(j);
+          const joint = { j, name, type, qadr: model.jnt_qposadr[j], status: '', active: false };
+          const own = this.owner(j), ten = tendon.get(j);
+          let dof = null;
           if (type !== 2 && type !== 3) joint.status = 'free or ball joint';
           else if (own) joint.status = `driven by ${own}`;
-          else if (a === undefined) joint.status = follows.has(j) ? `follows ${this.nameOf('mjOBJ_JOINT', follows.get(j)[0])}` : 'no position actuator';
-          else if (cfg.locked.includes(name)) joint.status = 'locked';
-          if (joint.status === 'ok') {
-            joint.act = a;
-            joint.gear = model.actuator_gear[6 * a];
-            joint.range = model.jnt_limited[j] ? [model.jnt_range[2 * j], model.jnt_range[2 * j + 1]] : [-Infinity, Infinity];
-            if (model.actuator_ctrllimited[a]) {
-              const [lo, hi] = [model.actuator_ctrlrange[2 * a], model.actuator_ctrlrange[2 * a + 1]].map((v) => v / joint.gear).sort((x, y) => x - y);
-              joint.range = [Math.max(joint.range[0], lo), Math.min(joint.range[1], hi)];
-            }
+          else if (servo.has(j)) {
+            const a = servo.get(j), gear = model.actuator_gear[6 * a];
+            dof = { kind: 'joint', name, joints: [info(j)], k: 1, act: a, gear, type, range: ctrlRange(a, gear, jointRange(j)) };
+          } else if (ten) {
+            // A position servo on a fixed tendon through this joint (Stretch's
+            // telescoping arm): one dof for the tendon's length, its joints
+            // moving by c_i L / sum c² (the least-norm split).
+            joint.status = `via ${this.nameOf('mjOBJ_ACTUATOR', ten.a)} (tendon)`;
+            dof = byTendon.get(ten.a);
+            if (!dof) {
+              let range = ctrlRange(ten.a, ten.gear, [-Infinity, Infinity]);
+              if (model.tendon_limited[ten.t]) range = [Math.max(range[0], model.tendon_range[2 * ten.t]), Math.min(range[1], model.tendon_range[2 * ten.t + 1])];
+              dof = { kind: 'tendon', name: this.nameOf('mjOBJ_ACTUATOR', ten.a), joints: ten.joints.map(([jj, c]) => info(jj, c)),
+                k: ten.joints.reduce((sum, [, c]) => sum + c * c, 0), act: ten.a, gear: ten.gear, type, range };
+              byTendon.set(ten.a, dof);
+            } else dof = null;  // already in the chain
+            joint.dof = byTendon.get(ten.a);
+          } else if (follows.has(j)) {
+            joint.status = `follows ${this.nameOf('mjOBJ_JOINT', follows.get(j)[0])}`;
+          } else {
+            // No actuator moves it: IK drives it with a force of its own
+            // (substep: PD on the target plus gravity compensation).
+            joint.status = 'software servo';
+            dof = { kind: 'servo', name, joints: [info(j)], k: 1, type, range: jointRange(j) };
           }
+          if (dof) joint.dof = dof;
+          if (joint.dof && cfg.locked.includes(name)) joint.locked = true;
           if (follows.has(j)) joint.follows = follows.get(j);
           chain.joints.push(joint);
+          if (dof) chain.active.push(dof);
         }
       }
-      chain.active = chain.joints.filter((jt) => jt.status === 'ok');
-      // Followers whose leader moves: [follower, leader index in active, coefficient].
+      // A locked joint takes its whole dof (a tendon's other joints too) out.
+      const locked = new Set(chain.joints.filter((jt) => jt.locked).map((jt) => jt.dof));
+      chain.active = chain.active.filter((d) => !locked.has(d));
+      for (const jt of chain.joints) {
+        jt.active = !!jt.dof && !locked.has(jt.dof);
+        if (jt.locked) jt.status = 'locked';
+        else if (jt.dof && !jt.active) jt.status = `locked with ${jt.dof.name}`;
+        else if (jt.active && !jt.status) jt.status = 'ok';
+      }
+      // Followers whose leader moves: [follower, leader dof index, coefficient].
       chain.followers = chain.joints.flatMap((jt) => {
-        if (!jt.follows || jt.status === 'ok') return [];
-        const k = chain.active.findIndex((l) => l.j === jt.follows[0]);
+        if (!jt.follows || jt.dof) return [];
+        const k = chain.active.findIndex((d) => d.joints.length === 1 && d.joints[0].j === jt.follows[0]);
         return k < 0 ? [] : [[jt, k, jt.follows[1]]];
       });
       if (!chain.active.length) { chain.error = 'no joint it can move'; return chain; }
       // The target's frame: the parent of the first body the chain moves, so
       // a root on a free joint (G1's pelvis) or above joints owned elsewhere
       // still puts the target on the robot, not in the world.
-      chain.ref = model.body_parentid[model.jnt_bodyid[chain.active[0].j]];
+      chain.ref = model.body_parentid[model.jnt_bodyid[chain.active[0].joints[0].j]];
       return chain;
     });
+  }
+
+  // What can move each joint: {servo: joint -> its position servo, tendon:
+  // joint -> {a, t, gear, joints: [[joint, coef]]} for a position servo on a
+  // fixed tendon through it}.
+  drives() {
+    const { model } = this, servo = this.servos(), tendon = new Map();
+    const T = this.mujoco.mjtTrn.mjTRN_TENDON.value;
+    for (let a = 0; a < model.nu; a++) {
+      if (model.actuator_trntype[a] !== T || model.actuator_biasprm[10 * a + 1] >= 0) continue;
+      const t = model.actuator_trnid[2 * a], joints = [];
+      let fixed = true;
+      for (let w = model.tendon_adr[t], e = w + model.tendon_num[t]; w < e; w++) {
+        if (model.wrap_type[w] !== 1) { fixed = false; break; }  // mjWRAP_JOINT
+        joints.push([model.wrap_objid[w], model.wrap_prm[w]]);
+      }
+      if (!fixed) continue;
+      const ten = { a, t, gear: model.actuator_gear[6 * a], joints };
+      for (const [j] of joints) if (!servo.has(j) && !tendon.has(j)) tendon.set(j, ten);
+    }
+    return { servo, tendon };
+  }
+
+  // A dof's commanded value: its servo's target (joint position or tendon
+  // length), or the software servo's.
+  value(dof, data) {
+    if (dof.kind !== 'servo') return data.ctrl[dof.act] / dof.gear;
+    const { j, qadr } = dof.joints[0];
+    if (!this.servoTargets.has(j)) this.servoTargets.set(j, data.qpos[qadr]);
+    return this.servoTargets.get(j);
+  }
+
+  setValue(dof, data, v) {
+    if (dof.kind === 'servo') this.servoTargets.set(dof.joints[0].j, v);
+    else data.ctrl[dof.act] = v * dof.gear;
   }
 
   // Forward kinematics of the commanded joint positions into this.scratch.
@@ -354,11 +440,41 @@ export class IkController {
     const s = this.scratch;
     s.qpos.set(data.qpos);
     for (const chain of this.chains) {
-      for (const jt of chain.active) s.qpos[jt.qadr] = data.ctrl[jt.act] / jt.gear;
-      for (const [f, k, c] of chain.followers) s.qpos[f.qadr] = c * s.qpos[chain.active[k].qadr];
+      for (const dof of chain.active) {
+        const v = this.value(dof, data);
+        for (const { qadr, c } of dof.joints) s.qpos[qadr] = (c * v) / dof.k;
+      }
+      for (const [f, k, c] of chain.followers) s.qpos[f.qadr] = c * s.qpos[chain.active[k].joints[0].qadr];
     }
     this.mujoco.mj_kinematics(this.model, s);
     return s;
+  }
+
+  // Every physics step (App.advance): the software servos' joint forces, a
+  // critically damped PD (SERVO_OMEGA) on their targets scaled by the
+  // joint's inertia, plus gravity and Coriolis compensation.
+  substep(data) {
+    const want = new Set();
+    if (this.enabled) {
+      for (const chain of this.chains) {
+        if (chain.error) continue;
+        for (const dof of chain.active) {
+          if (dof.kind !== 'servo' || !this.servoTargets.has(dof.joints[0].j)) continue;
+          const { j, qadr, dadr } = dof.joints[0], w = SERVO_OMEGA;
+          const m = this.model.dof_M0[dadr];
+          data.qfrc_applied[dadr] = m * (w * w * (this.servoTargets.get(j) - data.qpos[qadr]) - 2 * w * data.qvel[dadr]) + data.qfrc_bias[dadr];
+          want.add(dadr);
+        }
+      }
+    }
+    for (const d of this.applied) if (!want.has(d)) data.qfrc_applied[d] = 0;
+    this.applied = want;
+  }
+
+  // Stops the software servos (IK switched off).
+  release(data) {
+    for (const d of this.applied) data.qfrc_applied[d] = 0;
+    this.applied = new Set();
   }
 
   // World pose {pos, rot} of body b with a local offset, from MjData d.
@@ -383,7 +499,7 @@ export class IkController {
       s ??= this.commanded(data);
       const tip = this.tipFrame(s, chain), ref = IkController.frame(s, chain.ref);
       t = { pos: mulTV(ref.rot, tip.pos.map((v, i) => v - ref.pos[i])), rot: mulTM(ref.rot, tip.rot) };
-      t.home = chain.active.map((jt) => s.qpos[jt.qadr]);
+      t.home = chain.active.map((dof) => this.value(dof, data));
       this.targets.set(chain.cfg.name, t);
     }
     return t;
@@ -430,14 +546,22 @@ export class IkController {
     ep = cap(ep, MAX_STEP[0]);
     er = cap(er, MAX_STEP[1]);
 
-    // Jacobian columns: d(tip position), d(tip rotation) per active joint.
+    // Jacobian columns: d(tip position), d(tip rotation) per active dof (a
+    // tendon's: its joints' columns weighted by their share c_i / sum c²).
     const col = (j, scale = 1) => {
       const a = s.xaxis.subarray(3 * j, 3 * j + 3);
       if (this.model.jnt_type[j] === 2) return [[...a].map((k) => k * scale), [0, 0, 0]];
       const r = cross(a, tip.pos.map((v, i) => v - s.xanchor[3 * j + i]));
       return [r.map((k) => k * scale), [...a].map((k) => k * scale)];
     };
-    const cols = active.map((jt) => col(jt.j));
+    const cols = active.map((dof) => {
+      const sum = [[0, 0, 0], [0, 0, 0]];
+      for (const { j, c } of dof.joints) {
+        const [p, r] = col(j, c / dof.k);
+        for (let i = 0; i < 3; i++) { sum[0][i] += p[i]; sum[1][i] += r[i]; }
+      }
+      return sum;
+    });
     for (const [f, k, c] of chain.followers) {
       const [p, r] = col(f.j, c);
       for (let i = 0; i < 3; i++) { cols[k][0][i] += p[i]; cols[k][1][i] += r[i]; }
@@ -447,7 +571,7 @@ export class IkController {
     const rows = [], e = [], w = ROT_WEIGHT;
     for (let i = 0; i < 3; i++) { rows.push(cols.map((c) => c[0][i])); e.push(ep[i]); }
     for (let i = 0; i < 3; i++) { rows.push(cols.map((c) => c[1][i] * w)); e.push(er[i] * w); }
-    const q = active.map((jt) => s.qpos[jt.qadr]);
+    const q = active.map((dof) => this.value(dof, data));
 
     // dq = Jᵀ (J Jᵀ + λ² I)⁻¹ e, plus the home pull projected into J's null
     // space. A joint the step would push past its range is taken out (its
@@ -469,9 +593,8 @@ export class IkController {
     // Joint speed limits, scaling the whole step so its direction is kept.
     const over = Math.max(1, ...active.map((jt, c) => Math.abs(dq[c]) / (MAX_SPEED[jt.type] * dt)));
     const scale = 1 / over;
-    active.forEach((jt, c) => {
-      const v = Math.max(jt.range[0], Math.min(jt.range[1], q[c] + dq[c] * scale));
-      data.ctrl[jt.act] = v * jt.gear;
+    active.forEach((dof, c) => {
+      this.setValue(dof, data, Math.max(dof.range[0], Math.min(dof.range[1], q[c] + dq[c] * scale)));
     });
   }
 

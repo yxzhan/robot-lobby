@@ -17,13 +17,15 @@ import loadMujoco from './vendor/mujoco/mujoco.js';
 import { loadModelFiles, readFirst, urlSource } from './vfs.js';
 import { bodyInertia, compileWorld, firstKey, referencedNames } from './world.js';
 import { CONTROL_DT } from './groot.js';
-import { defaultPolicy, loadPolicy, policyById } from './policy.js';
+import { defaultPolicy, loadPolicy, loadPolicyIndex, policyById } from './policy.js';
 import { Perturb, StagePanel } from './inspect.js';
 import { AssetPanel, loadAssets } from './assets.js';
 import { AxisGizmo } from './gizmo.js';
 import { TeleopPanel } from './teleop.js';
 import { BaseController } from './base.js';
 import { IkController } from './ik.js';
+import { applyOptions, geomOverrides, geomSignature, injectGeomDefaults, loadPhysics, savePhysics } from './physics.js';
+import { WorldPanel } from './worldpanel.js';
 import { MARKER } from './marker.js';
 import { CHAIN_COLORS } from './teleop.js';
 import Stats from './vendor/stats/Stats.js';
@@ -500,7 +502,7 @@ class App {
     this.scene.setIndirectLight(
       Filament.IndirectLight.Builder().irradianceSh(3, sh).intensity(25000).build(engine));
 
-    // The floor of world.js's BASE_XML (a size-0, i.e. infinite, plane), drawn
+    // The floor of world.js's base XML (a size-0, i.e. infinite, plane), drawn
     // 40 m x 40 m: 40 x 40 checker cells.
     const floor = this.matChecker.createInstance();
     floor.setColor3Parameter('color1', Filament.RgbType.sRGB, [0.25, 0.3, 0.36]);
@@ -727,6 +729,34 @@ class App {
     this.syncTransforms();
   }
 
+  // The free joint of the robot's root body, or -1 (a fixed base: placed by
+  // its attach frame, robot.pos / robot.yaw).
+  rootFreeJoint(robot) {
+    const m = this.model, b = robot.bodyOffset;
+    if (!m || !(m.body_jntnum[b] > 0)) return -1;
+    const j = m.body_jntadr[b];
+    return m.jnt_type[j] === 0 ? j : -1;
+  }
+
+  // Moves a robot on a free joint to `pos` with orientation `quat` (w, x, y,
+  // z), at rest, at once (no rebuild); also its spawn pose (Reset, saved
+  // stage). False for a fixed base.
+  placeFree(robot, pos, quat) {
+    const j = this.rootFreeJoint(robot);
+    if (j < 0) return false;
+    const { mujoco, model, data } = this, adr = model.jnt_qposadr[j], dof = model.jnt_dofadr[j];
+    data.qpos.set(pos, adr);
+    data.qpos.set(quat, adr + 3);
+    data.qvel.fill(0, dof, dof + 6);
+    const at = stateLayout(this.robots).get(robot);
+    if (robot.initial && at) robot.initial.qpos.set(data.qpos.subarray(adr, adr + 7), adr - at.qpos);
+    robot.pos = [...pos];
+    robot.yaw = Math.atan2(2 * (quat[0] * quat[3] + quat[1] * quat[2]), 1 - 2 * (quat[2] * quat[2] + quat[3] * quat[3]));
+    mujoco.mj_forward(model, data);
+    this.syncTransforms();
+    return true;
+  }
+
   writeInitial(robot, at) {
     if (!robot.initial) return;
     this.data.qpos.set(robot.initial.qpos, at.qpos);
@@ -898,6 +928,7 @@ class App {
         this.nextControl += CONTROL_DT;
       }
       this.perturb.apply();
+      for (const c of this.controllers) c.substep?.(data);  // software servos (ik.js, base.js)
       mujoco.mj_step(model, data);
     }
     if (data.time < target) this.simStart = performance.now() - data.time * 1000;
@@ -1103,10 +1134,13 @@ try {
   const app = new App(document.getElementById('canvas'));
   app.panel = new StagePanel(app, document.getElementById('stage'), {
     onRemove: (robot) => respawn(robots.filter((r) => r !== robot)),
+    onMove: (robot, pos, yaw) => moveFixed(robot, pos, yaw),
     onSave: () => saveStage(),
     onForget: () => forgetStage(),
   });
   app.teleop = new TeleopPanel(app, document.getElementById('teleop'));
+  app.physics = loadPhysics();  // World panel settings (physics.js)
+  app.world = new WorldPanel(app, document.getElementById('world'));
   // Frame meter (stats.js) in the bottom-right corner; click it to cycle
   // FPS / ms per frame (JS time of App.frame) / MB of JS heap.
   app.stats = new Stats();
@@ -1119,7 +1153,7 @@ try {
 
   // The model library index written by scripts/vendor.mjs (empty without
   // mjcf_assets/).
-  const assets = await loadAssets();
+  const [assets] = await Promise.all([loadAssets(), loadPolicyIndex()]);
 
   // Asset paths (`rel`) are under public/:
   // 'mjcf_assets/<category>/<source>/<model>/<file>.xml'.
@@ -1143,14 +1177,15 @@ try {
     if (!visuals.has(rel)) {
       const pending = (async () => {
         const mujoco = await loadMujoco();  // throwaway: dropped after this
-        const { path, images, docs } = await loadModelFiles(mujoco, models, '/models', rel, progress);
+        const sig = geomSignature(app.physics);
+        const { path, images, docs } = await loadModelFiles(mujoco, models, '/models', rel, progress, editDocs);
         progress(`preparing ${label} for rendering…`);
         await nextFrame();
         const model = mujoco.MjModel.from_xml_path(path);
         try {
           return {
             rel, parts: app.buildVisual(mujoco, model, images, models),
-            inertia: bodyInertia(model), key: firstKey(docs), refs: referencedNames(docs),
+            inertia: bodyInertia(model), sig, key: firstKey(docs), refs: referencedNames(docs),
             dims: { nq: model.nq, nv: model.nv, na: model.na, nu: model.nu, nmocap: model.nmocap },
           };
         } finally {
@@ -1161,6 +1196,33 @@ try {
       visuals.set(rel, pending);
     }
     return visuals.get(rel);
+  }
+
+  // The World panel's default geom properties, written into every model's
+  // root default class before it is compiled (physics.js).
+  const editDocs = (docs) => injectGeomDefaults(docs, geomOverrides(app.physics));
+
+  // `visual` with the body inertias of its full compile under the current
+  // default geom properties (they set masses), compiled again if they
+  // changed since it was made.
+  const inertias = new Map();  // rel + signature -> Promise of bodyInertia
+  async function withPhysics(visual, progress = () => {}) {
+    const sig = geomSignature(app.physics);
+    if (visual.sig === sig) return visual;
+    const k = `${visual.rel}\n${sig}`;
+    if (!inertias.has(k)) {
+      const pending = (async () => {
+        const mujoco = await loadMujoco();
+        const { path } = await loadModelFiles(mujoco, models, '/models', visual.rel, progress, editDocs);
+        progress(`computing masses of ${visual.rel.split('/').at(-1)}…`);
+        await nextFrame();
+        const model = mujoco.MjModel.from_xml_path(path);
+        try { return bodyInertia(model); } finally { model.delete(); }
+      })();
+      pending.catch(() => inertias.delete(k));
+      inertias.set(k, pending);
+    }
+    return { ...visual, inertia: await inertias.get(k), sig };
   }
 
   const robots = [];  // spawned, in attach order: {label, visual, prefix, pos, yaw, entities, bodyOffset, policy, base, ik, use}
@@ -1235,7 +1297,8 @@ try {
     } else {
       r.use[kind] = on;
     }
-    if (kind === 'base') r.base.reset();
+    if (kind === 'base') { r.base.reset(); if (on) r.base.resolve(); else r.base.release(app.data); }
+    if (kind === 'ik' && !on) r.ik?.release(app.data);
     // What the policy or base drives is off limits to IK: find the chains
     // again (an automatic setup may change, e.g. G1 legs without GR00T).
     if (kind !== 'ik' && r.ik?.config?.auto) r.ik.config = null;
@@ -1253,12 +1316,12 @@ try {
     const mujoco = await loadMujoco();
     const specs = [];
     for (const r of list) {
-      const { path } = await loadModelFiles(mujoco, models, '/models', r.visual.rel);
+      const { path } = await loadModelFiles(mujoco, models, '/models', r.visual.rel, () => {}, editDocs);
       specs.push({ path, prefix: r.prefix, pos: r.pos, yaw: r.yaw, strip: { refs: r.visual.refs, inertia: r.visual.inertia } });
     }
     progress(`compiling ${list.length} robots…`);
     await nextFrame();
-    const model = compileWorld(mujoco, specs);
+    const model = compileWorld(mujoco, specs, app.physics);
     let offset = 1;
     for (const r of list) {
       r.bodyOffset = offset;
@@ -1276,6 +1339,7 @@ try {
     // Controlled robots: find their joints and actuators in the new model
     // (GR00T also sets its actuator gains to the policy's PD gains).
     for (const r of list) {
+      if (!r.use) continue;  // environments and objects have no controllers
       if (r.use.policy && r.policy && !bindController(r, 'policy', mujoco, model)) r.use.policy = '';
       if (r.base) bindController(r, 'base', mujoco, model);
       r.use.base ??= !!r.base?.config?.kind;
@@ -1342,7 +1406,7 @@ try {
         liftAboveFloor(data, fresh, q0, nq);
       }
       if (key?.ctrl?.length === nu) data.ctrl.set(key.ctrl, u0);
-      if (fresh.use.policy) fresh.policy?.pose(data);
+      if (fresh.use?.policy) fresh.policy?.pose(data);
     }
     // Reset returns a robot to its spawn pose.
     for (const r of fresh) {
@@ -1356,7 +1420,7 @@ try {
 
   // A new robot (not in the world yet) for asset file `rel`.
   async function makeRobot(rel, label, pos, yaw, progress) {
-    const visual = await robotVisual(rel, label, progress);
+    const visual = await withPhysics(await robotVisual(rel, label, progress), progress);
     const robot = { label, visual, prefix: `r${nextId++}/`, pos, yaw };
     // Every robot gets the controllers of the Teleop panel, each switched
     // on or off (robot.use): a trained policy (policy.js), a mobile base and
@@ -1409,6 +1473,70 @@ try {
       busy = false;
       setBusy(null);
     }
+  }
+
+  // New World panel settings: global options go straight into the live
+  // model; changed default geom properties recompile every model's masses
+  // and rebuild the world (state kept). Resolves to false if busy.
+  app.setPhysics = async (next) => {
+    const rebuildNeeded = geomSignature(next) !== geomSignature(app.physics);
+    if (rebuildNeeded && busy) return false;
+    app.physics = next;
+    savePhysics(next);
+    if (app.model) applyOptions(app.model, next);
+    if (!rebuildNeeded || !app.model) return true;
+    busy = true;
+    const progress = (msg) => { status.textContent = msg; setBusy(msg); };
+    progress('applying default geom properties…');
+    try {
+      for (const r of robots) r.visual = await withPhysics(r.visual, progress);
+      await rebuild([...robots], [], progress);
+      status.textContent = hint();
+    } catch (err) {
+      status.textContent = `failed: ${err.message ?? err}`;
+      console.error(err);
+    } finally {
+      busy = false;
+      setBusy(null);
+    }
+    return true;
+  };
+
+  // A fixed-base robot to a new attach frame: the world is rebuilt (its
+  // state kept). Resolves to false if busy.
+  async function moveFixed(robot, pos, yaw) {
+    if (busy) return false;
+    busy = true;
+    const old = [robot.pos, robot.yaw];
+    [robot.pos, robot.yaw] = [[...pos], yaw];
+    const progress = (msg) => { status.textContent = msg; setBusy(msg); };
+    progress(`moving ${robot.label}…`);
+    try {
+      await rebuild([...robots], [], progress);
+      // Its mocap bodies are state (kept by the rebuild): carry them along.
+      const { model, data, mujoco } = app, [p0, y0] = [old[0], old[1] ?? 0], dy = yaw - y0;
+      const c0 = Math.cos(-y0), s0 = Math.sin(-y0), c1 = Math.cos(yaw), s1 = Math.sin(yaw);
+      for (let b = robot.bodyOffset; b < robot.bodyOffset + robot.visual.inertia.nbody - 1; b++) {
+        const k = model.body_mocapid[b];
+        if (k < 0) continue;
+        const mp = data.mocap_pos.subarray(3 * k, 3 * k + 3), mq = data.mocap_quat.subarray(4 * k, 4 * k + 4);
+        const lx = c0 * (mp[0] - p0[0]) - s0 * (mp[1] - p0[1]), ly = s0 * (mp[0] - p0[0]) + c0 * (mp[1] - p0[1]);
+        mp.set([pos[0] + c1 * lx - s1 * ly, pos[1] + s1 * lx + c1 * ly, mp[2] - p0[2] + pos[2]]);
+        const hw = Math.cos(dy / 2), hz = Math.sin(dy / 2), [w, x, y, z] = mq;  // (hw, 0, 0, hz) * quat
+        mq.set([hw * w - hz * z, hw * x - hz * y, hw * y + hz * x, hw * z + hz * w]);
+      }
+      mujoco.mj_forward(model, data);
+      app.syncTransforms();
+      status.textContent = hint();
+    } catch (err) {
+      [robot.pos, robot.yaw] = old;
+      status.textContent = `failed: ${err.message ?? err}`;
+      console.error(err);
+    } finally {
+      busy = false;
+      setBusy(null);
+    }
+    return true;
   }
 
   // The saved stage: what is spawned, where and heading where (no joint

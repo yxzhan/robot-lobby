@@ -44,7 +44,8 @@
     #assets li.group.folded .caret::before { content: '▸'; }
     #assets li.empty { grid-column: 1 / -1; color: #999; cursor: default; font-size: 12px; display: block; }
     #assets .hint { color: #999; font-size: 12px; }
-    #stats { position: absolute; right: 12px; bottom: 12px; cursor: pointer; opacity: .9; }
+    /* Flush with the corner, under the side panels when they reach down. */
+    #stats { position: absolute; right: 0; bottom: 0; z-index: 0; cursor: pointer; opacity: .9; }
     #gizmo { position: absolute; left: 12px; bottom: 12px; width: 84px; height: 84px; }
     .drag-ghost { position: fixed; left: 0; top: 0; pointer-events: none; z-index: 10; color: #fff;
                   background: rgba(40,40,40,.85); border: 1px solid #666; padding: 3px 8px; border-radius: 4px; }
@@ -61,7 +62,7 @@
     #views button[aria-pressed=true] { color: #fff; background: #3d5a73; border-color: #5a85a8; }
     #views button[aria-pressed=true]::before { background: #7fd1ff; box-shadow: 0 0 6px #7fd1ff; }
     /* Right column: Stage on top (scrolls), Teleop below it. */
-    #side { position: absolute; top: 60px; right: 12px; width: 320px; max-height: calc(100% - 72px - 60px);
+    #side { position: absolute; top: 60px; right: 12px; width: 320px; max-height: calc(100% - 72px); z-index: 1;
             display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
     #side > * { pointer-events: auto; box-sizing: border-box; color: #ddd; background: rgba(0,0,0,.6);
                 padding: 8px 10px; border-radius: 6px; }
@@ -102,6 +103,22 @@
     #teleop .joints label.off { color: #777; }
     #teleop .joints .why { margin-left: auto; color: #888; font-style: italic; }
     #teleop .error { color: #f88; margin: 4px 0; }
+    #world { overflow: hidden auto; min-height: 0; flex: 0 5 auto; font-size: 12px; }
+    #world h3 { margin: 0 0 6px; font-size: 13px; }
+    #world .field { display: grid; grid-template-columns: 64px 1fr 38px; align-items: center; gap: 6px; margin: 3px 0; }
+    #world .ctl { display: flex; gap: 4px; min-width: 0; }
+    #world .unit { color: #888; font-size: 11px; }
+    #world input[type=number] { width: 0; flex: 1; min-width: 0; font: inherit; color: #eee; background: #222;
+                                border: 1px solid #555; border-radius: 4px; padding: 1px 3px; }
+    #world .hint { color: #999; margin: 4px 0; line-height: 1.5; }
+    #world .sub { margin-top: 8px; padding-top: 6px; border-top: 1px solid #3a3d44; font-weight: 600; }
+    #world .sub.minor { border-top: 0; margin-top: 4px; padding-top: 0; color: #aaa; font-weight: 400; }
+    #world .bar { display: flex; align-items: center; gap: 4px; margin-top: 6px; }
+    #world button { cursor: pointer; font: inherit; font-size: 11px; color: #ddd; background: #333;
+                    border: 1px solid #555; border-radius: 4px; padding: 2px 8px; }
+    #world button.primary { background: #2f5a3c; border-color: #4d8a5f; }
+    #world button:disabled { opacity: .5; cursor: default; }
+    #world .note { color: #c9a; font-size: 11px; }
     #teleop .chips { display: flex; gap: 4px; flex-wrap: wrap; }
     #teleop .chip { display: flex; align-items: center; gap: 3px; padding: 1px 7px 1px 3px; border: 1px solid #555;
                     border-radius: 10px; background: #2a2c31; cursor: pointer; }
@@ -112,6 +129,10 @@
     #teleop .gains input { width: auto; }
     #teleop .base .ctl select:first-child { flex: 2; }
     #stage[hidden] { display: none; }
+    #stage .pose { display: grid; grid-template-columns: 64px repeat(3, 1fr); gap: 4px; align-items: center; margin: 3px 0 3px 12px; font-size: 12px; }
+    #stage .pose input { width: 0; min-width: 100%; box-sizing: border-box; font: inherit; color: #eee; background: #222;
+                         border: 1px solid #555; border-radius: 4px; padding: 1px 3px; }
+    #stage .pose input:disabled { opacity: .4; }
     #stage .hint { color: #999; margin: 2px 0 6px; font-size: 12px; }
     #stage summary { cursor: pointer; padding: 4px 0; font-weight: 600; }
     #stage > details { border-top: 1px solid #3a3d44; }
@@ -166,6 +187,7 @@
   <div id="views" role="group" aria-label="Panels">
     <button data-panel="assets" title="Show or hide the asset library">Assets</button>
     <button data-panel="stage" title="Spawned robots: joints, controls, reset, remove">Stage</button>
+    <button data-panel="world" title="World physics: gravity, medium, default geom properties">World</button>
     <button data-panel="teleop" title="Teleoperate a robot: controller and input">Teleop</button>
   </div>
   <div id="assets">
@@ -184,6 +206,10 @@
     <div>Selected: <span id="selected">none</span></div>
     <div class="hint">Double-click a body to select it, Shift+drag to pull it. Joints can be set while paused.</div>
     <div class="hint empty">Nothing spawned yet: drag an asset onto the floor.</div>
+  </div>
+  <div id="world" hidden>
+    <h3>World</h3>
+    <div class="body"></div>
   </div>
   <div id="teleop">
     <h3>Teleop</h3>
