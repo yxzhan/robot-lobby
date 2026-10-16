@@ -89,6 +89,7 @@ try {
     // environment), from the default camera angle, then let textures load.
     await ev(`(() => {
       app.paused = true;
+      app.setOriginMarker(false);
       const { model: m, data: d } = app;
       const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
       for (let g = 1; g < m.ngeom; g++) {

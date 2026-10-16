@@ -12,7 +12,8 @@ npm start        # python3 scripts/serve.py 4000: public/ with Cache-Control: no
 Open http://localhost:4000 (in JupyterHub: `.../user/<name>/proxy/4000/` — all
 URLs are relative, so the path proxy works). Left-drag orbits, right-drag pans,
 wheel zooms. The gizmo in the bottom-left corner shows the world axes (Z up);
-click an axis to look along it (`public/gizmo.js`). The meter in the
+click an axis to look along it (`public/gizmo.js`); the same colored axes
+(30 cm) mark the world origin on the floor. The meter in the
 bottom-right corner is stats.js: click it to cycle FPS / ms per frame / MB.
 
 ## Spawning robots
@@ -27,7 +28,7 @@ shows the height; it is kept for the next drag), and Esc cancels. The drag
 label shows the spawn position and heading. The toolbar (top left) runs the
 simulation: Undo removes the last one, Clear all of them, Reset puts every
 robot back in its spawn pose. The toggles at the top right show or hide the
-Assets, Stage and Control panels.
+Assets, Stage and Teleop panels.
 
 Like MuJoCo's simulate: double-click a body to select it (double-click the
 floor to deselect) and Shift+drag to pull it with a spring
@@ -128,7 +129,7 @@ does not ship; `iit_softfoot` (an `<asset><model>` sub-model) fails to attach. S
 If the GR00T locomotion policies are checked out next to `package.json`
 (`git clone https://huggingface.co/nepyope/GR00T-WholeBodyControl_g1`),
 `npm install` links them as `public/groot`, and every spawned `unitree_g1`
-walks under them. The Control panel (`public/control.js`) picks which one
+walks under them. The Teleop panel (`public/teleop.js`) picks which one
 is driven (the newest by default, or the one double-clicked; double-clicking
 anything else releases it; the others get a zero command and stand)
 and, later, by which controller and input; with the keyboard: **WASD** walk,

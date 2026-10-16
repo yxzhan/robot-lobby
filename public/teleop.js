@@ -1,4 +1,4 @@
-// Teleoperation: the Control panel picks which robot is driven, by which
+// Teleoperation: the Teleop panel picks which robot is driven, by which
 // controller and from which input; every other controllable robot gets a
 // zero command (it stands). For now the only controller is the GR00T
 // locomotion policy (groot.js, on robot.groot) and the only input the
@@ -43,7 +43,7 @@ export class KeyboardInput {
   }
 }
 
-export class ControlPanel {
+export class TeleopPanel {
   constructor(app, el) {
     this.app = app;
     this.el = el;

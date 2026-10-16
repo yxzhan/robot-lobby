@@ -60,23 +60,23 @@
     #views button:hover { color: #eee; background: rgba(255,255,255,.08); }
     #views button[aria-pressed=true] { color: #fff; background: #3d5a73; border-color: #5a85a8; }
     #views button[aria-pressed=true]::before { background: #7fd1ff; box-shadow: 0 0 6px #7fd1ff; }
-    /* Right column: Stage on top (scrolls), Control below it. */
+    /* Right column: Stage on top (scrolls), Teleop below it. */
     #side { position: absolute; top: 60px; right: 12px; width: 320px; max-height: calc(100% - 72px - 60px);
             display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
     #side > * { pointer-events: auto; box-sizing: border-box; color: #ddd; background: rgba(0,0,0,.6);
                 padding: 8px 10px; border-radius: 6px; }
     #side > [hidden] { display: none; }
     #stage { overflow: auto; min-height: 0; flex: 0 1 auto; }
-    #control { flex: none; }
-    #control h3 { margin: 0 0 6px; font-size: 13px; }
-    #control .field { display: grid; grid-template-columns: 80px 1fr; align-items: center; gap: 6px; margin: 4px 0; font-size: 12px; }
-    #control select { font: inherit; color: #eee; background: #222; border: 1px solid #555; border-radius: 4px; padding: 2px 4px; }
-    #control select:disabled { opacity: 1; color: #bbb; }
-    #control .hint { color: #999; font-size: 12px; margin-top: 6px; line-height: 1.7; }
-    #control kbd { display: inline-block; min-width: 14px; text-align: center; padding: 0 3px; margin-right: 2px;
+    #teleop { flex: none; }
+    #teleop h3 { margin: 0 0 6px; font-size: 13px; }
+    #teleop .field { display: grid; grid-template-columns: 80px 1fr; align-items: center; gap: 6px; margin: 4px 0; font-size: 12px; }
+    #teleop select { font: inherit; color: #eee; background: #222; border: 1px solid #555; border-radius: 4px; padding: 2px 4px; }
+    #teleop select:disabled { opacity: 1; color: #bbb; }
+    #teleop .hint { color: #999; font-size: 12px; margin-top: 6px; line-height: 1.7; }
+    #teleop kbd { display: inline-block; min-width: 14px; text-align: center; padding: 0 3px; margin-right: 2px;
                    border: 1px solid #555; border-bottom-width: 2px; border-radius: 3px; background: #2a2c31;
                    color: #ddd; font: 11px ui-monospace, monospace; }
-    #control .readout { margin-top: 4px; font: 11px ui-monospace, monospace; color: #9cd; white-space: pre; }
+    #teleop .readout { margin-top: 4px; font: 11px ui-monospace, monospace; color: #9cd; white-space: pre; }
     #stage[hidden] { display: none; }
     #stage .hint { color: #999; margin: 2px 0 6px; font-size: 12px; }
     #stage summary { cursor: pointer; padding: 4px 0; font-weight: 600; }
@@ -132,7 +132,7 @@
   <div id="views" role="group" aria-label="Panels">
     <button data-panel="assets" title="Show or hide the asset library">Assets</button>
     <button data-panel="stage" title="Spawned robots: joints, controls, reset, remove">Stage</button>
-    <button data-panel="control" title="Drive a robot: controller and input">Control</button>
+    <button data-panel="teleop" title="Teleoperate a robot: controller and input">Teleop</button>
   </div>
   <div id="assets">
     <div class="tabs"></div>
@@ -151,8 +151,8 @@
     <div class="hint">Double-click a body to select it, Shift+drag to pull it. Joints can be set while paused.</div>
     <div class="hint empty">Nothing spawned yet: drag an asset onto the floor.</div>
   </div>
-  <div id="control" hidden>
-    <h3>Control</h3>
+  <div id="teleop" hidden>
+    <h3>Teleop</h3>
     <div class="body"></div>
   </div>
   </div>

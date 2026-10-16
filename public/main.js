@@ -20,7 +20,7 @@ import { CONTROL_DT, G1_MODEL, GrootController, loadGrootPolicy } from './groot.
 import { Perturb, StagePanel } from './inspect.js';
 import { AssetPanel, loadAssets } from './assets.js';
 import { AxisGizmo } from './gizmo.js';
-import { ControlPanel } from './control.js';
+import { TeleopPanel } from './teleop.js';
 import Stats from './vendor/stats/Stats.js';
 
 // Filament.init() replaces the global with the loaded module, so re-read it after init.
@@ -122,6 +122,9 @@ function plane(sx, sy) {
   sx = sx || 10; sy = sy || 10;  // size 0 means infinite in MuJoCo
   return grid(1, 1, (i, j) => [(j ? 1 : -1) * sx, (i ? -1 : 1) * sy, 0, 0, 0, 1]);
 }
+
+const SPAWN_MARKER_RADIUS = 0.25;  // m
+const ORIGIN_AXIS_LENGTH = 0.3, ORIGIN_AXIS_RADIUS = 0.008;  // m
 
 // The drag-to-spawn marker, flat in the z=0 plane, unit radius: a ring for
 // the spawn point and an arrow along +x for the heading (a robot's +x is
@@ -413,7 +416,7 @@ class App {
     this.stepping = null;   // the pending advance(), if any
     this.perturb = new Perturb(this);  // double-click selection, Shift+drag force
     this.panel = null;                 // StagePanel, set by the page
-    this.control = null;               // ControlPanel, set by the page
+    this.teleop = null;                // TeleopPanel, set by the page
     this.stats = null;                 // stats.js meter, set by the page
 
     // xrCompatible: the same context renders the WebXR session (enterVR).
@@ -492,6 +495,17 @@ class App {
     // From the floor up to a raised spawn marker.
     this.spawnPole = makeEntity(engine, makeGeometry(engine, cylinder(1, 0.5)), spawnMi, false);
     this.scene.addEntity(this.spawnPole);
+
+    // World origin: X/Y/Z axes (red/green/blue, like the gizmo) of a fixed
+    // world length, resting on the floor, and a small ball at the origin.
+    const cyl = makeGeometry(engine, cylinder(1, 0.5));
+    this.originMarker = [
+      [marker([0.9, 0.25, 0.25], cyl), (L, r) => [0, r, 0, 0, 0, 0, r, 0, L, 0, 0, 0, L / 2, 0, r, 1]],
+      [marker([0.3, 0.7, 0.35], cyl), (L, r) => [0, 0, r, 0, r, 0, 0, 0, 0, L, 0, 0, 0, L / 2, r, 1]],
+      [marker([0.25, 0.55, 0.95], cyl), (L, r) => [r, 0, 0, 0, 0, r, 0, 0, 0, 0, L, 0, 0, 0, r + L / 2, 1]],
+      [marker([0.92, 0.92, 0.92], sphere), (L, r) => [2.5 * r, 0, 0, 0, 0, 2.5 * r, 0, 0, 0, 0, 2.5 * r, 0, 0, 0, r, 1]],
+    ];
+    this.setOriginMarker(true);
 
     this.orbit = new OrbitCamera(canvas, [0, 0, 0.4], 4);
     this.setSpawnMarker(null);
@@ -618,7 +632,7 @@ class App {
     this.simStart = performance.now() - data.time * 1000;
     this.syncTransforms();
     this.panel?.build();
-    this.control?.build();
+    this.teleop?.build();
   }
 
   // Every robot back to its spawn pose (robot.initial), time back to 0.
@@ -695,9 +709,21 @@ class App {
     }
   }
 
+  // Shows or hides the world-origin axes (ORIGIN_AXIS_LENGTH long).
+  setOriginMarker(visible) {
+    const tcm = this.engine.getTransformManager();
+    for (const [entity, matrix] of this.originMarker) {
+      const inst = tcm.getInstance(entity);
+      tcm.setTransform(inst, visible ? matrix(ORIGIN_AXIS_LENGTH, ORIGIN_AXIS_RADIUS)
+                                     : [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]);
+      inst.delete();
+    }
+  }
+
   // Shows the drag-to-spawn marker at `pos` heading `yaw`, with a pole down
-  // to the floor when it is raised, or hides it (null). Its size follows the
-  // camera distance.
+  // to the floor when it is raised, or hides it (null). It has a fixed size
+  // in the world (SPAWN_MARKER_RADIUS), so it looks bigger up close and
+  // smaller far away, like the models it places.
   setSpawnMarker(pos, yaw = 0) {
     const tcm = this.engine.getTransformManager();
     const put = (entity, m) => {
@@ -705,7 +731,7 @@ class App {
       tcm.setTransform(inst, m ?? [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]);
       inst.delete();
     };
-    const k = 0.06 * this.orbit.dist, c = Math.cos(yaw) * k, s = Math.sin(yaw) * k;
+    const k = SPAWN_MARKER_RADIUS, c = Math.cos(yaw) * k, s = Math.sin(yaw) * k;
     put(this.spawnMarker, pos && [c, s, 0, 0, -s, c, 0, 0, 0, 0, k, 0, pos[0], pos[1], pos[2] + 0.003, 1]);
     const h = pos?.[2] ?? 0, w = 0.06 * k;
     put(this.spawnPole, Math.abs(h) > 1e-3 ? [w, 0, 0, 0, 0, w, 0, 0, 0, 0, h, 0, pos[0], pos[1], h / 2, 1] : null);
@@ -996,7 +1022,7 @@ try {
     onSave: () => saveStage(),
     onForget: () => forgetStage(),
   });
-  app.control = new ControlPanel(app, document.getElementById('control'));
+  app.teleop = new TeleopPanel(app, document.getElementById('teleop'));
   // Frame meter (stats.js) in the bottom-right corner; click it to cycle
   // FPS / ms per frame (JS time of App.frame) / MB of JS heap.
   app.stats = new Stats();
@@ -1075,7 +1101,7 @@ try {
   let nextId = 1, busy = false;
 
   const hint = () => {
-    const walk = robots.some((r) => r.groot) ? ' · drive a G1 from the Control panel' : '';
+    const walk = robots.some((r) => r.groot) ? ' · drive a G1 from the Teleop panel' : '';
     return `${robots.length} spawned · drag an asset onto the floor` + walk;
   };
 
@@ -1299,7 +1325,7 @@ try {
     const hit = app.pickBody(e.clientX, e.clientY);
     app.perturb.select(hit);
     const robot = hit && app.robots.find((r) => hit.body >= r.bodyOffset && hit.body < r.bodyOffset + r.visual.inertia.nbody - 1);
-    app.control.drive(robot ?? null);
+    app.teleop.drive(robot ?? null);
   });
   document.getElementById('pause').onclick = (e) => {
     app.paused = !app.paused;
