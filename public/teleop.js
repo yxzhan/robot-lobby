@@ -257,6 +257,17 @@ export class TeleopPanel {
     }
     const row = el('div', { className: 'field' }, el('span', { textContent: 'Model' }), el('div', { className: 'ctl' }, models));
     box.append(row);
+    // World settings the policy needs (its physics), if they differ.
+    const ph = this.app.physics, want = p?.physics ?? {};
+    const off = Object.keys(want).filter((k) => JSON.stringify(ph[k]) !== JSON.stringify(want[k]));
+    if (r.use.policy && off.length) {
+      const text = off.map((k) => `${k} ${want[k]}`).join(', ');
+      box.append(el('div', { className: 'bar' },
+        el('span', { className: 'note warn', textContent: `Needs ${text} (World panel)` }),
+        this.button('Apply', `Set ${text} for the whole world`, () => {
+          this.app.setPhysics({ ...structuredClone(ph), ...structuredClone(want) }).then(() => this.render());
+        })));
+    }
     const hint = el('div', { className: 'hint' });
     hint.textContent = (p ? `${p.about} ` : '') + 'Untick Policy to give the joints their own actuator gains back.';
     box.append(hint);

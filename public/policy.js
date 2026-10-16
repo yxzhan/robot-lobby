@@ -14,6 +14,8 @@
 //               file(name) is the URL of one of the files in `dir`
 //   create(weights, prefix)  a controller for the robot whose names start
 //               with `prefix`
+//   physics     optional World settings it needs (physics.js keys, e.g.
+//               {cone, impratio}); the Policy section offers to apply them
 //
 // A policy controller implements, like GrootController (groot.js):
 //   name

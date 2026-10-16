@@ -2,7 +2,7 @@
 // (physics.js). Options apply as soon as a field changes; default geom
 // properties change masses, so they wait for Apply (a rebuild).
 
-import { PHYSICS_DEFAULTS } from './physics.js';
+import { CONES, PHYSICS_DEFAULTS } from './physics.js';
 
 const el = (tag, props = {}, ...children) => {
   const e = Object.assign(document.createElement(tag), props);
@@ -17,7 +17,8 @@ const OPTIONS = [
   ['magnetic', 'Magnetic', 'T', 3, 'global magnetic flux (magnetometer sensors)'],
   ['density', 'Density', 'kg/m³', 1, 'density of the medium (air ≈ 1.2, water 1000): lift and drag'],
   ['viscosity', 'Viscosity', 'Pa·s', 1, 'viscosity of the medium (air ≈ 1.8e-5, water ≈ 0.0009)'],
-  ['impratio', 'Impratio', '', 1, 'ratio of frictional to normal constraint impedance (elliptic cones: > 1 makes friction harder)'],
+  ['impratio', 'Impratio', '', 1, 'ratio of frictional to normal constraint impedance (> 1 makes friction harder, less slip)'],
+  ['cone', 'Cone', '', CONES, 'friction cone: elliptic is more accurate (legged robots), pyramidal cheaper'],
 ];
 const GEOM = [
   ['density', 'Density', 'kg/m³', 1, 'for geoms that set neither density nor mass'],
@@ -53,12 +54,19 @@ export class WorldPanel {
 
     for (const [k, label, unit, n, title] of OPTIONS) {
       if (k === 'density') this.body.append(el('div', { className: 'sub minor', textContent: 'Medium (air, water…)' }));
+      if (k === 'impratio') this.body.append(el('div', { className: 'sub minor', textContent: 'Contacts' }));
       const set = (i) => (v) => {
         const next = structuredClone(this.app.physics);
-        if (n === 1) next[k] = v; else next[k][i] = v;
+        if (!Array.isArray(s[k])) next[k] = v; else next[k][i] = v;
         this.app.setPhysics(next).then(() => this.render());
       };
-      const inputs = n === 1 ? [num(s[k], set(0), title)] : s[k].map((v, i) => num(v, set(i), `${title} (${'xyz'[i]})`));
+      let inputs;
+      if (Array.isArray(n)) {
+        const sel = el('select', { title });
+        for (const v of n) sel.append(new Option(v, v, false, v === s[k]));
+        sel.onchange = () => { set(0)(sel.value); sel.blur(); };
+        inputs = [sel];
+      } else inputs = n === 1 ? [num(s[k], set(0), title)] : s[k].map((v, i) => num(v, set(i), `${title} (${'xyz'[i]})`));
       this.body.append(row(label, unit, title, ...inputs));
     }
     this.body.append(el('div', { className: 'hint', textContent: 'Applied at once. Wind and fluid drag only act with a medium density or viscosity.' }));

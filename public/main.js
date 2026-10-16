@@ -1253,10 +1253,11 @@ try {
   // robot.errors[kind] set) if it cannot drive this robot.
   function bindController(r, kind, mujoco, model) {
     const bodies = [r.bodyOffset, r.bodyOffset + r.visual.inertia.nbody - 1];
-    const owner = (j) => (r.use.policy && r.policy?.owns(j)) || (r.use.base && r.base?.owns(j)) || null;
+    const byPolicy = (j) => (r.use.policy && r.policy?.owns(j)) || null;
+    const owner = (j) => byPolicy(j) || (r.use.base && r.base?.owns(j)) || null;
     try {
       if (kind === 'policy') r.policy.bind(mujoco, model);
-      else r[kind].bind(mujoco, model, kind === 'ik' ? owner : () => null, bodies);
+      else r[kind].bind(mujoco, model, kind === 'ik' ? owner : byPolicy, bodies);
       delete r.errors[kind];
       return true;
     } catch (err) {
@@ -1285,6 +1286,11 @@ try {
   // off (Teleop panel), remembering the choice for its robot file. For
   // 'policy', `on` is the POLICIES id to run ('' for none).
   app.setUse = async (r, kind, on) => {
+    // An automatic base setup leaves the policy's joints out (a leg joint
+    // can look like a wheel once a policy makes its actuator a torque motor):
+    // find it again after the switch, giving back what it holds first.
+    const rebase = kind === 'policy' && r.base?.config?.auto;
+    if (rebase) r.base.release(app.data);
     if (kind === 'policy') {
       r.policy?.unbind?.();
       r.use.policy = on || '';
@@ -1296,6 +1302,11 @@ try {
       }
     } else {
       r.use[kind] = on;
+    }
+    if (rebase) {
+      r.base.config = null;
+      bindController(r, 'base', app.mujoco, app.model);
+      r.use.base = !!r.base.config?.kind && r.use.base !== false;
     }
     if (kind === 'base') { r.base.reset(); if (on) r.base.resolve(); else r.base.release(app.data); }
     if (kind === 'ik' && !on) r.ik?.release(app.data);
@@ -1483,6 +1494,8 @@ try {
     if (rebuildNeeded && busy) return false;
     app.physics = next;
     savePhysics(next);
+    app.world?.render();
+    app.teleop?.render();  // a policy's physics note
     if (app.model) applyOptions(app.model, next);
     if (!rebuildNeeded || !app.model) return true;
     busy = true;

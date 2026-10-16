@@ -2,7 +2,9 @@
 //
 // - Global options (MuJoCo <option>): gravity, wind, magnetic field, medium
 //   density and viscosity (both 0: no fluid forces, so wind does nothing),
-//   impratio (frictional-to-normal constraint impedance ratio). They go into
+//   impratio (frictional-to-normal constraint impedance ratio), friction
+//   cone (pyramidal or elliptic; legged robots often need elliptic with a
+//   high impratio to keep their feet from creeping). They go into
 //   the world spec at every rebuild (world.js) and are also set on the live
 //   model, so a change needs no rebuild.
 // - Default geom properties: density, mass and friction for every geom that
@@ -22,6 +24,7 @@ export const PHYSICS_DEFAULTS = Object.freeze({
   density: 0,
   viscosity: 0,
   impratio: 1,
+  cone: 'pyramidal',
   geom: { density: 1000, mass: null, friction: [1, 0.005, 0.0001] },
 });
 
@@ -38,7 +41,8 @@ export function savePhysics(s) {
   try { localStorage.setItem(STORE, JSON.stringify(s)); } catch { /* no storage */ }
 }
 
-const OPTION_KEYS = ['gravity', 'wind', 'magnetic', 'density', 'viscosity', 'impratio'];
+const OPTION_KEYS = ['gravity', 'wind', 'magnetic', 'density', 'viscosity', 'impratio', 'cone'];
+export const CONES = ['pyramidal', 'elliptic'];  // mjtCone order
 const fmt = (v) => (Array.isArray(v) ? v.join(' ') : String(v));
 
 // The <option> attributes for the world spec.
@@ -53,6 +57,7 @@ export function applyOptions(model, s) {
   o.density = s.density;
   o.viscosity = s.viscosity;
   o.impratio = s.impratio;
+  o.cone = Math.max(0, CONES.indexOf(s.cone));
 }
 
 // The default geom attributes that differ from MuJoCo's ({name: value}).

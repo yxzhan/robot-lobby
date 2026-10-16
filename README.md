@@ -101,7 +101,8 @@ its own first keyframe (qpos + ctrl, free joints shifted to the click point)
 or `qpos0`. Compile time grows with the number of robots (~3 s per spawn
 with a dozen menagerie robots). Physics `<option>`s come from `BASE_XML`: a
 robot's own (e.g. the quadrupeds' elliptic cones / `impratio`) is dropped
-with an "Attach conflict" warning in the console.
+with an "Attach conflict" warning in the console; set them in the World
+panel (a policy that needs them offers to).
 
 ### Memory: physics-only world, render data per robot file
 
@@ -150,7 +151,7 @@ The World panel (`public/worldpanel.js`, settings in `public/physics.js`,
 saved in this browser) sets MuJoCo's global options and default geom
 properties:
 - **Gravity, wind, magnetic field, medium density and viscosity,
-  impratio** go into the world spec's `<option>` at every rebuild and onto
+  impratio, friction cone** go into the world spec's `<option>` at every rebuild and onto
   the live `model.opt`, so they act at once. Wind and fluid drag need a
   medium (density or viscosity > 0).
 - **Default geom density, mass and friction** apply to geoms that do not
@@ -193,9 +194,15 @@ name, its `dir`, the robot files it starts on for (`defaultFor`),
 directory; shared, loaded on first use; onnxruntime-web is there as
 `onnxRuntime()`) and `create(weights, prefix)` for a controller with
 `bind` / `unbind` / `owns` / `pose` / `reset` / async `step`, plus `cmd` /
-`drive` (and `height`) for a locomotion policy driven by the keys. The
-panel's Policy section picks the model; a hand or quadruped policy is one
-more entry.
+`drive` (and `height`) for a locomotion policy driven by the keys, and an
+optional `substep(data)` run before every physics step (actuator models).
+An entry's optional `physics` names World settings it needs (e.g.
+`{cone: 'elliptic', impratio: 100}`): the Policy section shows them when
+the world differs, with a button that applies them. The panel's Policy
+section picks the model; a hand or quadruped policy is one more entry.
+`public/torchscript.js` reads the tensors of a TorchScript `.pt` (a zip
+of raw storages) in the browser, so small exported MLPs/RNNs need no
+conversion.
 
 ## Walking G1 (GR00T policy)
 
