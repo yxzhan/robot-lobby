@@ -183,6 +183,19 @@ gets leg chains). Keyboard: **WASD** walk / drive, **QE** turn, hold
 **R**/**F** to raise or lower a locomotion policy's base height (keys typed
 into a text field are ignored); the sections fold.
 
+The **Input** select switches the keys for a **goal marker**
+(`public/goal.js`): an orange ring with a heading arrow, like the spawn
+marker, that sits under the driven robot until it is dragged along the
+floor (the mouse wheel or **Q**/**E** turn it while dragging, **Esc** puts
+it back). The robot then drives itself there, with the same twist command
+the keys give and within their speeds, so a walking policy and a wheeled
+base both follow it, in local and network mode: far off it turns towards
+the goal and goes forward (a robot that cannot strafe backs up to a goal
+just behind it), near it a mecanum base or a walking robot closes the rest
+sideways, and at the point it turns to the goal heading (6 cm, 3.5°, with
+hysteresis). A robot keeps going to its goal while another one is driven;
+**Stop** forgets the goal.
+
 Pretrained policies live in `pretrained_policies/<dir>/`, one checkout per
 model (not tracked by git). `npm install` (or `node scripts/vendor.mjs`)
 links the folder as `public/pretrained_policies` and lists what is there in
@@ -362,6 +375,66 @@ alpha multiplies in) and cast no shadow; alpha 0 hides a geom, as in MuJoCo.
 Back faces are culled like MuJoCo does. Filament sorts transparent
 renderables back to front per renderable, so a self-overlapping or
 interpenetrating transparent mesh can blend in the wrong order.
+
+## Shared world (Python server)
+
+```sh
+pip install mujoco numpy aiohttp onnxruntime
+npm run server   # python3 server/server.py 4007
+```
+
+`server/server.py` steps one MuJoCo world in Python and serves `public/`
+too; every browser that opens it (http://localhost:4007, or through the
+JupyterHub proxy) sees and changes the same world. The page notices the
+server (`server.json`) and switches to network mode (`public/net.js`), in
+which it loads no MuJoCo at all:
+
+- **Drawing.** The server compiles each model file once and serves what is
+  drawn at `/render?rel=…` (`server/render_asset.py`): visible geoms,
+  materials, the meshes they use (compiled: MuJoCo recenters meshes), the
+  pixels of MuJoCo's builtin textures, image textures by path, and the
+  kinematic tree. Gzipped, cached by the browser (ETag); a G1 is ~7 MB. The
+  arrays keep MjModel's field names, so `buildVisual` turns them into
+  Filament parts like it does a WASM model.
+- **State.** 30 times a second the server sends qpos and mocap poses as
+  float32 (ctrl at 5 Hz, for the panels): ten G1s are ~1.7 KB per state,
+  ~50 KB/s. The page interpolates between states, a little behind (see
+  the network meter; quaternions on the short arc), and places the bodies itself
+  (`forwardKinematics`, MuJoCo's `mj_kinematics`, matching it to 1e-15).
+- **Requests.** Spawn, Undo / Clear / ✕, Reset, Pause, the Stage panel's
+  poses and sliders, Shift+drag, double-click picking (the server casts the
+  ray) and the World panel's options go to the server, which applies them
+  and tells every browser. Robots are attached in the same order on both
+  sides, so bodies, joints and actuators are numbered the same.
+- **Controllers on the server.** Policies (`server/policies.py`: GR00T
+  on onnxruntime, same ids as `policy.js`), mobile bases (`server/base.py`)
+  and IK (`server/ik.py`) are ports of `groot.js`, `base.js` and `ik.js`,
+  ticked at 50 Hz with the physics; ten G1s walking under GR00T keep real
+  time. The Teleop panel works as in local mode through `public/remote.js`.
+  The keys' drive command goes to the server when it changes and is
+  repeated while held; the server stops a command not repeated for 1 s
+  (a closed or frozen tab), and the base's measured twist comes back for
+  the readout. Base setups saved from the panel go to
+  `server/saved/base.json`; `base_defaults.json` holds the built-in ones.
+- **IK markers.** They work as in local mode:
+  dragging a marker moves it at once and sends its target (in the chain's
+  reference body frame, so it rides with the robot); the server sends
+  targets and tracking errors back 5 times a second, so every browser sees
+  the markers move. Chain edits, Save (to `server/saved/ik.json`, for
+  everyone) and Defaults are requests too. `ik_defaults.json` holds the
+  built-in setups for both sides.
+- **Network meter.** Bottom right, next to the frame meter: round trip
+  (ping, includes the page's own frame time), states per second, download
+  rate, and how far the view trails the newest state: one state interval
+  plus three times the arrival jitter (40–250 ms).
+- **Memory.** Copies of a model share its meshes in the server's world:
+  ten G1s compile to ~75 MB instead of ~750 MB.
+
+Not yet in network mode: the World panel's default geom properties. The scene lives as long as
+the server process. Local mode keeps everything in the browser as before.
+
+`?local` in the URL keeps the page fully local (WASM physics) even when the
+server serves it.
 
 ## How it works
 

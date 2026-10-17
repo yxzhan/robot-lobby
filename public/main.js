@@ -29,6 +29,8 @@ import { WorldPanel } from './worldpanel.js';
 import { MARKER } from './marker.js';
 import { CHAIN_COLORS } from './teleop.js';
 import Stats from './vendor/stats/Stats.js';
+import { NET_MUJOCO, NetClient, findServer, loadRender, worldData, worldModel } from './net.js';
+import { RemoteBase, RemoteIk, RemotePolicy } from './remote.js';
 
 // Filament.init() replaces the global with the loaded module, so re-read it after init.
 let Filament = window.Filament;
@@ -461,6 +463,8 @@ class App {
     this.panel = null;                 // StagePanel, set by the page
     this.teleop = null;                // TeleopPanel, set by the page
     this.stats = null;                 // stats.js meter, set by the page
+    this.net = null;                   // NetClient in network mode (net.js): the server steps the world
+    this.netVersion = -1;              // the server scene this.model describes
 
     // xrCompatible: the same context renders the WebXR session (enterVR).
     const engine = this.engine = Filament.Engine.create(canvas, { xrCompatible: true });
@@ -554,6 +558,14 @@ class App {
     // From the floor up to a raised spawn marker.
     this.spawnPole = makeEntity(engine, makeGeometry(engine, cylinder(1, 0.5)), spawnMi, false);
     this.scene.addEntity(this.spawnPole);
+    // The Teleop panel's goal marker (goal.js): the spawn marker's shape in
+    // orange, brighter while hovered or dragged.
+    this.goalMi = this.matLit.createInstance();
+    this.goalMi.setFloatParameter('roughness', 0.6);
+    this.goalMi.setFloatParameter('metallic', 0.0);
+    this.goalMarker = makeEntity(engine, makeGeometry(engine, spawnMarkerShape()), this.goalMi, false);
+    this.scene.addEntity(this.goalMarker);
+    this.goalHot = null;
 
     // World origin: X/Y/Z axes (red/green/blue, like the gizmo) of a fixed
     // world length, resting on the floor, and a small ball at the origin.
@@ -696,6 +708,20 @@ class App {
     this.teleop?.build();
   }
 
+  // Network mode: swaps in the server's world. `model` and `data` are
+  // net.js stand-ins (worldModel, worldData): tables for the panels and the
+  // state the server sends; nothing is compiled here.
+  setNetWorld(model, data, robots) {
+    this.perturb.clear();
+    this.mujoco = NET_MUJOCO;
+    this.model = model;
+    this.data = data;
+    this.robots = robots;
+    this.controllers = [];
+    this.panel?.build();
+    this.teleop?.build();
+  }
+
   // The controllers to tick: each robot's switched-on ones (robot.use).
   refreshControllers() {
     this.controllers = this.robots.flatMap((r) => {
@@ -706,6 +732,7 @@ class App {
 
   // Every robot back to its spawn pose (robot.initial), time back to 0.
   reset() {
+    if (this.net) { this.net.send('reset'); return; }
     this.mujoco.mj_resetData(this.model, this.data);
     const layout = stateLayout(this.robots);
     for (const r of this.robots) this.writeInitial(r, layout.get(r));
@@ -718,6 +745,7 @@ class App {
 
   // One robot back to its spawn pose, at rest; the others and time go on.
   resetRobot(robot) {
+    if (this.net) { this.net.send('reset_robot', { id: robot.netId }); return; }
     const { mujoco, model, data } = this;
     const at = stateLayout(this.robots).get(robot);
     if (!at) return;
@@ -744,6 +772,7 @@ class App {
   placeFree(robot, pos, quat) {
     const j = this.rootFreeJoint(robot);
     if (j < 0) return false;
+    if (this.net) { this.net.send('place', { id: robot.netId, pos, quat }); return true; }
     const { mujoco, model, data } = this, adr = model.jnt_qposadr[j], dof = model.jnt_dofadr[j];
     data.qpos.set(pos, adr);
     data.qpos.set(quat, adr + 3);
@@ -794,6 +823,9 @@ class App {
     const { mujoco, model, data } = this;
     if (!model) return null;
     const { eye, dir } = this.pointerRay(clientX, clientY);
+    if (this.net) {  // a promise: the server casts the ray
+      return this.net.request('ray', { eye, dir }).then((hit) => (hit.body >= 0 ? hit : null), () => null);
+    }
     const geom = new mujoco.IntBuffer(1), normal = new mujoco.DoubleBuffer(3);
     try {
       const dist = mujoco.mj_ray(model, data, eye, dir, null, true, -1, geom, normal);
@@ -862,6 +894,19 @@ class App {
       }
     }
     put(this.markers.rope, rope);
+
+    // Goal marker, flat on the floor at its fixed size.
+    const goal = this.model ? this.teleop?.goalMarker() : null;
+    if (goal) {
+      const k = SPAWN_MARKER_RADIUS, c = Math.cos(goal.yaw) * k, s = Math.sin(goal.yaw) * k;
+      put(this.goalMarker, [c, s, 0, 0, -s, c, 0, 0, 0, 0, k, 0, goal.pos[0], goal.pos[1], 0.005, 1]);
+      if (this.goalHot !== goal.hot) {
+        this.goalMi.setColor4Parameter('baseColor', Filament.RgbaType.sRGB, goal.hot ? [1, 0.85, 0.2, 1] : [1, 0.5, 0.1, 1]);
+        this.goalHot = goal.hot;
+      }
+    } else {
+      put(this.goalMarker, null);
+    }
 
     // IK markers: part frame = marker pose * the part's axis (z -> x/y/z) * scale.
     const gizmos = this.model ? this.teleop?.gizmos() ?? [] : [];
@@ -935,10 +980,27 @@ class App {
     this.syncTransforms();
   }
 
+  // Network mode: round trip, state rate and traffic, next to the frame meter.
+  showNetStats() {
+    const now = performance.now();
+    if (now - (this.netShown ?? 0) < 500) return;
+    this.netShown = now;
+    const el = document.getElementById('net');
+    const { rtt, hz, rate, delay } = this.net.stats();
+    el.hidden = false;
+    el.querySelector('.rtt').textContent = rtt == null ? 'RTT …' : `RTT ${Math.round(rtt)} ms`;
+    el.querySelector('.rtt').className = `rtt ${rtt == null ? '' : rtt < 80 ? 'good' : rtt < 200 ? 'fair' : 'poor'}`;
+    el.querySelector('.rate').textContent = `${Math.round(hz)} Hz · ${(rate / 1024).toFixed(rate < 10240 ? 1 : 0)} KB/s · +${Math.round(delay * 1000)} ms`;
+  }
+
   // `xrFrame` is set when called from the WebXR session's animation loop.
   frame(xrFrame = null) {
     this.stats?.begin();
-    if (this.model && !this.paused && !this.stepping) {
+    if (this.net) {
+      // The server steps; show its state (interpolated) once this world matches it.
+      if (this.model && this.net.apply(this.model, this.data, this.netVersion, this.robots)) this.syncTransforms();
+      this.showNetStats();
+    } else if (this.model && !this.paused && !this.stepping) {
       this.stepping = this.advance()
         .catch((err) => { this.paused = true; console.error('simulation stopped', err); })
         .finally(() => { this.stepping = null; });
@@ -1286,6 +1348,10 @@ try {
   // off (Teleop panel), remembering the choice for its robot file. For
   // 'policy', `on` is the POLICIES id to run ('' for none).
   app.setUse = async (r, kind, on) => {
+    if (app.net) {  // the server runs the controllers; it tells everyone (applyRobot)
+      app.net.send('use', { id: r.netId, kind, on: kind === 'policy' ? on || '' : !!on });
+      return;
+    }
     // An automatic base setup leaves the policy's joints out (a leg joint
     // can look like a wheel once a policy makes its actuator a torque motor):
     // find it again after the switch, giving back what it holds first.
@@ -1430,14 +1496,14 @@ try {
   }
 
   // A new robot (not in the world yet) for asset file `rel`.
-  async function makeRobot(rel, label, pos, yaw, progress) {
+  async function makeRobot(rel, label, pos, yaw, progress, prefix = `r${nextId++}/`) {
     const visual = await withPhysics(await robotVisual(rel, label, progress), progress);
-    const robot = { label, visual, prefix: `r${nextId++}/`, pos, yaw };
+    const robot = { label, visual, prefix, pos, yaw };
     // Every robot gets the controllers of the Teleop panel, each switched
     // on or off (robot.use): a trained policy (policy.js), a mobile base and
     // IK chains, each saved, built in or found in the model.
     const key = rel.match(/(?:^|\/)mjcf_assets\/robots\/(.+)$/)?.[1];
-    if (!key) return robot;
+    if (!key || app.net) return robot;  // network mode: no controllers (yet)
     Object.assign(robot, { key, use: loadUse(key), errors: {} });
     robot.base = new BaseController(key, robot.prefix);
     robot.ik = new IkController(key, robot.prefix);
@@ -1446,6 +1512,11 @@ try {
   }
 
   async function spawn({ rel, name: label }, pos, yaw) {
+    if (app.net) {
+      app.net.send('spawn', { rel, label, pos, yaw });
+      status.textContent = `spawning ${label} on the server…`;
+      return;
+    }
     busy = true;
     setBusy(`spawning ${label}…`);
     const t0 = performance.now();
@@ -1469,6 +1540,10 @@ try {
   // of `robots`, in order); the state of the rest is kept.
   async function respawn(list) {
     if (busy) return;
+    if (app.net) {
+      app.net.send('remove', { ids: robots.filter((r) => !list.includes(r)).map((r) => r.netId) });
+      return;
+    }
     busy = true;
     setBusy('rebuilding…');
     try {
@@ -1490,6 +1565,14 @@ try {
   // model; changed default geom properties recompile every model's masses
   // and rebuild the world (state kept). Resolves to false if busy.
   app.setPhysics = async (next) => {
+    if (app.net) {  // the server's settings: they come back to everyone (onMeta)
+      if (geomSignature(next) !== geomSignature(app.physics)) {
+        status.textContent = 'default geom properties are not available in server mode yet';
+        return false;
+      }
+      app.net.send('physics', { physics: next });
+      return true;
+    }
     const rebuildNeeded = geomSignature(next) !== geomSignature(app.physics);
     if (rebuildNeeded && busy) return false;
     app.physics = next;
@@ -1519,6 +1602,7 @@ try {
   // state kept). Resolves to false if busy.
   async function moveFixed(robot, pos, yaw) {
     if (busy) return false;
+    if (app.net) { app.net.send('move', { id: robot.netId, pos, yaw }); return true; }
     busy = true;
     const old = [robot.pos, robot.yaw];
     [robot.pos, robot.yaw] = [[...pos], yaw];
@@ -1597,6 +1681,97 @@ try {
     status.textContent = (failed.length ? `stage loaded, skipped ${failed.join(', ')} · ` : 'stage loaded · ') + hint();
   }
 
+  // Network mode: a robot's controllers as the server runs them (the
+  // Teleop panel shows them like local ones, through remote.js).
+  function applyRobot(r, it) {
+    if (!it.key) return;
+    Object.assign(r, { key: it.key, use: it.use, errors: it.errors ?? {} });
+    if (r.ik) r.ik.update(it.ik);
+    else r.ik = new RemoteIk(app, r, it.ik);
+    if (r.base) r.base.update(it.base);
+    else r.base = new RemoteBase(app, r, it.base);
+    if (!it.policy) r.policy = null;
+    else if (r.policy?.policyId === it.use.policy) r.policy.update(it.policy);
+    else r.policy = new RemotePolicy(app, r, it.policy, it.use.policy);
+  }
+
+  // Network mode: settings and spawn poses of the server's world.
+  function applyMeta(msg) {
+    app.physics = { ...msg.physics, geom: app.physics.geom };
+    app.paused = msg.paused;
+    pauseButton.textContent = app.paused ? 'Resume' : 'Pause';
+    for (const it of msg.items ?? []) {
+      const r = robots.find((x) => x.netId === it.id);
+      if (r) [r.pos, r.yaw] = [it.pos, it.yaw];
+    }
+    app.world?.render();
+  }
+
+  // Network mode: render data per model file (net.js loadRender), shared by
+  // its copies like robotVisual's.
+  const netVisuals = new Map();
+  function netVisual(rel, label, progress) {
+    if (!netVisuals.has(rel)) {
+      const pending = (async () => {
+        progress(`loading ${label}…`);
+        const { model, images } = await loadRender(rel);
+        progress(`preparing ${label} for rendering…`);
+        await nextFrame();
+        return {
+          rel, parts: app.buildVisual(NET_MUJOCO, model, images, models),
+          kin: model, dims: model.dims, inertia: { nbody: model.nbody },
+        };
+      })();
+      pending.catch(() => netVisuals.delete(rel));
+      netVisuals.set(rel, pending);
+    }
+    return netVisuals.get(rel);
+  }
+
+  // Network mode: lays out the server's world (its robots, in its order, with
+  // its prefixes) from their render data; the state comes from the server.
+  async function applyScene(msg) {
+    applyMeta(msg);
+    const progress = (m) => { status.textContent = m; setBusy(m); };
+    try {
+      const list = [], fresh = [];
+      for (const it of msg.items) {
+        let r = robots.find((x) => x.netId === it.id);
+        if (!r) {
+          const visual = await netVisual(it.rel, it.label, progress);
+          r = { label: it.label, visual, prefix: `r${it.id}/`, pos: it.pos, yaw: it.yaw, netId: it.id };
+          fresh.push(r);
+        }
+        list.push(r);
+        r.pendingItem = it;  // controllers: once the world below is in place
+      }
+      const model = worldModel(msg.world);
+      let offset = 1;
+      for (const r of list) {
+        r.bodyOffset = offset;
+        offset += r.visual.inertia.nbody - 1;
+      }
+      const layout = stateLayout(list);
+      const mismatch = Object.keys(layout.total).find((k) => layout.total[k] !== model[k]);
+      if (offset !== model.nbody || mismatch) {
+        throw new Error(mismatch ? `server world has ${mismatch} ${model[mismatch]}, expected ${layout.total[mismatch]}`
+                                 : `server world has ${model.nbody} bodies, expected ${offset}`);
+      }
+      for (const r of list) r.netAt = { qpos: layout.get(r).qpos, mocap: layout.get(r).mocap_pos / 3 };
+      for (const r of fresh) r.entities = app.addEntities(r.visual.parts);
+      for (const r of robots) if (!list.includes(r)) app.removeEntities(r.entities);
+      app.setNetWorld(model, worldData(model), list);
+      robots.splice(0, robots.length, ...list);
+      app.netVersion = msg.version;
+      for (const r of list) { applyRobot(r, r.pendingItem); delete r.pendingItem; }
+      app.teleop.build();
+      status.textContent = `${hint()} · shared world (server)`;
+    } catch (err) {
+      status.textContent = `could not show the server's world: ${err.message ?? err}`;
+      console.error(err);
+    }
+  }
+
   // For devtools and scripts/render_previews.mjs.
   window.spawnAsset = (rel, pos = [0, 0, 0], yaw = 0) => spawn(assets.find((a) => a.rel === rel) ?? { rel, name: rel }, pos, yaw);
   window.clearAssets = () => respawn([]);
@@ -1644,13 +1819,15 @@ try {
   });
   // Double-clicking a controllable robot also makes it the driven one;
   // double-clicking anything else releases control.
-  canvas.addEventListener('dblclick', (e) => {
-    const hit = app.pickBody(e.clientX, e.clientY);
+  canvas.addEventListener('dblclick', async (e) => {
+    const hit = await app.pickBody(e.clientX, e.clientY);  // a promise in network mode
     app.perturb.select(hit);
     const robot = hit && app.robots.find((r) => hit.body >= r.bodyOffset && hit.body < r.bodyOffset + r.visual.inertia.nbody - 1);
     app.teleop.drive(robot ?? null);
   });
-  document.getElementById('pause').onclick = (e) => {
+  const pauseButton = document.getElementById('pause');
+  pauseButton.onclick = (e) => {
+    if (app.net) { app.net.send('pause', { paused: !app.paused }); return; }
     app.paused = !app.paused;
     e.target.textContent = app.paused ? 'Resume' : 'Pause';
     if (!app.paused && app.data) app.simStart = performance.now() - app.data.time * 1000;
@@ -1677,22 +1854,63 @@ try {
     };
   }
 
-  await rebuild([]);
-  status.textContent = hint();
-  const stage = savedStage();
-  app.panel.showSaved(stage);
-  if (stage?.items?.length) {
-    busy = true;
-    try {
-      await loadStage(stage);
-    } catch (err) {
-      status.textContent = `could not load the saved stage: ${err.message ?? err}`;
-      console.error(err);
-    } finally {
-      busy = false;
+  // Network mode (served by server/server.py): the world is the server's.
+  const server = await findServer();
+  if (server) {
+    const scenes = [];  // waiting scene messages; only the newest one is built
+    let building = false;
+    const buildScenes = async () => {
+      if (building) return;
+      building = busy = true;
+      try {
+        while (scenes.length) await applyScene(scenes.splice(0).at(-1));
+      } finally {
+        building = busy = false;
+        setBusy(null);
+      }
+    };
+    app.net = new NetClient({
+      scene: (msg) => { scenes.push(msg); buildScenes(); },
+      meta: (msg) => applyMeta(msg),
+      robot: (msg) => {
+        const r = robots.find((x) => x.netId === msg.item.id);
+        if (!r || building) return;  // a scene being built brings its own
+        applyRobot(r, msg.item);
+        app.teleop.render();
+      },
+      status: (msg) => {
+        for (const [id, s] of Object.entries(msg.robots)) {
+          const r = robots.find((x) => x.netId === +id);
+          if (!r) continue;
+          if (s.ik) r.ik?.status(s.ik);
+          if (r.base) r.base.measured = s.base?.measured ?? null;
+        }
+      },
+      error: (msg) => { status.textContent = `server: ${msg.op} failed: ${msg.msg}`; },
+      closed: () => { status.textContent = 'disconnected from the server · reload the page'; },
+    });
+    await app.net.opened;
+    console.log(`network mode: ${server.server}, MuJoCo ${server.mujoco}`);
+    app.world.render();
+    app.panel.showSaved(savedStage());
+  } else {
+    await rebuild([]);
+    status.textContent = hint();
+    const stage = savedStage();
+    app.panel.showSaved(stage);
+    if (stage?.items?.length) {
+      busy = true;
+      try {
+        await loadStage(stage);
+      } catch (err) {
+        status.textContent = `could not load the saved stage: ${err.message ?? err}`;
+        console.error(err);
+      } finally {
+        busy = false;
+      }
     }
+    setBusy(null);
   }
-  setBusy(null);
   app.frame();
 } catch (err) {
   status.textContent = `error: ${err.message ?? err}`;

@@ -10,12 +10,16 @@
 //   markers (marker.js) dragged with the mouse; the panel edits them.
 // Locomotion policies and Base take a body twist command `cmd` = [vx, vy, yaw rate] and
 // say how fast the keys drive them (`drive`, null while there is nothing to
-// drive). The only input so far is the keyboard; the Input select is where
-// a ROS bridge or a gamepad would plug in. Setups are saved per robot file.
+// drive). Inputs (the Input select, where a ROS bridge or a gamepad would
+// plug in too): the keyboard, or a goal marker on the floor (goal.js) that
+// the robot drives to, dragged like a spawn marker (wheel or Q/E turn it).
+// A robot keeps going to its goal while another one is driven. Setups are
+// saved per robot file.
 
 import { dragPose, markerScale, pickMarker, startDrag } from './marker.js';
 import { BaseController, KINDS } from './base.js';
 import { POLICIES, POLICY_ROOT, defaultPolicy, isInstalled, policyById } from './policy.js';
+import { bodyPose, goalCommand } from './goal.js';
 
 // Per held key: [command index (vx, vy, yaw rate), direction, drive speed].
 const DRIVE = {
@@ -63,6 +67,11 @@ export class KeyboardInput {
 }
 
 const FOLDED = 'mujoco-filament/teleop-folded';
+const INPUT = 'mujoco-filament/teleop-input';
+const INPUTS = [['keyboard', 'Keyboard'], ['goal', 'Goal marker']];
+const GOAL_TURN = Math.PI / 12;  // per wheel notch or Q/E press while dragging a goal (like assets.js)
+const GOAL_GRAB = 0.35;          // m: grab radius around the goal marker's center
+const DEG = 180 / Math.PI;
 const CONTROLLERS = [['policy', 'Policy', 'A trained policy (locomotion, hands, …)'],
   ['base', 'Base', 'Mobile base: wheels or planar joints'], ['ik', 'IK', 'IK chains with interactive markers']];
 
@@ -90,8 +99,27 @@ export class TeleopPanel {
     this.closedChains = new Set();  // "<prefix><chain name>" folded in the panel
     // Folded sections ('base', 'ik'), kept across robots and page loads.
     try { this.folded = new Set(JSON.parse(localStorage.getItem(FOLDED) ?? '[]')); } catch { this.folded = new Set(); }
-    this.dragging = null;    // marker.js drag state + {index, chain} while a marker is dragged
-    this.hover = null;       // {index, part} of the marker under the pointer
+    this.dragging = null;    // marker.js drag state + {index, chain} while a marker is dragged, or {goal} for the goal marker
+    this.hover = null;       // {index, part} of the marker under the pointer, or {goal: true}
+    try { this.mode = localStorage.getItem(INPUT) === 'goal' ? 'goal' : 'keyboard'; } catch { this.mode = 'keyboard'; }
+    this.goalReadout = null;
+    // While the goal marker is dragged, the wheel and Q/E turn it and Esc puts
+    // it back (capture phase: before the camera zoom and the drive keys).
+    window.addEventListener('wheel', (e) => {
+      if (!this.dragging?.goal) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      this.turnGoal(Math.sign(e.deltaY || e.deltaX) * GOAL_TURN);
+    }, { capture: true, passive: false });
+    window.addEventListener('keydown', (e) => {
+      if (!this.dragging?.goal) return;
+      const k = e.key.toLowerCase();
+      if (k === 'q' || k === 'e') this.turnGoal(k === 'q' ? GOAL_TURN : -GOAL_TURN);
+      else if (k === 'escape') { this.dragging.robot.goal = this.dragging.before; this.dragging = null; }
+      else return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+    }, { capture: true });
     // G opens or closes the gripper of the chain dragged last.
     window.addEventListener('keydown', (e) => {
       if (e.key.toLowerCase() !== 'g' || e.ctrlKey || e.metaKey || e.altKey || isTyping(e.target)) return;
@@ -161,13 +189,54 @@ export class TeleopPanel {
 
   // Pointer moved with no button down: highlights the part under it.
   hoverAt(ray) {
-    const hit = this.dragging ? null : this.pick(ray);
+    const hit = this.dragging ? null : this.pick(ray) ?? (this.pickGoal(ray) && { goal: true });
     this.hover = hit;
     return !!hit;
   }
 
+  // ---- goal marker (goal.js, drawn by App.syncMarkers) ----
+
+  // The driven robot's goal while the goal input is on: its own, else where
+  // it stands (grabbing the marker there sets one).
+  goalOf(r = this.active) {
+    if (this.mode !== 'goal' || !r || !locomotion(r).length || !this.app.data) return null;
+    if (r.goal) return r.goal;
+    const p = bodyPose(this.app.data, r.bodyOffset);
+    return { x: p.x, y: p.y, yaw: p.yaw };
+  }
+
+  // {pos, yaw, hot} for the goal marker, or null.
+  goalMarker() {
+    const g = this.goalOf();
+    return g && { pos: [g.x, g.y, 0], yaw: g.yaw, hot: !!(this.dragging?.goal || this.hover?.goal) };
+  }
+
+  static floorHit({ eye, dir }) {
+    if (dir[2] > -1e-6 || eye[2] <= 0) return null;
+    const s = -eye[2] / dir[2];
+    return [eye[0] + s * dir[0], eye[1] + s * dir[1]];
+  }
+
+  pickGoal(ray) {
+    const g = this.goalOf(), p = g && TeleopPanel.floorHit(ray);
+    return p && Math.hypot(p[0] - g.x, p[1] - g.y) < GOAL_GRAB ? p : null;
+  }
+
+  turnGoal(delta) {
+    const g = this.dragging?.robot.goal;
+    if (g) g.yaw += delta;
+  }
+
   // Starts dragging the marker part under the ray; false if there is none.
   grab(ray) {
+    const p = !this.pick(ray) && this.pickGoal(ray);
+    if (p) {
+      const r = this.active, g = this.goalOf();
+      this.dragging = { goal: true, robot: r, before: r.goal, offset: [g.x - p[0], g.y - p[1]] };
+      r.goal = { ...g };
+      r.goalState = {};
+      return true;
+    }
     const hit = this.pick(ray);
     if (!hit) return false;
     const ik = this.active.ik, chain = ik.chains[hit.index];
@@ -181,6 +250,12 @@ export class TeleopPanel {
 
   dragTo(ray) {
     const g = this.dragging;
+    if (g?.goal) {
+      const p = TeleopPanel.floorHit(ray);
+      if (p) Object.assign(g.robot.goal, { x: p[0] + g.offset[0], y: p[1] + g.offset[1] });
+      g.robot.goalState = {};
+      return;
+    }
     if (!g || !this.active?.ik) return;
     const pose = dragPose(g, ray);
     if (pose) this.active.ik.setTargetPose(g.chain, this.app.data, pose);
@@ -229,11 +304,25 @@ export class TeleopPanel {
     this.body.append(el('div', { className: 'field' }, el('span', { textContent: 'Controllers' }), chips));
     const locos = locomotion(r);
     if (locos.length) {
-      field('Input', this.select([['keyboard', 'Keyboard']], 'keyboard'));
+      field('Input', this.select(INPUTS, this.mode, (v) => {
+        this.mode = v;
+        try { localStorage.setItem(INPUT, v); } catch { /* no storage */ }
+        r.goal = null;  // a new goal starts where the robot is
+        this.render();
+      }));
       const keys = el('div', { className: 'hint' });
-      keys.innerHTML = '<kbd>W</kbd><kbd>S</kbd> forward/back · ' + (locos.some((c) => c.drive.side) ? '<kbd>A</kbd><kbd>D</kbd> sideways · ' : '')
-        + '<kbd>Q</kbd><kbd>E</kbd> turn' + (locos.some((c) => 'height' in c) ? ' · hold <kbd>R</kbd><kbd>F</kbd> height' : '');
-      this.body.append(keys);
+      if (this.mode === 'goal') {
+        keys.innerHTML = 'Drag the ring on the floor to where the robot should go; while dragging, the mouse wheel or '
+          + '<kbd>Q</kbd><kbd>E</kbd> turn it (the arrow is the heading), <kbd>Esc</kbd> puts it back.';
+        this.goalReadout = el('span', { className: 'note' });
+        this.body.append(keys, el('div', { className: 'bar' },
+          this.button('Stop', 'Forget the goal: the robot stops where it is', () => { r.goal = null; }), this.goalReadout));
+      } else {
+        this.goalReadout = null;
+        keys.innerHTML = '<kbd>W</kbd><kbd>S</kbd> forward/back · ' + (locos.some((c) => c.drive.side) ? '<kbd>A</kbd><kbd>D</kbd> sideways · ' : '')
+          + '<kbd>Q</kbd><kbd>E</kbd> turn' + (locos.some((c) => 'height' in c) ? ' · hold <kbd>R</kbd><kbd>F</kbd> height' : '');
+        this.body.append(keys);
+      }
       this.readout = el('div', { className: 'readout' });
       this.body.append(this.readout);
     }
@@ -369,10 +458,10 @@ export class TeleopPanel {
     if (c.error) box.append(el('div', { className: 'error', textContent: c.error }));
     const note = el('span', { className: 'note', textContent: c.saved ? 'saved' : cfg.auto ? 'automatic' : '' });
     box.append(el('div', { className: 'bar' },
-      this.button('Save', 'Use this base setup for every spawn of this robot (this browser)', () => { c.save(); this.render(); }),
+      this.button('Save', `Use this base setup for every spawn of this robot (${this.app.net ? 'on the server, for everyone' : 'this browser'})`, () => { c.save(); this.render(); }),
       this.button(c.hasDefaults ? 'Defaults' : 'Auto', c.hasDefaults ? 'Back to the built-in base setup' : 'Back to the setup found in the model',
         () => { c.restoreDefaults(); c.reset(); this.render(); }),
-      this.button('Export', 'Copy the setup as JSON (for BASE_DEFAULTS in base.js)', () => {
+      this.button('Export', 'Copy the setup as JSON (for base_defaults.json)', () => {
         const json = JSON.stringify({ [c.key]: c.config }, null, 2);
         navigator.clipboard?.writeText(json).catch(() => {});
         console.log(json);
@@ -433,9 +522,9 @@ export class TeleopPanel {
         ik.enabled = true;
         changed(ik.config.chains.at(-1));
       }),
-      this.button('Save', 'Use this IK setup for every spawn of this robot (this browser)', () => { ik.save(); this.render(); }),
+      this.button('Save', `Use this IK setup for every spawn of this robot (${this.app.net ? 'on the server, for everyone' : 'this browser'})`, () => { ik.save(); this.render(); }),
       this.button(ik.hasDefaults ? 'Defaults' : 'Auto', ik.hasDefaults ? 'Back to the built-in IK setup' : 'Back to the chains found in the model', () => { ik.restoreDefaults(); this.render(); }),
-      this.button('Export', 'Copy the setup as JSON (for IK_DEFAULTS in ik.js)', () => {
+      this.button('Export', 'Copy the setup as JSON (for ik_defaults.json)', () => {
         const json = JSON.stringify({ [ik.key]: ik.config }, null, 2);
         navigator.clipboard?.writeText(json).catch(() => {});
         console.log(json);
@@ -534,16 +623,32 @@ export class TeleopPanel {
   tick(dt) {
     const robots = this.controllable();
     const locos = locomotion(this.active);
-    this.input.enabled = locos.length > 0;
+    const keyboard = this.mode === 'keyboard';
+    this.input.enabled = locos.length > 0 && keyboard;
     for (const r of robots) {
       const mine = r === this.active ? locos : [];
+      // A goal is followed until it is cleared, also while another robot is driven.
+      const goal = r.goal && !(r === this.active && keyboard) && this.app.data ? r.goal : null;
+      const pose = goal && bodyPose(this.app.data, r.bodyOffset);
+      r.goalResult = null;
       for (const c of [r.policy, r.base]) {
         if (!c) continue;
-        if (!mine.includes(c)) { c.cmd = [0, 0, 0]; continue; }
+        if (goal && locomotion(r).includes(c)) {
+          r.goalResult = goalCommand(pose, goal, c.drive, r.goalState ??= {});
+          c.cmd = r.goalResult.cmd;
+          continue;
+        }
+        if (!mine.includes(c) || !keyboard) { c.cmd = [0, 0, 0]; continue; }
         const { cmd, dh } = this.input.read(dt, c.drive);
         c.cmd = cmd;
         if ('height' in c) c.height = Math.min(HEIGHT_RANGE[1], Math.max(HEIGHT_RANGE[0], c.height + dh));
       }
+    }
+    if (this.goalReadout) {
+      const g = this.active?.goalResult;
+      const text = !this.active?.goal ? 'no goal' : !g ? '' : g.phase === 'arrived' ? 'arrived'
+        : `${g.dist.toFixed(2)} m · ${(g.dyaw * DEG).toFixed(0)}° · ${g.phase === 'turn' ? 'turning' : 'driving'}`;
+      if (this.goalReadout.textContent !== text) this.goalReadout.textContent = text;
     }
     const c = locos[0];
     if (this.readout && c) {

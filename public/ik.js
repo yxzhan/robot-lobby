@@ -25,7 +25,7 @@
 // tendon length or a software servo target.
 //
 // Configs, first found: one saved in localStorage from the Teleop panel,
-// IK_DEFAULTS per robot file (keyed like base.js's BASE_DEFAULTS), or one
+// IK_DEFAULTS per robot file (ik_defaults.json, keyed like base.js's BASE_DEFAULTS), or one
 // made from the model (autoConfig): every serial run of at least MIN_CHAIN
 // free movable joints that ends a branch of the tree (an arm, a leg,
 // a neck with enough joints), gripper/finger joints left out and their
@@ -34,19 +34,11 @@
 
 import { CONTROL_DT } from './groot.js';
 
-export const IK_DEFAULTS = {
-  'digital_twin/garmi/garmi.xml': {
-    chains: [
-      // Franka TCP: 0.1034 m past the hand flange, between the fingertips.
-      { name: 'left', root: 'left_fr3_link1', tip: 'left_fr3_hand', offset: [0, 0, 0.1034], locked: [], gripper: 'left_gripper' },
-      { name: 'right', root: 'right_fr3_link1', tip: 'right_fr3_hand', offset: [0, 0, 0.1034], locked: [], gripper: 'right_gripper' },
-    ],
-  },
-  // panda.xml has no TCP site (only mjx_panda.xml's "gripper", 0.1 m out).
-  'mujoco_menagerie/franka_emika_panda/panda.xml': {
-    chains: [{ name: 'hand', root: 'link1', tip: 'hand', offset: [0, 0, 0.1034], locked: [], gripper: 'actuator8' }],
-  },
-};
+// Built-in setups per robot file, in ik_defaults.json (shared with the
+// server, server/ik.py). Garmi and the Panda put the Franka TCP 0.1034 m past
+// the hand flange, between the fingertips (panda.xml has no TCP site; only
+// mjx_panda.xml's "gripper", 0.1 m out).
+export const IK_DEFAULTS = await fetch(new URL('./ik_defaults.json', import.meta.url)).then((r) => r.json()).catch(() => ({}));
 
 const STORE = 'mujoco-filament/ik/';
 const MIN_CHAIN = 3;  // fewest joints for an automatic chain (a 2-joint head is left alone)
@@ -495,11 +487,21 @@ export class IkController {
   // The chain's target, starting where its tip is (commanded) if it has none.
   target(chain, data, s = null) {
     let t = this.targets.get(chain.cfg.name);
+    if (t && t.ref !== chain.ref) {
+      // Its reference body changed (a joint locked or unlocked): the same
+      // pose in the world, in the new body's frame.
+      const from = IkController.frame(data, t.ref), to = IkController.frame(data, chain.ref);
+      const pos = mulMV(from.rot, t.pos).map((v, i) => v + from.pos[i]);
+      t.pos = mulTV(to.rot, pos.map((v, i) => v - to.pos[i]));
+      t.rot = mulTM(to.rot, mulMM(from.rot, t.rot));
+      t.ref = chain.ref;
+    }
     if (!t) {
       s ??= this.commanded(data);
       const tip = this.tipFrame(s, chain), ref = IkController.frame(s, chain.ref);
-      t = { pos: mulTV(ref.rot, tip.pos.map((v, i) => v - ref.pos[i])), rot: mulTM(ref.rot, tip.rot) };
-      t.home = chain.active.map((dof) => this.value(dof, data));
+      t = { pos: mulTV(ref.rot, tip.pos.map((v, i) => v - ref.pos[i])), rot: mulTM(ref.rot, tip.rot), ref: chain.ref };
+      // The posture to drift back to, by dof (a lock or unlock keeps the target).
+      t.home = new Map(chain.active.map((dof) => [dof.name, this.value(dof, data)]));
       this.targets.set(chain.cfg.name, t);
     }
     return t;
@@ -581,7 +583,7 @@ export class IkController {
     let dq;
     for (let pass = 0; pass < 4; pass++) {
       dq = this.dlsStep(rows.map((row) => row.map((v, c) => (free[c] ? v : 0))), e, n,
-        q.map((v, c) => (free[c] ? NULL_GAIN * dt * (t.home[c] - v) : 0)));
+        q.map((v, c) => (free[c] ? NULL_GAIN * dt * ((t.home.get(active[c].name) ?? v) - v) : 0)));
       let again = false;
       active.forEach((jt, c) => {
         const next = q[c] + dq[c];

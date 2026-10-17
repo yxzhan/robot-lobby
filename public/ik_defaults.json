@@ -1,0 +1,11 @@
+{
+  "digital_twin/garmi/garmi.xml": {
+    "chains": [
+      { "name": "left", "root": "left_fr3_link1", "tip": "left_fr3_hand", "offset": [0, 0, 0.1034], "locked": [], "gripper": "left_gripper" },
+      { "name": "right", "root": "right_fr3_link1", "tip": "right_fr3_hand", "offset": [0, 0, 0.1034], "locked": [], "gripper": "right_gripper" }
+    ]
+  },
+  "mujoco_menagerie/franka_emika_panda/panda.xml": {
+    "chains": [{ "name": "hand", "root": "link1", "tip": "hand", "offset": [0, 0, 0.1034], "locked": [], "gripper": "actuator8" }]
+  }
+}

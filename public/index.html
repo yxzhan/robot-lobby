@@ -46,6 +46,11 @@
     #assets .hint { color: #999; font-size: 12px; }
     /* Flush with the corner, under the side panels when they reach down. */
     #stats { position: absolute; right: 0; bottom: 0; z-index: 0; cursor: pointer; opacity: .9; }
+    #net { position: absolute; right: 80px; bottom: 0; z-index: 0; height: 48px; box-sizing: border-box; padding: 6px 8px;
+           background: #002; color: #0ff; opacity: .9; font: bold 9px Helvetica, Arial, sans-serif; line-height: 15px;
+           white-space: nowrap; font-variant-numeric: tabular-nums; }
+    #net .rtt { font-size: 13px; display: block; }
+    #net .rtt.good { color: #0f8; } #net .rtt.fair { color: #fd4; } #net .rtt.poor { color: #f55; }
     #gizmo { position: absolute; left: 12px; bottom: 12px; width: 84px; height: 84px; }
     .drag-ghost { position: fixed; left: 0; top: 0; pointer-events: none; z-index: 10; color: #fff;
                   background: rgba(40,40,40,.85); border: 1px solid #666; padding: 3px 8px; border-radius: 4px; }
@@ -219,6 +224,7 @@
   </div>
   </div>
   <canvas id="gizmo" title="World axes: click an axis to look along it"></canvas>
+  <div id="net" hidden title="Shared world: round trip to the server (ping), states received per second, download rate, and how far the view trails the newest state (interpolation buffer)"><span class="rtt">RTT …</span><span class="rate"></span></div>
   <div id="busy"><div class="spinner"></div><div class="msg">loading…</div></div>
   <!-- Filament.js is a UMD bundle that defines the global `Filament`. -->
   <script src="vendor/filament/filament.js"></script>

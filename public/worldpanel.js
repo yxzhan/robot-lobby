@@ -71,6 +71,13 @@ export class WorldPanel {
     }
     this.body.append(el('div', { className: 'hint', textContent: 'Applied at once. Wind and fluid drag only act with a medium density or viscosity.' }));
 
+    if (this.app.net) {  // network mode: the server's options (server/server.py)
+      this.body.append(el('div', { className: 'hint', textContent: 'Shared world: these are the server\'s settings, for everyone. Default geom properties are not available in server mode yet.' }));
+      const reset = el('button', { type: 'button', textContent: 'MuJoCo defaults', title: 'Every option back to MuJoCo\'s defaults' });
+      reset.onclick = () => this.app.setPhysics({ ...structuredClone(PHYSICS_DEFAULTS), geom: this.app.physics.geom });
+      this.body.append(el('div', { className: 'bar' }, reset));
+      return;
+    }
     this.body.append(el('div', { className: 'sub', textContent: 'Default geom' }));
     const d = this.draft, dirty = JSON.stringify(d) !== JSON.stringify(s.geom);
     for (const [k, label, unit, n, title] of GEOM) {

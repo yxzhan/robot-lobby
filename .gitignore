@@ -10,3 +10,6 @@ public/thumbs/
 # model library / policies checked out next to package.json
 mjcf_assets/
 pretrained_policies/
+# IK setups saved from the Teleop panel in network mode
+server/saved/
+__pycache__/

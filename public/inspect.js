@@ -85,12 +85,19 @@ export class Perturb {
     if (Math.abs(den) < 1e-6) return;
     const s = dot(sub(this.target, eye), this.normal) / den;
     if (s > 0) this.target = eye.map((v, i) => v + s * dir[i]);
+    this.sync();
+  }
+
+  // Network mode: the server applies the spring (net.js).
+  sync() {
+    this.app.net?.send('perturb', this.target ? { body: this.body, local: this.local, target: this.target } : { body: -1 });
   }
 
   end() {
     if (!this.target) return;
     this.target = null;
     this.prev = null;
+    this.sync();
     const { data } = this.app;
     if (this.body > 0 && this.body < this.app.model.nbody) data.xfrc_applied.fill(0, 6 * this.body, 6 * this.body + 6);
   }
@@ -160,6 +167,7 @@ export class StagePanel {
         name: mujoco.mj_id2name(model, T.mjOBJ_JOINT.value, j) || `joint ${j}`, range, joint: true,
         read: () => this.app.data.qpos[adr],
         write: (v) => {
+          if (this.app.net) { this.app.net.send('qpos', { adr, dof, v }); return; }
           const { mujoco: mj, model: m, data } = this.app;
           data.qpos[adr] = v;
           data.qvel[dof] = 0;
@@ -178,7 +186,7 @@ export class StagePanel {
       groups.get(r).ctrls.push({
         name, range, joint: false,
         read: () => this.app.data.ctrl[a],
-        write: (v) => { this.app.data.ctrl[a] = v; },
+        write: (v) => { if (this.app.net) this.app.net.send('ctrl', { a, v }); else this.app.data.ctrl[a] = v; },
       });
     }
 

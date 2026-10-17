@@ -21,33 +21,14 @@
 
 import { CONTROL_DT } from './groot.js';
 
-export const BASE_DEFAULTS = {
-  'digital_twin/garmi/garmi.xml': {
-    kind: 'wheels',
-    base: 'base_free',
-    wheels: [
-      { actuator: 'wheel_fl', roller: 1 }, { actuator: 'wheel_fr', roller: -1 },
-      { actuator: 'wheel_rl', roller: -1 }, { actuator: 'wheel_rr', roller: 1 },
-    ],
-    radius: 0.0759,
-    // Strafing slower than driving, like the real robot (teleop.py).
-    drive: { forward: 0.7, back: 0.7, side: 0.42, turn: 1.2 },
-    // Garmi's rollers give yaw a lever of only |x - y| = 4 cm, and the base
-    // turns ~3x slower than that predicts: hence the yaw feedforward.
-    ff: [1.0, 1.0, 3.0], kp: [1.6, 1.6, 4.0], ki: [0.0, 0.0, 4.0], iclamp: [0.5, 0.5, 2.0],
-    accel: [2, 2, 4],
-  },
-  // Its wheel velocity servos chatter (the left one flips ±2.3 rad/s every
-  // step, in MuJoCo too), so the wheels run on software servos.
-  'mujoco_menagerie/hello_robot_stretch_3/stretch.xml': {
-    kind: 'wheels',
-    base: '',
-    wheels: [{ joint: 'joint_left_wheel', roller: 0 }, { joint: 'joint_right_wheel', roller: 0 }],
-    radius: 0.0508,
-    drive: { forward: 0.3, back: 0.2, side: 0, turn: 1.0 },
-    ff: [1, 1, 1], kp: [0.5, 0.5, 0.3], ki: [0.3, 0.3, 0.2], iclamp: [0.2, 0.2, 0.2], accel: [0.5, 0.5, 1.0],
-  },
-};
+// Built-in setups per robot file, in base_defaults.json (shared with the
+// server, server/base.py). Garmi strafes slower than it drives, like the
+// real robot (teleop.py); its rollers give yaw a lever of only |x - y| = 4 cm
+// and the base turns ~3x slower than that predicts, hence its yaw
+// feedforward. Stretch 3's wheel velocity servos chatter (the left one flips
+// ±2.3 rad/s every step, in MuJoCo too), so its wheels run on software
+// servos.
+export const BASE_DEFAULTS = await fetch(new URL('./base_defaults.json', import.meta.url)).then((r) => r.json()).catch(() => ({}));
 
 export const KINDS = [['', 'none'], ['wheels', 'wheels (differential, skid, mecanum)'], ['planar', 'planar joints (x, y, yaw)']];
 const STORE = 'mujoco-filament/base/';
