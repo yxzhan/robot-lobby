@@ -22,10 +22,10 @@
     ],
     "radius": 0.0759,
     "drive": {
-      "forward": 0.7,
-      "back": 0.7,
-      "side": 0.42,
-      "turn": 1.2
+      "forward": 0.5,
+      "back": 0.5,
+      "side": 0.3,
+      "turn": 0.8
     },
     "ff": [
       1.0,
