@@ -32,6 +32,7 @@
 // (R/F keys); a hand or arm policy leaves those out and the keyboard skips it.
 
 import { G1_MODELS, GrootController, loadGrootPolicy } from './groot.js';
+import { PlaygroundController, loadPlaygroundPolicy } from './playground.js';
 
 // onnxruntime-web, loaded on first use.
 let ort = null;
@@ -54,6 +55,15 @@ export const POLICIES = [
     defaultFor: G1_MODELS,
     load: async (file) => loadGrootPolicy(await onnxRuntime(), file),
     create: (weights, prefix) => new GrootController(weights, prefix),
+  },
+  {
+    id: 'playground-spot',
+    name: 'Playground joystick · Boston Dynamics Spot',
+    about: 'Walking on flat ground (12 leg joints, 50 Hz), trained in MuJoCo Playground (training/).',
+    dir: 'playground_spot',  // training/export_onnx.py
+    defaultFor: /(^|\/)mujoco_menagerie\/boston_dynamics_spot\/spot\.xml$/,
+    load: async (file) => loadPlaygroundPolicy(await onnxRuntime(), file),
+    create: (weights, prefix) => new PlaygroundController(weights, prefix, 'Spot joystick policy'),
   },
 ];
 

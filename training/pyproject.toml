@@ -1,0 +1,14 @@
+[project]
+name = "mujoco-filament-training"
+version = "0.1.0"
+description = "Train locomotion policies in MuJoCo Playground (MJX + Brax PPO) and export them to ONNX for the viewer"
+requires-python = ">=3.11,<3.13"
+dependencies = [
+  "playground==0.2.0",
+  "jax[cuda12]<0.10",  # brax 0.14 calls jax.device_put_replicated, removed in jax 0.10+
+  "onnx",
+  "onnxruntime",
+]
+
+[tool.uv]
+package = false

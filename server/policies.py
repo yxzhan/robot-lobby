@@ -5,9 +5,11 @@ policy.js describes (bind, unbind, owns, pose, reset, step; locomotion ones
 also cmd, drive, height), with a synchronous step.
 
 GrootController is a port of public/groot.js (see there for the
-observation, the two MLPs and the PD gains).
+observation, the two MLPs and the PD gains); PlaygroundController of
+public/playground.js (policies from training/: policy.onnx + policy.json).
 """
 
+import json
 import math
 import pathlib
 import re
@@ -134,12 +136,129 @@ def load_groot(directory):
 
 
 # ---------------------------------------------------------------------------
+# MuJoCo Playground joystick policies (training/export_onnx.py)
+
+
+def drive_of(r):
+  """Key speeds a bit inside the trained command ranges."""
+  top = lambda v: round(0.8 * abs(v), 2)
+  return {'forward': top(r['lin_vel_x'][1]), 'back': top(r['lin_vel_x'][0]),
+          'side': min(top(r['lin_vel_y'][0]), top(r['lin_vel_y'][1])),
+          'turn': min(top(r['ang_vel_yaw'][0]), top(r['ang_vel_yaw'][1]))}
+
+
+class PlaygroundController:
+  def __init__(self, policy, prefix, name='Playground policy'):
+    self.session, self.spec = policy
+    self.prefix = prefix
+    self.name = name
+    self.drive = drive_of(self.spec['command_range'])
+    self.cmd = [0.0, 0.0, 0.0]
+    self.model = None
+    self.saved = None
+    self.driven = set()
+    self.reset()
+
+  def reset(self):
+    n = len(self.spec['joints'])
+    self.action = np.zeros(n, np.float32)  # applied last
+    self.prev_action = np.zeros(n, np.float32)  # the one before: what the observation holds
+    self.targets = np.zeros(n)  # Playground starts the error history against zero targets
+    self.error = np.zeros(self.spec['history_len'] * n)
+
+  def bind(self, model):
+    s = self.spec
+
+    def find(obj, name):
+      i = mujoco.mj_name2id(model, obj, self.prefix + name)
+      if i < 0:
+        raise ValueError(f'{self.name}: no {self.prefix}{name} in the model')
+      return i
+    joints = [find(OBJ.mjOBJ_JOINT, n) for n in s['joints']]
+    acts = np.array([find(OBJ.mjOBJ_ACTUATOR, n) for n in s['actuators']])
+    feet = np.array([find(OBJ.mjOBJ_GEOM, n) for n in s['feet']])
+    root = find(OBJ.mjOBJ_BODY, s['root'])
+    free = model.body_jntadr[root]
+    if free < 0 or model.jnt_type[free] != mujoco.mjtJoint.mjJNT_FREE:
+      raise ValueError(f"{self.name}: {self.prefix}{s['root']} has no free joint")
+    self.model, self.root, self.act, self.feet = model, root, acts, feet
+    self.qadr = model.jnt_qposadr[joints]
+    self.dofs = model.jnt_dofadr[joints]
+    self.driven = set(joints)
+    self.saved = (model.actuator_gainprm[acts, 0].copy(), model.actuator_biasprm[acts, :3].copy(),
+                  model.dof_damping[self.dofs].copy(), model.dof_armature[self.dofs].copy(),
+                  model.dof_frictionloss[self.dofs].copy())
+    model.actuator_gainprm[acts, 0] = s['actuator_gain']
+    model.actuator_biasprm[acts, :3] = s['actuator_bias']
+    model.dof_damping[self.dofs] = s['dof_damping']
+    model.dof_armature[self.dofs] = s['dof_armature']
+    model.dof_frictionloss[self.dofs] = s['dof_frictionloss']
+    self.default = np.array(s['default_pose'])
+    self.lo, self.hi = np.array(s['ctrl_range']).T
+
+  def unbind(self):
+    if self.saved is None:
+      return
+    m = self.model
+    (m.actuator_gainprm[self.act, 0], m.actuator_biasprm[self.act, :3], m.dof_damping[self.dofs],
+     m.dof_armature[self.dofs], m.dof_frictionloss[self.dofs]) = self.saved
+    self.saved = None
+    self.driven = set()
+
+  def owns(self, j):
+    return self.name if j in self.driven else None
+
+  def pose(self, data):
+    data.qpos[self.qadr] = self.default
+    data.ctrl[self.act] = self.default
+
+  def observe(self, data):
+    n = len(self.default)
+    R = data.xmat[self.root].reshape(3, 3)
+    q = data.qpos[self.qadr]
+    self.error = np.roll(self.error, n)
+    self.error[:n] = q - self.targets
+    parts = {
+        'gyro': lambda: data.cvel[self.root, :3] @ R,  # the gyro sensor: at the last step's start
+        'upvector': lambda: R[:, 2],
+        'joint_pos': lambda: q - self.default,
+        'qpos_error': lambda: self.error,
+        'feet_pos': lambda: ((data.geom_xpos[self.feet] - data.xpos[self.root]) @ R).ravel(),
+        'last_action': lambda: self.prev_action,
+        'command': lambda: np.asarray(self.cmd, float),
+    }
+    return np.concatenate([parts[k]() for k, _ in self.spec['obs']]).astype(np.float32)[None]
+
+  def step(self, data):
+    s = self.spec
+    self.prev_action = self.action
+    self.action = np.asarray(self.session.run(None, {s['input']: self.observe(data)})[0], np.float32).reshape(-1)
+    self.targets = np.clip(self.default + self.action * s['action_scale'], self.lo, self.hi)
+    data.ctrl[self.act] = self.targets
+
+  def describe(self):
+    return {'name': self.name, 'drive': self.drive}
+
+
+def load_playground(directory):
+  import onnxruntime as ort
+  spec = json.loads((directory / 'policy.json').read_text())
+  opts = ort.SessionOptions()
+  opts.intra_op_num_threads = 1
+  return ort.InferenceSession(str(directory / spec['onnx']), opts, providers=['CPUExecutionProvider']), spec
+
+
+# ---------------------------------------------------------------------------
 # Registry (ids as in policy.js)
 
 POLICIES = [
     {'id': 'groot-g1', 'name': 'GR00T locomotion · Unitree G1', 'dir': 'GR00T-WholeBodyControl_g1',
      'defaultFor': re.compile(r'(^|/)mujoco_menagerie/unitree_g1/[^/]+\.xml$'),
      'load': load_groot, 'create': GrootController},
+    {'id': 'playground-spot', 'name': 'Playground joystick · Boston Dynamics Spot', 'dir': 'playground_spot',
+     'defaultFor': re.compile(r'(^|/)mujoco_menagerie/boston_dynamics_spot/spot\.xml$'),
+     'load': load_playground,
+     'create': lambda policy, prefix: PlaygroundController(policy, prefix, 'Spot joystick policy')},
 ]
 
 _loaded = {}

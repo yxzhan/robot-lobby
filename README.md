@@ -183,18 +183,20 @@ gets leg chains). Keyboard: **WASD** walk / drive, **QE** turn, hold
 **R**/**F** to raise or lower a locomotion policy's base height (keys typed
 into a text field are ignored); the sections fold.
 
-The **Input** select switches the keys for a **goal marker**
-(`public/goal.js`): an orange ring with a heading arrow, like the spawn
+The **Input** select picks the keys or a **goal marker** (the default,
+`public/goal.js`): an orange ring with a heading arrow, like the spawn
 marker, that sits under the driven robot until it is dragged along the
 floor (the mouse wheel or **Q**/**E** turn it while dragging, **Esc** puts
-it back). The robot then drives itself there, with the same twist command
+it back; a label by the pointer shows its position and heading). It is
+drawn over everything, so a robot's base does not hide it. The robot then drives itself there, with the same twist command
 the keys give and within their speeds, so a walking policy and a wheeled
 base both follow it, in local and network mode: far off it turns towards
 the goal and goes forward (a robot that cannot strafe backs up to a goal
 just behind it), near it a mecanum base or a walking robot closes the rest
 sideways, and at the point it turns to the goal heading (6 cm, 3.5°, with
 hysteresis). A robot keeps going to its goal while another one is driven;
-**Stop** forgets the goal.
+**Stop** forgets the goal, and so does Reset (in network mode a reset by
+any client).
 
 Pretrained policies live in `pretrained_policies/<dir>/`, one checkout per
 model (not tracked by git). `npm install` (or `node scripts/vendor.mjs`)
@@ -233,6 +235,21 @@ into the menagerie position actuators (`gainprm`/`biasprm`), and the IMU is
 the floating base (`qpos[3:7]`, `qvel[3:6]`), as in lerobot's G1 sim.
 Inference is async, so `App.advance()` awaits it every 0.02 s of sim time.
 `g1.xml` and `g1_with_hands.xml` both walk.
+
+## Walking Spot (trained in MuJoCo Playground)
+
+`training/` trains locomotion policies on the GPU with MuJoCo Playground
+(MJX / MuJoCo Warp + Brax PPO) and exports them for the viewer; see
+`training/README.md`. `uv run train.py` then `uv run export_onnx.py
+runs/<name>` put `policy.onnx` and `policy.json` into
+`pretrained_policies/playground_spot/`, and the menagerie Spot
+(`boston_dynamics_spot/spot.xml`) starts with the `playground-spot` policy
+on. `public/playground.js` (and `PlaygroundController` in
+`server/policies.py`) runs any such policy from its `policy.json`: it writes
+the trained PD gains and joint damping / armature / friction loss into the
+robot, builds the observation (body gyro and up vector, joint positions,
+a history of tracking errors, foot positions, last action, command) and
+sets the targets `default + action * scale` every 0.02 s.
 
 ## Mobile bases
 
@@ -407,8 +424,9 @@ which it loads no MuJoCo at all:
   and tells every browser. Robots are attached in the same order on both
   sides, so bodies, joints and actuators are numbered the same.
 - **Controllers on the server.** Policies (`server/policies.py`: GR00T
-  on onnxruntime, same ids as `policy.js`), mobile bases (`server/base.py`)
-  and IK (`server/ik.py`) are ports of `groot.js`, `base.js` and `ik.js`,
+  and Playground policies on onnxruntime, same ids as `policy.js`), mobile
+  bases (`server/base.py`) and IK (`server/ik.py`) are ports of `groot.js`,
+  `playground.js`, `base.js` and `ik.js`,
   ticked at 50 Hz with the physics; ten G1s walking under GR00T keep real
   time. The Teleop panel works as in local mode through `public/remote.js`.
   The keys' drive command goes to the server when it changes and is
