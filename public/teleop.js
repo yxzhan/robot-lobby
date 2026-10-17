@@ -101,7 +101,7 @@ export class TeleopPanel {
     try { this.folded = new Set(JSON.parse(localStorage.getItem(FOLDED) ?? '[]')); } catch { this.folded = new Set(); }
     this.dragging = null;    // marker.js drag state + {index, chain} while a marker is dragged, or {goal} for the goal marker
     this.hover = null;       // {index, part} of the marker under the pointer, or {goal: true}
-    try { this.mode = localStorage.getItem(INPUT) === 'goal' ? 'goal' : 'keyboard'; } catch { this.mode = 'keyboard'; }
+    try { this.mode = localStorage.getItem(INPUT) === 'keyboard' ? 'keyboard' : 'goal'; } catch { this.mode = 'goal'; }
     this.goalReadout = null;
     // While the goal marker is dragged, the wheel and Q/E turn it and Esc puts
     // it back (capture phase: before the camera zoom and the drive keys).
@@ -115,7 +115,7 @@ export class TeleopPanel {
       if (!this.dragging?.goal) return;
       const k = e.key.toLowerCase();
       if (k === 'q' || k === 'e') this.turnGoal(k === 'q' ? GOAL_TURN : -GOAL_TURN);
-      else if (k === 'escape') { this.dragging.robot.goal = this.dragging.before; this.dragging = null; }
+      else if (k === 'escape') { this.dragging.robot.goal = this.dragging.before; this.release(); }
       else return;
       e.preventDefault();
       e.stopImmediatePropagation();
@@ -224,17 +224,46 @@ export class TeleopPanel {
 
   turnGoal(delta) {
     const g = this.dragging?.robot.goal;
-    if (g) g.yaw += delta;
+    if (!g) return;
+    g.yaw += delta;
+    this.showGoal();
+  }
+
+  // Forgets the goals of `robots` (Reset): they stop where they are.
+  clearGoals(robots) {
+    for (const r of robots) {
+      r.goal = null;
+      r.goalState = {};
+      r.goalResult = null;
+    }
+    if (this.dragging?.goal && robots.includes(this.dragging.robot)) this.release();
+  }
+
+  // While the goal marker is dragged: a label by the pointer with the goal's
+  // position and heading, like the one of a dragged asset (assets.js).
+  showGoal(at) {
+    const d = this.dragging;
+    if (!d?.goal) return;
+    if (!d.ghost) {
+      d.ghost = el('div', { className: 'drag-ghost placing' },
+        el('div', { textContent: `goal · ${d.robot.prefix.slice(0, -1)} · ${d.robot.label}` }), el('div', { className: 'readout' }));
+      document.body.append(d.ghost);
+    }
+    if (at) d.ghost.style.transform = `translate(${at[0] + 14}px, ${at[1] + 10}px)`;
+    const g = d.robot.goal, deg = ((g.yaw * DEG) % 360 + 540) % 360 - 180;  // [-180, 180)
+    d.ghost.lastChild.textContent = `x ${g.x.toFixed(2)}  y ${g.y.toFixed(2)} m · yaw ${deg.toFixed(0)}°`;
   }
 
   // Starts dragging the marker part under the ray; false if there is none.
-  grab(ray) {
+  // `at`: the pointer's client coordinates (for the goal's label).
+  grab(ray, at) {
     const p = !this.pick(ray) && this.pickGoal(ray);
     if (p) {
       const r = this.active, g = this.goalOf();
       this.dragging = { goal: true, robot: r, before: r.goal, offset: [g.x - p[0], g.y - p[1]] };
       r.goal = { ...g };
       r.goalState = {};
+      this.showGoal(at);
       return true;
     }
     const hit = this.pick(ray);
@@ -248,12 +277,13 @@ export class TeleopPanel {
     return true;
   }
 
-  dragTo(ray) {
+  dragTo(ray, at) {
     const g = this.dragging;
     if (g?.goal) {
       const p = TeleopPanel.floorHit(ray);
       if (p) Object.assign(g.robot.goal, { x: p[0] + g.offset[0], y: p[1] + g.offset[1] });
       g.robot.goalState = {};
+      this.showGoal(at);
       return;
     }
     if (!g || !this.active?.ik) return;
@@ -262,6 +292,7 @@ export class TeleopPanel {
   }
 
   release() {
+    this.dragging?.ghost?.remove();
     this.dragging = null;
   }
 

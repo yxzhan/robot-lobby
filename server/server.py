@@ -32,6 +32,7 @@ Server -> client:
                               their describe())
   {type: 'status', robots: {id: {ik: {targets, err}, base: {measured}}}}
                                                      STATUS_HZ times a second
+  {type: 'reset', id}            after reset (id null) / reset_robot {id}
   {type: 'reply', rid, ...} / {type: 'error', op, msg, rid?}
   {type: 'pong', t}
   binary state, STATE_HZ times a second: int32 [version, epoch, nq, nmocap,
@@ -464,6 +465,7 @@ class World:
       self.sim_start = time.monotonic()
       self.next_control = 0
       self.jumped()
+      await self.send_all(json.dumps({'type': 'reset', 'id': None}))
     elif op == 'reset_robot':
       r = self.robot(msg['id'])
       at = state_layout(self.robots)[r.id]
@@ -475,6 +477,7 @@ class World:
         if c:
           c.reset()
       self.jumped()
+      await self.send_all(json.dumps({'type': 'reset', 'id': r.id}))
     elif op == 'pause':
       self.paused = bool(msg['paused'])
       self.sim_start = time.monotonic() - d.time

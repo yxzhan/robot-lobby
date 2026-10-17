@@ -559,11 +559,18 @@ class App {
     this.spawnPole = makeEntity(engine, makeGeometry(engine, cylinder(1, 0.5)), spawnMi, false);
     this.scene.addEntity(this.spawnPole);
     // The Teleop panel's goal marker (goal.js): the spawn marker's shape in
-    // orange, brighter while hovered or dragged.
+    // orange, brighter while hovered or dragged. Drawn last and over
+    // everything, so a robot's base standing on it does not hide it.
     this.goalMi = this.matLit.createInstance();
     this.goalMi.setFloatParameter('roughness', 0.6);
     this.goalMi.setFloatParameter('metallic', 0.0);
+    this.goalMi.setDepthCulling(false);
     this.goalMarker = makeEntity(engine, makeGeometry(engine, spawnMarkerShape()), this.goalMi, false);
+    {
+      const rcm = engine.getRenderableManager(), inst = rcm.getInstance(this.goalMarker);
+      rcm.setPriority(inst, 7);
+      inst.delete();
+    }
     this.scene.addEntity(this.goalMarker);
     this.goalHot = null;
 
@@ -738,6 +745,7 @@ class App {
     for (const r of this.robots) this.writeInitial(r, layout.get(r));
     this.mujoco.mj_forward(this.model, this.data);
     for (const c of this.controllers) c.reset();
+    this.teleop?.clearGoals(this.robots);
     this.nextControl = 0;
     this.simStart = performance.now();
     this.syncTransforms();  // frame() only syncs while running
@@ -754,6 +762,7 @@ class App {
     data.act.fill(0, at.act, at.act + robot.visual.dims.na);
     mujoco.mj_forward(model, data);
     for (const c of [robot.policy, robot.base, robot.ik]) c?.reset();
+    this.teleop?.clearGoals([robot]);
     this.syncTransforms();
   }
 
@@ -1799,7 +1808,7 @@ try {
   const canvas = document.getElementById('canvas');
   let dragging = false;
   // Dragging an IK marker (Teleop panel) moves it instead of the camera.
-  app.orbit.intercept = (e) => e.button === 0 && app.teleop.grab(app.pointerRay(e.clientX, e.clientY));
+  app.orbit.intercept = (e) => e.button === 0 && app.teleop.grab(app.pointerRay(e.clientX, e.clientY), [e.clientX, e.clientY]);
   canvas.addEventListener('pointerdown', (e) => {
     if (app.teleop.dragging) canvas.setPointerCapture(e.pointerId);
     if (!e.shiftKey) return;
@@ -1810,7 +1819,7 @@ try {
   });
   canvas.addEventListener('pointermove', (e) => {
     if (dragging) app.perturb.move(app.pointerRay(e.clientX, e.clientY));
-    if (app.teleop.dragging) app.teleop.dragTo(app.pointerRay(e.clientX, e.clientY));
+    if (app.teleop.dragging) app.teleop.dragTo(app.pointerRay(e.clientX, e.clientY), [e.clientX, e.clientY]);
     else if (!e.buttons) canvas.style.cursor = app.teleop.hoverAt(app.pointerRay(e.clientX, e.clientY)) ? 'grab' : '';
   });
   canvas.addEventListener('pointerup', () => {
@@ -1886,6 +1895,8 @@ try {
           if (r.base) r.base.measured = s.base?.measured ?? null;
         }
       },
+      // Reset by any client: goals set here would drive the robots off again.
+      reset: (msg) => app.teleop.clearGoals(msg.id == null ? robots : robots.filter((r) => r.netId === msg.id)),
       error: (msg) => { status.textContent = `server: ${msg.op} failed: ${msg.msg}`; },
       closed: () => { status.textContent = 'disconnected from the server · reload the page'; },
     });
