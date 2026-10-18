@@ -20,7 +20,11 @@ bottom-right corner is stats.js: click it to cycle FPS / ms per frame / MB.
 
 The scene starts as an empty floor (`BASE_XML` in `public/world.js`). The
 Assets panel lists every model under three tabs — Environments, Robots,
-Objects (`public/assets.js`); drag one onto the floor to spawn it there. While
+Objects (`public/assets.js`) — after a **Recent** tab (the default): the
+last 30 models spawned from the panel, newest first, kept in the browser's
+localStorage; a browser without that list starts from `public/recent.json`
+(model files relative to `public/`, edited by hand). Drag one onto the
+floor to spawn it there. While
 dragging, a marker on the floor shows the spawn point and heading (the model's
 +x, which starts out along the world +x axis); the mouse wheel or Q/E turns it in
 15° steps, Shift+wheel or R/F raises or lowers it in 5 cm steps (a pole

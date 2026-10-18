@@ -1,8 +1,12 @@
 // The asset panel: the models of the library index (public/assets.json,
-// written by scripts/vendor.mjs from mjcf_assets/) under three tabs,
+// written by scripts/vendor.mjs from mjcf_assets/) under the tabs recent /
 // environments / robots / objects, with a name filter; within a tab, models
 // are listed under foldable group headers (their source, or menagerie's
 // README sections), in the index's order.
+// Recent (the default tab) lists the last MAX_RECENT models spawned from the
+// panel, newest first, kept in this browser's localStorage; a browser
+// without one starts from public/recent.json (a list of `rel`s, edited by
+// hand).
 // An item is spawned by dragging it onto the floor: while dragging, a marker
 // on the floor shows the spawn point and heading, which starts out along the
 // world +x axis and turns in 15° steps with the mouse wheel or Q/E; Shift+wheel or
@@ -10,6 +14,28 @@
 // drag); Esc cancels. The drag label shows the position and heading.
 
 export const CATEGORIES = [['environment', 'Environments'], ['robot', 'Robots'], ['object', 'Objects']];
+const TABS = [['recent', 'Recent'], ...CATEGORIES];
+const RECENT_STORE = 'mujoco-filament/recent';
+const MAX_RECENT = 30;
+
+// The recently spawned models' `rel`s, newest first: this browser's, else
+// the default list.
+export async function loadRecent(index = 'recent.json') {
+  try {
+    const saved = JSON.parse(localStorage.getItem(RECENT_STORE) ?? 'null');
+    if (Array.isArray(saved)) return saved;
+  } catch { /* no storage */ }
+  try {
+    const res = await fetch(index);
+    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+    const list = (await res.json()).filter((r) => typeof r === 'string').slice(0, MAX_RECENT);
+    try { localStorage.setItem(RECENT_STORE, JSON.stringify(list)); } catch { /* no storage */ }
+    return list;
+  } catch (err) {
+    console.warn(`no recent list (${index})`, err);
+    return [];
+  }
+}
 
 // The library index; `rel` is the file to spawn, relative to public/.
 export async function loadAssets(index = 'assets.json') {
@@ -35,22 +61,23 @@ const STEP = Math.PI / 12, HEIGHT_STEP = 0.05, MAX_HEIGHT = 5;
 
 export class AssetPanel {
   // `onDrop(asset, pos, yaw)` spawns; `canDrop()` says whether that is possible now.
-  constructor(app, el, assets, { onDrop, canDrop = () => true }) {
+  constructor(app, el, assets, { onDrop, canDrop = () => true, recent = [] }) {
     this.app = app;
     this.el = el;
     this.assets = assets;
     this.onDrop = onDrop;
     this.canDrop = canDrop;
-    this.tab = assets.some((a) => a.category === 'robot') ? 'robot' : 'environment';
+    this.recent = recent;
+    this.tab = 'recent';
     this.drag = null;  // {asset, ghost, label, readout, pos, turn, x, y}
     this.height = 0;  // spawn height above the floor, kept between drags
     this.collapsed = new Set();  // "<tab>/<group>" headers folded in the list
 
     const tabs = el.querySelector('.tabs');
-    for (const [cat, label] of CATEGORIES) {
+    for (const [cat, label] of TABS) {
       const b = document.createElement('button');
       b.dataset.tab = cat;
-      b.innerHTML = `${label} <span class="count">${assets.filter((a) => a.category === cat).length}</span>`;
+      b.innerHTML = `${label} <span class="count"></span>`;
       b.onclick = () => { this.tab = cat; this.render(); };
       tabs.append(b);
     }
@@ -85,14 +112,32 @@ export class AssetPanel {
     this.render();
   }
 
+  // The models of tab `tab`: the recent ones (those still in the library) in
+  // their order, else the category's.
+  tabAssets(tab) {
+    if (tab !== 'recent') return this.assets.filter((a) => a.category === tab);
+    const byRel = new Map(this.assets.map((a) => [a.rel, a]));
+    return this.recent.map((rel) => byRel.get(rel)).filter(Boolean);
+  }
+
+  // Puts `asset` first in Recent.
+  used(asset) {
+    this.recent = [asset.rel, ...this.recent.filter((r) => r !== asset.rel)].slice(0, MAX_RECENT);
+    try { localStorage.setItem(RECENT_STORE, JSON.stringify(this.recent)); } catch { /* no storage */ }
+    this.render();
+  }
+
   render() {
-    for (const b of this.el.querySelectorAll('.tabs button')) b.classList.toggle('active', b.dataset.tab === this.tab);
+    for (const b of this.el.querySelectorAll('.tabs button')) {
+      b.classList.toggle('active', b.dataset.tab === this.tab);
+      b.querySelector('.count').textContent = this.tabAssets(b.dataset.tab).length;
+    }
     const q = this.filter.value.trim().toLowerCase();
-    const items = this.assets.filter((a) => a.category === this.tab && a.name.toLowerCase().includes(q));
+    const items = this.tabAssets(this.tab).filter((a) => a.name.toLowerCase().includes(q));
     // Group headers where a tab's assets have groups, in the order the groups
     // first appear (the library indexes are sorted by group); the rest is
     // "Other". Each header folds its group.
-    const grouped = items.some((a) => a.group);
+    const grouped = this.tab !== 'recent' && items.some((a) => a.group);
     const groups = new Map();
     for (const a of items) {
       const g = grouped ? a.group ?? 'Other' : null;
@@ -119,6 +164,7 @@ export class AssetPanel {
       const li = document.createElement('li');
       li.className = 'empty';
       li.textContent = q ? 'No match.'
+        : this.tab === 'recent' ? 'Nothing spawned yet: models dragged onto the floor show up here.'
         : this.tab === 'object' ? 'No objects yet: put models in mjcf_assets/objects/<source>/ and re-run node scripts/vendor.mjs.'
         : 'Nothing here.';
       this.list.append(li);
@@ -218,7 +264,10 @@ export class AssetPanel {
     const { asset, pos } = d;
     const yaw = pos ? this.yaw() : 0;
     this.cancel();
-    if (pos && this.canDrop()) this.onDrop(asset, pos, yaw);
+    if (pos && this.canDrop()) {
+      this.onDrop(asset, pos, yaw);
+      this.used(asset);
+    }
   }
 
   cancel() {

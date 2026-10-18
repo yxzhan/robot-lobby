@@ -19,7 +19,7 @@ import { bodyInertia, compileWorld, firstKey, referencedNames } from './world.js
 import { CONTROL_DT } from './groot.js';
 import { defaultPolicy, loadPolicy, loadPolicyIndex, policyById } from './policy.js';
 import { Perturb, StagePanel } from './inspect.js';
-import { AssetPanel, loadAssets } from './assets.js';
+import { AssetPanel, loadAssets, loadRecent } from './assets.js';
 import { AxisGizmo } from './gizmo.js';
 import { TeleopPanel } from './teleop.js';
 import { BaseController } from './base.js';
@@ -1224,7 +1224,7 @@ try {
 
   // The model library index written by scripts/vendor.mjs (empty without
   // mjcf_assets/).
-  const [assets] = await Promise.all([loadAssets(), loadPolicyIndex()]);
+  const [assets, recent] = await Promise.all([loadAssets(), loadRecent(), loadPolicyIndex()]);
 
   // Asset paths (`rel`) are under public/:
   // 'mjcf_assets/<category>/<source>/<model>/<file>.xml'.
@@ -1789,6 +1789,7 @@ try {
   // Assets are spawned by dragging them from the asset panel onto the floor.
   new AssetPanel(app, document.getElementById('assets'), assets, {
     onDrop: (asset, pos, yaw) => spawn(asset, pos, yaw),
+    recent,
     canDrop: () => {
       if (busy) status.textContent = 'busy, try again in a moment';
       return !busy;
