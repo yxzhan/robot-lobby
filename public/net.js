@@ -15,6 +15,8 @@
 const MIN_DELAY = 0.04, MAX_DELAY = 0.25;  // s of server time the view runs behind the newest snapshot
 const KEEP = 40;    // snapshots kept
 const PING_EVERY = 1000;  // ms
+const SILENT_MAX = 5000;  // ms without a word from the server: the connection is gone
+const RETRY_MAX = 10000;  // ms between reconnect attempts, at most
 
 // The server's description, or null when the page is served statically
 // (scripts/serve.py) or `?local` is in the URL.
@@ -36,7 +38,9 @@ export const NET_MUJOCO = {
 };
 
 export class NetClient {
-  // handlers: {scene(msg), meta(msg), error(msg), closed()}
+  // handlers: {scene(msg), meta(msg), error(msg), connected(), closed(retryAt)}.
+  // Lost connections are retried until they come back (the server sends its
+  // scene again on each); `opened` resolves on the first.
   constructor(handlers) {
     this.handlers = handlers;
     this.snaps = [];       // {version, epoch, time, qpos, mocap_pos, mocap_quat, ctrl, recv}
@@ -49,26 +53,55 @@ export class NetClient {
     this.jitter = 0.01;        // s, smoothed deviation from that
     this.delay = 0.1;          // s, the view's current lag behind the newest state
     this.traffic = { bytes: 0, states: 0, t0: performance.now(), rate: 0, hz: 0 };
+    this.backoff = 0;          // reconnect attempts since the last open
+    let first;
+    this.opened = new Promise((resolve) => { first = resolve; });  // the first connection
+    this.onOpen = first;
+    // A phone waking up or a network coming back: try at once.
+    const now = () => { if (this.retry) this.reconnect(); };
+    window.addEventListener('online', now);
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) now(); });
+    this.connect();
+  }
+
+  connect() {
+    clearTimeout(this.retry);
+    this.retry = null;
     const url = new URL('ws', location.href);
     url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
-    this.ws = new WebSocket(url);
-    this.ws.binaryType = 'arraybuffer';
-    this.opened = new Promise((resolve, reject) => {
-      this.ws.onopen = resolve;
-      this.ws.onerror = () => reject(new Error(`cannot connect to ${url}`));
-    });
-    this.opened.then(() => {
-      const ping = () => this.send('ping', { t: performance.now() });
+    const ws = this.ws = new WebSocket(url);
+    ws.binaryType = 'arraybuffer';
+    ws.onopen = () => {
+      if (ws !== this.ws) return;
+      this.backoff = 0;
+      this.waiting = null;
+      this.snaps = [];  // the server sends its scene and state anew (it may have restarted)
+      this.renderTime = null;
+      this.ctrl = null;
+      const ping = () => {
+        this.checkAlive();
+        this.waiting ??= performance.now();  // cleared by any message
+        this.send('ping', { t: performance.now() });
+      };
       ping();
       this.pinger = setInterval(ping, PING_EVERY);
-    }, () => {});
-    this.ws.onclose = () => {
+      this.onOpen();
+      this.handlers.connected?.();
+    };
+    ws.onclose = () => {
+      if (ws !== this.ws) return;
       clearInterval(this.pinger);
       for (const { reject } of this.replies.values()) reject(new Error('disconnected'));
       this.replies.clear();
-      handlers.closed?.();
+      // Try again after 1, 2, 4, 8, then every 10 s.
+      const wait = Math.min(RETRY_MAX, 1000 * 2 ** this.backoff++);
+      this.retryAt = performance.now() + wait;
+      this.retry = setTimeout(() => this.connect(), wait);
+      this.handlers.closed?.(this.retryAt);
     };
-    this.ws.onmessage = (e) => {
+    ws.onmessage = (e) => {
+      if (ws !== this.ws) return;
+      this.waiting = null;
       this.traffic.bytes += typeof e.data === 'string' ? e.data.length : e.data.byteLength;
       if (typeof e.data !== 'string') { this.push(e.data); return; }
       const msg = JSON.parse(e.data);
@@ -84,8 +117,29 @@ export class NetClient {
         else waiting.resolve(msg);
         return;
       }
-      handlers[msg.type]?.(msg);
+      this.handlers[msg.type]?.(msg);
     };
+  }
+
+  get connected() {
+    return this.ws.readyState === WebSocket.OPEN;
+  }
+
+  // Now rather than when the wait is over (the banner's button, main.js).
+  reconnect() {
+    if (this.retry) this.connect();
+  }
+
+  // An open socket whose pings have gone unanswered for a while is dead
+  // without knowing it (e.g. after a phone slept, or Wi-Fi changed): drop it,
+  // which starts the reconnecting.
+  checkAlive() {
+    if (this.connected && this.waiting != null && performance.now() - this.waiting > SILENT_MAX) {
+      const ws = this.ws;
+      ws.onclose();  // at once: a dead socket's close can take a long time
+      ws.onclose = ws.onmessage = ws.onopen = null;
+      ws.close();
+    }
   }
 
   send(op, args = {}) {

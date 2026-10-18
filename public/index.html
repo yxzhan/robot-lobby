@@ -178,6 +178,14 @@
             align-items: center; justify-content: center; background: rgba(0,0,0,.55); color: #eee;
             cursor: wait; user-select: none; }
     #busy[hidden] { display: none; }
+    /* Network mode: the connection to the server is lost (main.js offline). */
+    #offline { position: fixed; top: 12px; left: 50%; transform: translateX(-50%); z-index: 101; display: flex;
+               gap: 10px; align-items: center; padding: 7px 10px 7px 14px; border-radius: 6px; font-size: 13px;
+               background: #7a2a22; color: #fff; border: 1px solid #c4544a; box-shadow: 0 2px 10px rgba(0,0,0,.5);
+               max-width: calc(100% - 24px); box-sizing: border-box; }
+    #offline[hidden] { display: none; }
+    #offline button { cursor: pointer; background: #fff; color: #7a2a22; border: 0; border-radius: 4px;
+                      padding: 4px 9px; font-weight: 600; white-space: nowrap; }
     #busy .spinner { width: 36px; height: 36px; border: 3px solid rgba(255,255,255,.25); border-top-color: #eee;
                      border-radius: 50%; animation: spin .8s linear infinite; }
     @keyframes spin { to { transform: rotate(360deg); } }
@@ -206,6 +214,7 @@
       #assets input[type=search], #teleop select, #world select, #world input, #teleop input[type=number] { font-size: 16px; }  /* no zoom on focus (iOS) */
       #gizmo { width: 64px; height: 64px; left: 8px; bottom: 8px; }
       #sticks { left: 12px; right: 12px; bottom: 84px; }
+      #offline { top: 8px; left: 8px; right: 8px; transform: none; max-width: none; justify-content: space-between; font-size: 12px; }
     }
   </style>
 </head>
@@ -253,6 +262,7 @@
   </div>
   <canvas id="gizmo" title="World axes: click an axis to look along it"></canvas>
   <div id="net" hidden title="Shared world: round trip to the server (ping), states received per second, download rate, and how far the view trails the newest state (interpolation buffer)"><span class="rtt">RTT …</span><span class="rate"></span></div>
+  <div id="offline" hidden><span class="msg"></span><button>Retry now</button></div>
   <div id="busy"><div class="spinner"></div><div class="msg">loading…</div></div>
   <!-- Filament.js is a UMD bundle that defines the global `Filament`. -->
   <script src="vendor/filament/filament.js"></script>

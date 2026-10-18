@@ -1038,8 +1038,9 @@ class App {
     const el = document.getElementById('net');
     const { rtt, hz, rate, delay } = this.net.stats();
     el.hidden = false;
-    el.querySelector('.rtt').textContent = rtt == null ? 'RTT …' : `RTT ${Math.round(rtt)} ms`;
-    el.querySelector('.rtt').className = `rtt ${rtt == null ? '' : rtt < 80 ? 'good' : rtt < 200 ? 'fair' : 'poor'}`;
+    const off = !this.net.connected;
+    el.querySelector('.rtt').textContent = off ? 'offline' : rtt == null ? 'RTT …' : `RTT ${Math.round(rtt)} ms`;
+    el.querySelector('.rtt').className = `rtt ${off ? 'poor' : rtt == null ? '' : rtt < 80 ? 'good' : rtt < 200 ? 'fair' : 'poor'}`;
     el.querySelector('.rate').textContent = `${Math.round(hz)} Hz · ${(rate / 1024).toFixed(rate < 10240 ? 1 : 0)} KB/s · +${Math.round(delay * 1000)} ms`;
   }
 
@@ -1787,7 +1788,7 @@ try {
     try {
       const list = [], fresh = [];
       for (const it of msg.items) {
-        let r = robots.find((x) => x.netId === it.id);
+        let r = robots.find((x) => x.netId === it.id && x.visual.rel === it.rel);  // (a restarted server numbers anew)
         if (!r) {
           const visual = await netVisual(it.rel, it.label, progress);
           r = { label: it.label, visual, prefix: `r${it.id}/`, pos: it.pos, yaw: it.yaw, netId: it.id };
@@ -1989,6 +1990,22 @@ try {
   // Network mode (served by server/server.py): the world is the server's.
   const server = await findServer();
   if (server) {
+    // Lost the server: a banner counting down to the next try (net.js keeps
+    // trying; on reconnecting the server sends its world again).
+    const banner = document.getElementById('offline'), bannerMsg = banner.querySelector('.msg');
+    let countdown = null;
+    banner.querySelector('button').onclick = () => app.net.reconnect();
+    const offline = (retryAt) => {
+      clearInterval(countdown);
+      banner.hidden = retryAt == null;
+      if (retryAt == null) return;
+      const show = () => {
+        const s = Math.ceil((retryAt - performance.now()) / 1000);
+        bannerMsg.textContent = s > 0 ? `Disconnected from the server · retrying in ${s} s` : 'Disconnected from the server · reconnecting…';
+      };
+      show();
+      countdown = setInterval(show, 250);
+    };
     const scenes = [];  // waiting scene messages; only the newest one is built
     let building = false;
     const buildScenes = async () => {
@@ -2028,7 +2045,8 @@ try {
       // Reset by any client: goals set here would drive the robots off again.
       reset: (msg) => app.teleop.clearGoals(msg.id == null ? robots : robots.filter((r) => r.netId === msg.id)),
       error: (msg) => { status.textContent = `server: ${msg.op} failed: ${msg.msg}`; },
-      closed: () => { status.textContent = 'disconnected from the server · reload the page'; },
+      closed: (retryAt) => offline(retryAt),
+      connected: () => offline(null),
     });
     await app.net.opened;
     console.log(`network mode: ${server.server}, MuJoCo ${server.mujoco}`);

@@ -493,6 +493,12 @@ which it loads no MuJoCo at all:
   (ping, includes the page's own frame time), states per second, download
   rate, and how far the view trails the newest state: one state interval
   plus three times the arrival jitter (40–250 ms).
+- **Reconnecting.** When the connection drops (the server stopped, Wi-Fi
+  changed, a phone slept: pings unanswered for 5 s count too), a banner
+  says so and the page tries again after 1, 2, 4, 8, then every 10 s, at
+  once on Retry now, when the network comes back or the tab is shown
+  again. The server sends its world on reconnecting; a restarted server's
+  (empty) world replaces the old one.
 - **Memory.** Copies of a model share its meshes in the server's world:
   ten G1s compile to ~75 MB instead of ~750 MB.
 
