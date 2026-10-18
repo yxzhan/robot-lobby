@@ -90,6 +90,7 @@ try {
     await ev(`(() => {
       app.paused = true;
       app.setOriginMarker(false);
+      if (app.teleop) app.teleop.active = null;  // no IK or goal markers
       const { model: m, data: d } = app;
       const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
       for (let g = 1; g < m.ngeom; g++) {
