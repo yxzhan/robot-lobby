@@ -208,7 +208,8 @@ the goal and goes forward (a robot that cannot strafe backs up to a goal
 just behind it), near it a mecanum base or a walking robot closes the rest
 sideways, and at the point it turns to the goal heading (6 cm, 3.5°, with
 hysteresis). A robot keeps going to its goal while another one is driven;
-**Stop** forgets the goal, and so does Reset or driving it with the keys.
+Reaching the goal lets it go (the readout says *arrived*; pushed or carried
+off afterwards, the robot stays put). **Stop** forgets the goal, and so does Reset or driving it with the keys.
 In network mode a robot has one goal for everyone: the server follows it
 (`server/goal.py`), every client shows it, and the last one set wins.
 

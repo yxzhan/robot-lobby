@@ -13,10 +13,10 @@
 // drive). Inputs (the Input select, where a ROS bridge or a gamepad would
 // plug in too): the keyboard, or a goal marker on the floor (goal.js) that
 // the robot drives to, dragged like a spawn marker (wheel or Q/E turn it).
-// A robot keeps going to its goal while another one is driven. In network
-// mode a robot's goal is the server's (server/goal.py), one for every
-// browser: changes go there and come back to everyone (fromServer). Setups
-// are saved per robot file.
+// A robot keeps going to its goal while another one is driven, and lets it
+// go on arriving (arrive). In network mode a robot's goal is the server's
+// (server/goal.py), one for every browser: changes go there and come back
+// to everyone (fromServer). Setups are saved per robot file.
 
 import { dragPose, markerScale, pickMarker, startDrag } from './marker.js';
 import { BaseController, KINDS } from './base.js';
@@ -301,6 +301,7 @@ export class TeleopPanel {
   setGoal(r, goal) {
     r.goal = goal;
     r.goalState = {};
+    r.arrived = false;
     const net = this.app.net;
     if (!net) return;
     clearTimeout(r.goalTimer);
@@ -314,11 +315,28 @@ export class TeleopPanel {
   }
 
   // Network mode: robot r's goal as the server has it (set by any browser).
-  fromServer(r, goal) {
+  // `arrived`: the goal the robot reached, which the server let go.
+  fromServer(r, goal, arrived) {
     if (this.dragging?.goal && this.dragging.robot === r) return;
+    if (arrived) {
+      const g = r.goal, same = g && ['x', 'y', 'yaw'].every((k) => Math.abs(g[k] - arrived[k]) < 1e-6);
+      if (same) this.arrive(r);  // (not a newer one of ours, on its way)
+      return;
+    }
     if (performance.now() - (r.goalSentAt ?? -Infinity) < GOAL_ECHO_MS) return;  // ours, or an older one
     r.goal = goal;
     r.goalState = {};
+    r.arrived = false;
+  }
+
+  // At the goal: it is let go, so a robot pushed or carried off afterwards
+  // stays where it is put (the marker goes back under it).
+  arrive(r) {
+    clearTimeout(r.goalTimer);
+    r.goal = null;
+    r.goalState = {};
+    r.goalResult = null;
+    r.arrived = true;
   }
 
   // Forgets the goals of `robots` (Reset): they stop where they are.
@@ -328,6 +346,7 @@ export class TeleopPanel {
       r.goal = null;
       r.goalState = {};
       r.goalResult = null;
+      r.arrived = false;
     }
     if (this.dragging?.goal && robots.includes(this.dragging.robot)) this.release();
   }
@@ -383,6 +402,9 @@ export class TeleopPanel {
   }
 
   release() {
+    const d = this.dragging;
+    // The goal once more as let go: the server may have dropped it as reached meanwhile.
+    if (d?.goal && d.robot.goal) this.setGoal(d.robot, d.robot.goal);
     this.dragging?.ghost?.remove();
     this.dragging = null;
   }
@@ -753,7 +775,7 @@ export class TeleopPanel {
     this.input.sticks?.show(this.input.enabled);
     for (const r of robots) {
       const mine = r === this.active ? locos : [];
-      // A goal is followed until it is cleared, also while another robot is
+      // A goal is followed until reached or cleared, also while another robot is
       // driven: here, or on the server (which sends goalResult) in network mode.
       const net = !!this.app.net;
       const goal = r.goal && !(r === this.active && keyboard) && this.app.data ? r.goal : null;
@@ -765,6 +787,7 @@ export class TeleopPanel {
         if (goal && locomotion(r).includes(c)) {
           r.goalResult = goalCommand(pose, goal, c.drive, r.goalState ??= {});
           c.cmd = r.goalResult.cmd;
+          if (r.goalResult.phase === 'arrived' && !(this.dragging?.goal && this.dragging.robot === r)) this.arrive(r);
           continue;
         }
         if (!mine.includes(c) || !keyboard) { c.cmd = [0, 0, 0]; continue; }
@@ -775,7 +798,7 @@ export class TeleopPanel {
     }
     if (this.goalReadout) {
       const g = this.active?.goalResult;
-      const text = !this.active?.goal ? 'no goal' : !g ? '' : g.phase === 'arrived' ? 'arrived'
+      const text = !this.active?.goal ? (this.active?.arrived ? 'arrived' : 'no goal') : !g ? '' : g.phase === 'arrived' ? 'arrived'
         : `${g.dist.toFixed(2)} m · ${(g.dyaw * DEG).toFixed(0)}° · ${g.phase === 'turn' ? 'turning' : 'driving'}`;
       if (this.goalReadout.textContent !== text) this.goalReadout.textContent = text;
     }

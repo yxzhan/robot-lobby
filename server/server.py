@@ -33,7 +33,8 @@ Server -> client:
                               their describe())
   {type: 'status', robots: {id: {ik: {targets, err}, base: {measured},
                               goal: {phase, dist, dyaw}}}}  STATUS_HZ times a second
-  {type: 'goal', id, goal}       a robot's goal changed (null: none)
+  {type: 'goal', id, goal, arrived?}  a robot's goal changed (null: none;
+                              arrived: the goal it reached, let go)
   {type: 'reset', id}            after reset (id null) / reset_robot {id}
   {type: 'reply', rid, ...} / {type: 'error', op, msg, rid?}
   {type: 'pong', t}
@@ -276,15 +277,22 @@ class Robot:
         c.cmd = [0.0, 0.0, 0.0]
 
   def follow_goal(self, data):
-    """Sets the drive command towards the goal, if there is one."""
+    """Sets the drive command towards the goal, if there is one. Returns the
+    goal if the robot just reached it: it is let go then (pushed off
+    afterwards, the robot stays where it is put), as in teleop.js."""
     locos = self.locomotion() if self.goal else []
     self.goal_result = None
     if not locos:
-      return
+      return None
     pose = GOAL.body_pose(data, self.body_offset)
     for c in locos:
       self.goal_result = GOAL.goal_command(pose, self.goal, c.drive, self.goal_state)
       c.cmd = list(self.goal_result['cmd'])
+    if self.goal_result['phase'] != 'arrived':
+      return None
+    reached = self.goal
+    self.set_goal(None)
+    return reached
 
   def status(self):
     out = {}
@@ -800,7 +808,9 @@ class World:
         while d.time < target and time.perf_counter() - t0 < STEP_BUDGET:
           if controllers and d.time >= self.next_control - 1e-9:
             for r in self.robots:
-              r.follow_goal(d)
+              reached = r.follow_goal(d)
+              if reached:
+                await self.send_all(json.dumps({'type': 'goal', 'id': r.id, 'goal': None, 'arrived': reached}))
             for c in controllers:
               try:
                 c.step(d)

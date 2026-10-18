@@ -2040,7 +2040,7 @@ try {
       // A robot's goal, set by any client (the server follows it).
       goal: (msg) => {
         const r = robots.find((x) => x.netId === msg.id);
-        if (r) app.teleop.fromServer(r, msg.goal);
+        if (r) app.teleop.fromServer(r, msg.goal, msg.arrived);
       },
       // Reset by any client: goals set here would drive the robots off again.
       reset: (msg) => app.teleop.clearGoals(msg.id == null ? robots : robots.filter((r) => r.netId === msg.id)),
