@@ -139,24 +139,34 @@ def load_groot(directory):
 # MuJoCo Playground joystick policies (training/export_onnx.py)
 
 
-def drive_of(r):
-  """Key speeds a bit inside the trained command ranges."""
+def drive_of(r, low=None):
+  """Key speeds a bit inside the trained command ranges, and the dead band
+  (minSpeed / minTurn: the goal marker's least command, public/goal.js)."""
   top = lambda v: round(0.8 * abs(v), 2)
-  return {'forward': top(r['lin_vel_x'][1]), 'back': top(r['lin_vel_x'][0]),
-          'side': min(top(r['lin_vel_y'][0]), top(r['lin_vel_y'][1])),
-          'turn': min(top(r['ang_vel_yaw'][0]), top(r['ang_vel_yaw'][1]))}
+  d = {'forward': top(r['lin_vel_x'][1]), 'back': top(r['lin_vel_x'][0]),
+       'side': min(top(r['lin_vel_y'][0]), top(r['lin_vel_y'][1])),
+       'turn': min(top(r['ang_vel_yaw'][0]), top(r['ang_vel_yaw'][1]))}
+  if low:
+    d.update(minSpeed=low['speed'], minTurn=low['turn'])
+  return d
 
 
 class PlaygroundController:
+  """See public/playground.js: position servos get the trained gains, torque
+  motors the trained servo's torque every physics step (substep); sensor
+  values are the forward pass's at the start of the last step, in the imu
+  site's frame (the root body's without one)."""
+
   def __init__(self, policy, prefix, name='Playground policy'):
     self.session, self.spec = policy
     self.prefix = prefix
     self.name = name
-    self.drive = drive_of(self.spec['command_range'])
+    self.drive = drive_of(self.spec['command_range'], self.spec.get('min_command'))
     self.cmd = [0.0, 0.0, 0.0]
     self.model = None
     self.saved = None
     self.driven = set()
+    self.default = np.array(self.spec['default_pose'])
     self.reset()
 
   def reset(self):
@@ -165,6 +175,7 @@ class PlaygroundController:
     self.prev_action = np.zeros(n, np.float32)  # the one before: what the observation holds
     self.targets = np.zeros(n)  # Playground starts the error history against zero targets
     self.error = np.zeros(self.spec['history_len'] * n)
+    self.servo = self.default.copy()  # what torque motors hold until the first action
 
   def bind(self, model):
     s = self.spec
@@ -176,32 +187,49 @@ class PlaygroundController:
       return i
     joints = [find(OBJ.mjOBJ_JOINT, n) for n in s['joints']]
     acts = np.array([find(OBJ.mjOBJ_ACTUATOR, n) for n in s['actuators']])
-    feet = np.array([find(OBJ.mjOBJ_GEOM, n) for n in s['feet']])
+    feet = np.array([find(OBJ.mjOBJ_GEOM, n) for n in s['feet']], int)
     root = find(OBJ.mjOBJ_BODY, s['root'])
     free = model.body_jntadr[root]
     if free < 0 or model.jnt_type[free] != mujoco.mjtJoint.mjJNT_FREE:
       raise ValueError(f"{self.name}: {self.prefix}{s['root']} has no free joint")
-    self.model, self.root, self.act, self.feet = model, root, acts, feet
+    AFFINE, FIXED, NONE = mujoco.mjtBias.mjBIAS_AFFINE, mujoco.mjtGain.mjGAIN_FIXED, mujoco.mjtBias.mjBIAS_NONE
+    torque = np.zeros(len(acts), bool)
+    for i, a in enumerate(acts):
+      if model.actuator_biastype[a] == AFFINE:
+        continue
+      if model.actuator_gaintype[a] == FIXED and model.actuator_biastype[a] == NONE:
+        torque[i] = True
+      else:
+        raise ValueError(f"{self.name}: actuator {s['actuators'][i]} is neither a position servo nor a motor")
+    self.model, self.root, self.act, self.feet, self.torque = model, root, acts, feet, torque
+    self.tree = model.body_rootid[root]  # cvel is about its subtree's center of mass
+    self.imu = find(OBJ.mjOBJ_SITE, s['imu']) if s.get('imu') else None
     self.qadr = model.jnt_qposadr[joints]
     self.dofs = model.jnt_dofadr[joints]
     self.driven = set(joints)
-    self.saved = (model.actuator_gainprm[acts, 0].copy(), model.actuator_biasprm[acts, :3].copy(),
+    servos = acts[~torque]
+    self.saved = (servos, model.actuator_gainprm[servos, 0].copy(), model.actuator_biasprm[servos, :3].copy(),
                   model.dof_damping[self.dofs].copy(), model.dof_armature[self.dofs].copy(),
                   model.dof_frictionloss[self.dofs].copy())
-    model.actuator_gainprm[acts, 0] = s['actuator_gain']
-    model.actuator_biasprm[acts, :3] = s['actuator_bias']
+    model.actuator_gainprm[servos, 0] = np.array(s['actuator_gain'])[~torque]
+    model.actuator_biasprm[servos, :3] = np.array(s['actuator_bias'])[~torque]
     model.dof_damping[self.dofs] = s['dof_damping']
     model.dof_armature[self.dofs] = s['dof_armature']
     model.dof_frictionloss[self.dofs] = s['dof_frictionloss']
-    self.default = np.array(s['default_pose'])
     self.lo, self.hi = np.array(s['ctrl_range']).T
+    self.gain = np.array(s['actuator_gain'])
+    self.bias = np.array(s['actuator_bias'])
+    self.flo, self.fhi = np.array(s.get('force_range', [[-1e6, 1e6]] * len(acts))).T
+    # torque -> ctrl of the motors
+    self.per_ctrl = model.actuator_gainprm[acts, 0] * model.actuator_gear[acts, 0]
 
   def unbind(self):
     if self.saved is None:
       return
     m = self.model
-    (m.actuator_gainprm[self.act, 0], m.actuator_biasprm[self.act, :3], m.dof_damping[self.dofs],
-     m.dof_armature[self.dofs], m.dof_frictionloss[self.dofs]) = self.saved
+    servos, *vals = self.saved
+    (m.actuator_gainprm[servos, 0], m.actuator_biasprm[servos, :3], m.dof_damping[self.dofs],
+     m.dof_armature[self.dofs], m.dof_frictionloss[self.dofs]) = vals
     self.saved = None
     self.driven = set()
 
@@ -210,18 +238,38 @@ class PlaygroundController:
 
   def pose(self, data):
     data.qpos[self.qadr] = self.default
-    data.ctrl[self.act] = self.default
+    data.ctrl[self.act[~self.torque]] = self.default[~self.torque]
+
+  def substep(self, data):
+    """Before every physics step: the trained servo's torque on torque motors."""
+    if not self.torque.any():
+      return
+    t = self.torque
+    f = self.gain * self.servo + self.bias[:, 0] + self.bias[:, 1] * data.qpos[self.qadr] \
+        + self.bias[:, 2] * data.qvel[self.dofs]
+    u = np.clip(f, self.flo, self.fhi) / self.per_ctrl
+    m, a = self.model, self.act[t]
+    lim = m.actuator_ctrllimited[a].astype(bool)
+    u = u[t]
+    u[lim] = np.clip(u[lim], m.actuator_ctrlrange[a[lim], 0], m.actuator_ctrlrange[a[lim], 1])
+    data.ctrl[a] = u
 
   def observe(self, data):
     n = len(self.default)
     R = data.xmat[self.root].reshape(3, 3)
+    S, p = ((data.site_xmat[self.imu].reshape(3, 3), data.site_xpos[self.imu]) if self.imu is not None
+            else (R, data.xpos[self.root]))
+    w, v0 = data.cvel[self.root, :3], data.cvel[self.root, 3:]
     q = data.qpos[self.qadr]
     self.error = np.roll(self.error, n)
     self.error[:n] = q - self.targets
     parts = {
-        'gyro': lambda: data.cvel[self.root, :3] @ R,  # the gyro sensor: at the last step's start
-        'upvector': lambda: R[:, 2],
+        'linvel': lambda: (v0 + np.cross(w, p - data.subtree_com[self.tree])) @ S,
+        'gyro': lambda: w @ S,
+        'gravity': lambda: -S[2],
+        'upvector': lambda: S[:, 2],
         'joint_pos': lambda: q - self.default,
+        'joint_vel': lambda: data.qvel[self.dofs],
         'qpos_error': lambda: self.error,
         'feet_pos': lambda: ((data.geom_xpos[self.feet] - data.xpos[self.root]) @ R).ravel(),
         'last_action': lambda: self.prev_action,
@@ -234,7 +282,8 @@ class PlaygroundController:
     self.prev_action = self.action
     self.action = np.asarray(self.session.run(None, {s['input']: self.observe(data)})[0], np.float32).reshape(-1)
     self.targets = np.clip(self.default + self.action * s['action_scale'], self.lo, self.hi)
-    data.ctrl[self.act] = self.targets
+    self.servo = self.targets.copy()
+    data.ctrl[self.act[~self.torque]] = self.targets[~self.torque]
 
   def describe(self):
     return {'name': self.name, 'drive': self.drive}
@@ -259,6 +308,10 @@ POLICIES = [
      'defaultFor': re.compile(r'(^|/)mujoco_menagerie/boston_dynamics_spot/spot\.xml$'),
      'load': load_playground,
      'create': lambda policy, prefix: PlaygroundController(policy, prefix, 'Spot joystick policy')},
+    {'id': 'playground-go2', 'name': 'Playground joystick · Unitree Go2', 'dir': 'playground_go2',
+     'defaultFor': re.compile(r'(^|/)mujoco_menagerie/unitree_go2/go2\.xml$'),
+     'load': load_playground,
+     'create': lambda policy, prefix: PlaygroundController(policy, prefix, 'Go2 joystick policy')},
 ]
 
 _loaded = {}

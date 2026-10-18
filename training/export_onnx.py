@@ -34,12 +34,15 @@ from brax.training.agents.ppo import networks as ppo_networks
 from mujoco_playground import registry
 from onnx import TensorProto, helper, numpy_helper
 
+import envs  # registers our own tasks
+
 HERE = pathlib.Path(__file__).resolve().parent
 ROOT = HERE.parent
 
 # Per task: where the policy goes and how to build its observation outside
-# Playground. `obs` lists the observation's parts in order (see
-# Joystick._get_obs in mujoco_playground/_src/locomotion/spot/joystick.py).
+# Playground. `obs` lists the observation's parts in order (see the task's
+# _get_obs); sensors read at the `imu` site are in its frame (the root body's
+# without one). `command_range`: what the task samples commands from.
 TASKS = {
     'SpotFlatTerrainJoystick': {
         'dir': 'playground_spot',
@@ -54,6 +57,29 @@ TASKS = {
         ],
         'feet': ['FL', 'FR', 'HL', 'HR'],  # foot geoms (sites in Playground's model)
         'root': 'body',
+        'imu': None,  # at the body origin
+        'command_range': {'lin_vel_x': [-1.0, 1.0], 'lin_vel_y': [-0.8, 0.8], 'ang_vel_yaw': [-1.0, 1.0]},
+    },
+    # Go1's joystick task (mujoco_playground/_src/locomotion/go1/joystick.py) on a Go2 (envs/go2.py).
+    'Go2JoystickFlatTerrain': {
+        'dir': 'playground_go2',
+        'obs': [
+            ['linvel', 3],           # imu velocimeter: its linear velocity in its frame, at the last step's start
+            ['gyro', 3],             # imu angular velocity in its frame, at the last step's start
+            ['gravity', 3],          # gravity direction (0, 0, -1) in the imu frame
+            ['joint_pos', 12],       # q - default pose
+            ['joint_vel', 12],       # qdot
+            ['last_action', 12],     # the raw action before the last one
+            ['command', 3],          # vx, vy (m/s), yaw rate (rad/s)
+        ],
+        'feet': [],
+        'root': 'base',
+        'imu': 'imu',
+        # command_config a: amplitudes, sampled in [-a, a] (b: chance of not zeroing an axis).
+        'command_range': {'lin_vel_x': [-1.5, 1.5], 'lin_vel_y': [-0.8, 0.8], 'ang_vel_yaw': [-1.2, 1.2]},
+        # Measured on go2.xml: it stands for commands below about these (the
+        # task's tracking reward is lenient and its stand_still cost is not).
+        'min_command': {'speed': 0.3, 'turn': 0.3},
     },
 }
 
@@ -114,6 +140,7 @@ def describe(env, env_cfg, task):
       'ctrl_dt': env_cfg.ctrl_dt,
       'sim_dt': env_cfg.sim_dt,
       'root': task['root'],
+      'imu': task['imu'],
       'joints': joints,
       'actuators': acts,
       'feet': task['feet'],
@@ -123,13 +150,19 @@ def describe(env, env_cfg, task):
       # controller sets these on bind (and gives them back on unbind).
       'actuator_gain': [float(m.actuator_gainprm[i, 0]) for i in range(m.nu)],
       'actuator_bias': [[float(v) for v in m.actuator_biasprm[i, :3]] for i in range(m.nu)],
-      'ctrl_range': [[float(v) for v in m.actuator_ctrlrange[i]] for i in range(m.nu)],
+      'ctrl_range': [[float(v) for v in (m.actuator_ctrlrange[i] if m.actuator_ctrllimited[i] else (-1e3, 1e3))]
+                     for i in range(m.nu)],
+      # Torque limits: a controller that closes the PD loop itself (on torque
+      # motors) clips to these.
+      'force_range': [[float(v) for v in (m.actuator_forcerange[i] if m.actuator_forcelimited[i] else (-1e6, 1e6))]
+                      for i in range(m.nu)],
       'dof_damping': [float(m.dof_damping[d]) for d in dofs],
       'dof_armature': [float(m.dof_armature[d]) for d in dofs],
       'dof_frictionloss': [float(m.dof_frictionloss[d]) for d in dofs],
       'obs': task['obs'],
       'history_len': env_cfg.history_len,
-      'command_range': {k: list(v) for k, v in env_cfg.command_config.items()},
+      'command_range': task['command_range'],
+      'min_command': task.get('min_command'),
   }
 
 
@@ -141,10 +174,13 @@ class Observer:
     self.spec = spec
     j = [m.joint(n) for n in spec['joints']]
     self.qadr = np.array([x.qposadr[0] for x in j])
+    self.dofs = np.array([x.dofadr[0] for x in j])
     self.root = m.body(spec['root']).id
+    self.tree = m.body_rootid[self.root]  # cvel is about its subtree center of mass
+    self.imu = m.site(spec['imu']).id if spec.get('imu') else None
     free = m.body_jntadr[self.root]
     self.vadr = m.jnt_dofadr[free]
-    self.feet = np.array([m.geom(n).id for n in spec['feet']])
+    self.feet = np.array([m.geom(n).id for n in spec['feet']], int)
     self.act = np.array([m.actuator(n).id for n in spec['actuators']])
     self.default = np.array(spec['default_pose'])
     self.lo, self.hi = np.array(spec['ctrl_range']).T
@@ -164,11 +200,18 @@ class Observer:
     self.error = np.roll(self.error, n)
     self.error[:n] = q - self.targets
     feet = (d.geom_xpos[self.feet] - d.xpos[self.root]) @ R  # rows: R^T (p - p0)
+    # Sensors are computed in the forward pass at the start of the last step,
+    # as cvel, xpos, xmat and subtree_com are: cvel is the root's angular and
+    # linear velocity (world frame) at its tree's center of mass.
+    S, p = (d.site_xmat[self.imu].reshape(3, 3), d.site_xpos[self.imu]) if self.imu is not None else (R, d.xpos[self.root])
+    w, v0 = d.cvel[self.root, :3], d.cvel[self.root, 3:]
+    v = v0 + np.cross(w, p - d.subtree_com[self.tree])
     parts = {
-        # The gyro sensor, computed in the forward pass at the start of the
-        # last step: cvel (world-frame angular part) in the body frame.
-        'gyro': d.cvel[self.root, :3] @ R,
-        'upvector': R[:, 2],
+        'linvel': v @ S,
+        'gyro': w @ S,
+        'gravity': -S[2],  # S^T (0, 0, -1)
+        'upvector': S[:, 2],
+        'joint_vel': d.qvel[self.dofs],
         'joint_pos': q - self.default,
         'qpos_error': self.error,
         'feet_pos': feet.ravel(),

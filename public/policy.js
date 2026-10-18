@@ -65,6 +65,15 @@ export const POLICIES = [
     load: async (file) => loadPlaygroundPolicy(await onnxRuntime(), file),
     create: (weights, prefix) => new PlaygroundController(weights, prefix, 'Spot joystick policy'),
   },
+  {
+    id: 'playground-go2',
+    name: 'Playground joystick · Unitree Go2',
+    about: "Walking on flat ground (12 leg joints, 50 Hz): Playground's Go1 task on a Go2 (training/envs/go2.py); drives go2.xml's torque motors as PD servos.",
+    dir: 'playground_go2',  // training/export_onnx.py
+    defaultFor: /(^|\/)mujoco_menagerie\/unitree_go2\/go2\.xml$/,
+    load: async (file) => loadPlaygroundPolicy(await onnxRuntime(), file),
+    create: (weights, prefix) => new PlaygroundController(weights, prefix, 'Go2 joystick policy'),
+  },
 ];
 
 export const POLICY_ROOT = 'pretrained_policies';

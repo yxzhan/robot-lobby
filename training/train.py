@@ -2,6 +2,7 @@
 
   uv run train.py                                   # SpotFlatTerrainJoystick, its tuned config
   uv run train.py --steps 20_000_000 --name quick   # a short run (pipeline test)
+  uv run train.py --env Go2JoystickFlatTerrain      # envs/go2.py, Go1's task and config
 
 Writes runs/<name>/params.pkl (normalizer statistics, policy and value
 parameters) and runs/<name>/run.json (environment, its config, the PPO
@@ -22,6 +23,8 @@ from brax.training.agents.ppo import networks as ppo_networks
 from brax.training.agents.ppo import train as ppo
 from mujoco_playground import registry, wrapper
 from mujoco_playground.config import locomotion_params
+
+import envs  # registers our own tasks (Go2JoystickFlatTerrain)
 
 HERE = pathlib.Path(__file__).resolve().parent
 
@@ -51,7 +54,7 @@ def main():
   args = ap.parse_args()
 
   env_cfg = registry.get_default_config(args.env)
-  ppo_cfg = locomotion_params.brax_ppo_config(args.env)
+  ppo_cfg = locomotion_params.brax_ppo_config(envs.PPO_LIKE.get(args.env, args.env))
   if args.steps:
     ppo_cfg.num_timesteps = args.steps
   if args.envs:
@@ -65,7 +68,7 @@ def main():
   out.mkdir(parents=True, exist_ok=True)
 
   env, eval_env = (quiet(registry.load(args.env, config=env_cfg)) for _ in range(2))
-  randomizer = registry.get_domain_randomizer(args.env)
+  randomizer = envs.RANDOMIZERS.get(args.env) or registry.get_domain_randomizer(args.env)
   net_cfg = dict(ppo_cfg.network_factory)
   train_cfg = {k: v for k, v in ppo_cfg.to_dict().items() if k != 'network_factory'}
   print(f'{args.env}: {ppo_cfg.num_timesteps:,} steps, {ppo_cfg.num_envs} envs, devices {jax.devices()}')

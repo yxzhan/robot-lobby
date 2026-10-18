@@ -11,7 +11,9 @@
 // one that cannot keeps aiming at the point. At the point it turns to the
 // goal heading and stops. Tolerances have hysteresis (a step out of the
 // point by more than twice TOL_POS starts over), and commands do not drop
-// below what still moves a robot (a walking policy stands below ~0.05).
+// below what still moves a robot (a walking policy stands below ~0.05; one
+// with a larger dead band says so in drive.minSpeed / drive.minTurn, and
+// the tolerances grow with it so it does not overshoot back and forth).
 
 const NEAR = 0.4;          // m: from here on, fine positioning
 const TOL_POS = 0.06;      // m
@@ -34,18 +36,20 @@ export function bodyPose(data, b) {
 // {cmd, phase ('drive' | 'turn' | 'arrived'), dist, dyaw} for the robot at
 // `pose` and `goal` ({x, y, yaw}); `state` ({phase}) persists between calls.
 export function goalCommand(pose, goal, drive, state) {
+  const minSpeed = drive.minSpeed ?? MIN_SPEED, minTurn = drive.minTurn ?? MIN_TURN;
+  const tolPos = Math.max(TOL_POS, 0.25 * minSpeed), tolYaw = Math.max(TOL_YAW, 0.25 * minTurn);
   const dxw = goal.x - pose.x, dyw = goal.y - pose.y;
   const c = Math.cos(pose.yaw), s = Math.sin(pose.yaw);
   const dx = c * dxw + s * dyw, dy = -s * dxw + c * dyw;  // the goal in the robot's frame
   const dist = Math.hypot(dx, dy), dyaw = wrap(goal.yaw - pose.yaw);
-  if (dist > 2 * TOL_POS) state.phase = 'drive';
-  else if (state.phase === 'drive' && dist < TOL_POS) state.phase = 'turn';
-  if (state.phase === 'turn' && Math.abs(dyaw) < TOL_YAW) state.phase = 'arrived';
-  if (state.phase === 'arrived' && Math.abs(dyaw) > 2 * TOL_YAW) state.phase = 'turn';
+  if (dist > 2 * tolPos) state.phase = 'drive';
+  else if (state.phase === 'drive' && dist < tolPos) state.phase = 'turn';
+  if (state.phase === 'turn' && Math.abs(dyaw) < tolYaw) state.phase = 'arrived';
+  if (state.phase === 'arrived' && Math.abs(dyaw) > 2 * tolYaw) state.phase = 'turn';
   const out = { cmd: [0, 0, 0], phase: state.phase ?? 'drive', dist, dyaw };
   if (out.phase === 'arrived') return out;
   if (out.phase === 'turn') {
-    out.cmd[2] = atLeast(clamp(K_YAW * dyaw, drive.turn), MIN_TURN);
+    out.cmd[2] = atLeast(clamp(K_YAW * dyaw, drive.turn), minTurn);
     return out;
   }
   const strafe = drive.side > 0;
@@ -58,7 +62,7 @@ export function goalCommand(pose, goal, drive, state) {
   if (dist > NEAR || !strafe) {
     const align = Math.max(0, Math.cos(bearing));
     const top = dir > 0 ? drive.forward : drive.back;
-    out.cmd[0] = dir * atLeast(Math.min(top, K_POS * dist) * align * align, align > 0.7 ? MIN_SPEED : 0);
+    out.cmd[0] = dir * atLeast(Math.min(top, K_POS * dist) * align * align, align > 0.7 ? minSpeed : 0);
     out.cmd[2] = clamp(K_YAW * bearing, drive.turn);
     // Near and roughly facing the point, the heading can start turning already.
     if (dist < NEAR && align > 0.9) out.cmd[2] = clamp(K_YAW * bearing + 0.3 * dyaw, drive.turn);
@@ -66,7 +70,7 @@ export function goalCommand(pose, goal, drive, state) {
     // Near: close the rest straight, forward/back and sideways, turning to the goal heading.
     const v = [clamp(K_POS * dx, dx > 0 ? drive.forward : drive.back), clamp(K_POS * dy, drive.side)];
     const n = Math.hypot(...v);
-    if (n > 0 && n < MIN_SPEED) v.forEach((k, i) => { v[i] = (k * MIN_SPEED) / n; });
+    if (n > 0 && n < minSpeed) v.forEach((k, i) => { v[i] = (k * minSpeed) / n; });
     out.cmd = [v[0], v[1], clamp(K_YAW * dyaw, drive.turn)];
   }
   return out;

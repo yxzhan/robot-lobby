@@ -236,20 +236,26 @@ the floating base (`qpos[3:7]`, `qvel[3:6]`), as in lerobot's G1 sim.
 Inference is async, so `App.advance()` awaits it every 0.02 s of sim time.
 `g1.xml` and `g1_with_hands.xml` both walk.
 
-## Walking Spot (trained in MuJoCo Playground)
+## Walking Spot and Go2 (trained in MuJoCo Playground)
 
 `training/` trains locomotion policies on the GPU with MuJoCo Playground
 (MJX / MuJoCo Warp + Brax PPO) and exports them for the viewer; see
 `training/README.md`. `uv run train.py` then `uv run export_onnx.py
 runs/<name>` put `policy.onnx` and `policy.json` into
-`pretrained_policies/playground_spot/`, and the menagerie Spot
-(`boston_dynamics_spot/spot.xml`) starts with the `playground-spot` policy
-on. `public/playground.js` (and `PlaygroundController` in
+`pretrained_policies/playground_spot/` (or `playground_go2/`), and the
+menagerie Spot (`boston_dynamics_spot/spot.xml`) and Go2
+(`unitree_go2/go2.xml`) start with the `playground-spot` /
+`playground-go2` policy on. Playground has no Go2 task: `training/envs/go2.py`
+runs its Go1 task on a Go2 built from `go2.xml`; the Go2 policy walks
+without falling, the Spot one (Playground's own config) still tips over
+under quickly changing commands. `public/playground.js` (and `PlaygroundController` in
 `server/policies.py`) runs any such policy from its `policy.json`: it writes
 the trained PD gains and joint damping / armature / friction loss into the
 robot, builds the observation (body gyro and up vector, joint positions,
-a history of tracking errors, foot positions, last action, command) and
-sets the targets `default + action * scale` every 0.02 s.
+a history of tracking errors, foot positions, last action, command, or
+for Go2 body velocity, gravity and joint velocities) and sets the targets
+`default + action * scale` every 0.02 s; on `go2.xml`'s torque motors it
+computes the trained PD torque itself before every physics step.
 
 ## Mobile bases
 
