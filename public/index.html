@@ -25,7 +25,8 @@
     #assets ul { list-style: none; margin: 0; padding: 0; overflow: auto; min-height: 0;
                  display: grid; grid-template-columns: 1fr 1fr; gap: 6px; align-content: start; }
     #assets li { display: flex; flex-direction: column; gap: 2px; padding: 4px; border-radius: 5px; min-width: 0;
-                 cursor: grab; user-select: none; touch-action: none; border: 1px solid transparent; }
+                 cursor: grab; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
+                 touch-action: pan-y; border: 1px solid transparent; }  /* a finger scrolls up and down, drags sideways */
     #assets li:hover { background: rgba(255,255,255,.08); border-color: #555; }
     #assets li.dragging { background: rgba(80,160,220,.25); border-color: #5a85a8; cursor: grabbing; }
     #assets .thumb { position: relative; aspect-ratio: 4 / 3; border-radius: 3px; overflow: hidden;
@@ -44,6 +45,7 @@
     #assets li.group.folded .caret::before { content: '▸'; }
     #assets li.empty { grid-column: 1 / -1; color: #999; cursor: default; font-size: 12px; display: block; }
     #assets .hint { color: #999; font-size: 12px; }
+    #assets.fading { opacity: .15; pointer-events: none; transition: opacity .15s; }  /* an item dragged out with a finger */
     /* Flush with the corner, under the side panels when they reach down. */
     #stats { position: absolute; right: 0; bottom: 0; z-index: 0; cursor: pointer; opacity: .9; }
     #net { position: absolute; right: 80px; bottom: 0; z-index: 0; height: 48px; box-sizing: border-box; padding: 6px 8px;
@@ -179,6 +181,32 @@
     #busy .spinner { width: 36px; height: 36px; border: 3px solid rgba(255,255,255,.25); border-top-color: #eee;
                      border-radius: 50%; animation: spin .8s linear infinite; }
     @keyframes spin { to { transform: rotate(360deg); } }
+    /* Touch screens: the Teleop panel's drive sticks (teleop.js TouchSticks), left walks, right turns. */
+    #sticks { position: fixed; left: 16px; right: 16px; bottom: 104px; z-index: 2; display: flex;
+              justify-content: space-between; pointer-events: none; }
+    #sticks[hidden] { display: none; }
+    #sticks .stick { position: relative; width: 120px; height: 120px; border-radius: 50%; pointer-events: auto;
+                     touch-action: none; display: grid; place-items: center; background: rgba(0,0,0,.35);
+                     border: 2px solid rgba(255,255,255,.3); }
+    #sticks .stick::before { position: absolute; top: -18px; color: #ccc; font-size: 11px; }
+    #sticks .left::before { content: 'walk'; }
+    #sticks .right::before { content: 'turn'; }
+    #sticks .knob { width: 50px; height: 50px; border-radius: 50%; background: rgba(255,255,255,.55); pointer-events: none; }
+    /* Phones: the toolbar on top (status on its own line), the panel toggles
+       under it, one panel at a time (main.js), across the width but
+       for Assets, which keeps its desktop size. */
+    @media (max-width: 700px) {
+      #ui { top: 8px; left: 8px; right: 8px; flex-wrap: wrap; gap: 4px; padding: 5px 6px; }
+      #ui button { padding: 5px 9px; }
+      #status { flex: 1 1 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: #bbb; }
+      #views { top: 72px; left: 8px; right: auto; }
+      #views button { padding: 5px 8px; }
+      #assets, #side { top: 112px; left: 8px; right: 8px; width: auto; max-height: calc(100% - 112px - 12px); }
+      #assets { right: auto; width: min(300px, calc(100% - 16px)); }  /* as on desktop: two columns */
+      #assets input[type=search], #teleop select, #world select, #world input, #teleop input[type=number] { font-size: 16px; }  /* no zoom on focus (iOS) */
+      #gizmo { width: 64px; height: 64px; left: 8px; bottom: 8px; }
+      #sticks { left: 12px; right: 12px; bottom: 84px; }
+    }
   </style>
 </head>
 <body>

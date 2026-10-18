@@ -21,7 +21,7 @@ import { defaultPolicy, loadPolicy, loadPolicyIndex, policyById } from './policy
 import { Perturb, StagePanel } from './inspect.js';
 import { AssetPanel, loadAssets, loadRecent } from './assets.js';
 import { AxisGizmo } from './gizmo.js';
-import { TeleopPanel } from './teleop.js';
+import { TeleopPanel, TOUCH } from './teleop.js';
 import { BaseController } from './base.js';
 import { IkController } from './ik.js';
 import { applyOptions, geomOverrides, geomSignature, injectGeomDefaults, loadPhysics, savePhysics } from './physics.js';
@@ -403,21 +403,57 @@ function quatToMat([w, x, y, z]) {
   ];
 }
 
-// Simple orbit camera around a Z-up target.
+// Simple orbit camera around a Z-up target. Mouse: left drag orbits,
+// right/middle drag pans, the wheel zooms. Touch: one finger orbits, two
+// pinch to zoom and move together to pan.
 class OrbitCamera {
   constructor(canvas, center, dist) {
     this.center = center; this.dist = dist;
     this.azim = -0.6; this.elev = 0.35;
     let last = null, button = 0;
+    const touches = new Map();  // pointerId -> [x, y] of the fingers on the canvas
+    let pinch = null;           // {d, mid} of the two fingers while pinching
+    const two = () => {
+      const [a, b] = [...touches.values()];
+      return { d: Math.hypot(a[0] - b[0], a[1] - b[1]) || 1, mid: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2] };
+    };
+    // Drags another handler took over (the IK and goal markers, a pulled body)
+    // leave the camera alone, a second finger included.
+    this.stop = () => { last = null; pinch = null; };
     canvas.addEventListener('pointerdown', (e) => {
+      if (e.pointerType === 'touch') {
+        touches.set(e.pointerId, [e.clientX, e.clientY]);
+        if (this.busy?.()) { this.stop(); return; }
+        if (touches.size >= 2) {
+          last = null;
+          pinch = two();
+          canvas.setPointerCapture(e.pointerId);
+          return;
+        }
+      }
       // Shift+drag perturbs (inspect.js); `intercept(e)` claims other drags
       // (the Teleop panel's IK handles).
       if (e.shiftKey || this.intercept?.(e)) { last = null; return; }
       last = [e.clientX, e.clientY]; button = e.button; canvas.setPointerCapture(e.pointerId);
     });
-    canvas.addEventListener('pointerup', () => { last = null; });
+    const up = (e) => {
+      touches.delete(e.pointerId);
+      if (touches.size < 2) pinch = null;
+      last = null;
+    };
+    canvas.addEventListener('pointerup', up);
+    canvas.addEventListener('pointercancel', up);
     canvas.addEventListener('contextmenu', (e) => e.preventDefault());
     canvas.addEventListener('pointermove', (e) => {
+      if (touches.has(e.pointerId)) touches.set(e.pointerId, [e.clientX, e.clientY]);
+      if (pinch) {
+        if (touches.size < 2 || this.busy?.()) return;
+        const now = two();
+        this.dist *= pinch.d / now.d;
+        this.pan(now.mid[0] - pinch.mid[0], now.mid[1] - pinch.mid[1]);
+        pinch = now;
+        return;
+      }
       if (!last) return;
       const dx = e.clientX - last[0], dy = e.clientY - last[1];
       last = [e.clientX, e.clientY];
@@ -425,17 +461,22 @@ class OrbitCamera {
         this.azim -= dx * 0.005;
         this.elev = Math.max(-1.5, Math.min(1.5, this.elev + dy * 0.005));
       } else {  // right/middle drag pans in the view plane
-        const k = this.dist * 0.0015;
-        const [ca, sa] = [Math.cos(this.azim), Math.sin(this.azim)];
-        this.center[0] += (sa * dx - ca * Math.sin(this.elev) * dy) * k;
-        this.center[1] += (-ca * dx - sa * Math.sin(this.elev) * dy) * k;
-        this.center[2] += Math.cos(this.elev) * dy * k;
+        this.pan(dx, dy);
       }
     });
     canvas.addEventListener('wheel', (e) => {
       e.preventDefault();
       this.dist *= Math.exp(e.deltaY * 0.001);
     }, { passive: false });
+  }
+
+  // Moves the target in the view plane by a pointer motion of (dx, dy) pixels.
+  pan(dx, dy) {
+    const k = this.dist * 0.0015;
+    const [ca, sa] = [Math.cos(this.azim), Math.sin(this.azim)];
+    this.center[0] += (sa * dx - ca * Math.sin(this.elev) * dy) * k;
+    this.center[1] += (-ca * dx - sa * Math.sin(this.elev) * dy) * k;
+    this.center[2] += Math.cos(this.elev) * dy * k;
   }
 
   eye() {
@@ -1796,45 +1837,125 @@ try {
     },
   });
   // Panel toggles (top right), apart from the simulation controls.
-  for (const b of document.querySelectorAll('#views button')) {
-    const panel = document.getElementById(b.dataset.panel);
+  // On a phone they start hidden and show one at a time (index.html's
+  // narrow layout puts each across the width).
+  const narrow = matchMedia('(max-width: 700px)');
+  const toggles = [...document.querySelectorAll('#views button')].map((b) => [b, document.getElementById(b.dataset.panel)]);
+  const showPanel = (panel, on) => {
+    panel.hidden = !on;
+    toggles.find(([, p]) => p === panel)[0].setAttribute('aria-pressed', String(on));
+    if (on && panel === app.panel.el) app.panel.lastUpdate = 0;
+  };
+  for (const [b, panel] of toggles) {
+    if (narrow.matches) panel.hidden = true;
     b.setAttribute('aria-pressed', String(!panel.hidden));
     b.onclick = () => {
-      panel.hidden = !panel.hidden;
-      b.setAttribute('aria-pressed', String(!panel.hidden));
-      if (panel === app.panel.el) app.panel.lastUpdate = 0;
+      const on = panel.hidden;
+      if (on && narrow.matches) for (const [, p] of toggles) if (p !== panel && !p.hidden) showPanel(p, false);
+      showPanel(panel, on);
     };
+  }
+  if (TOUCH) {  // the hints name mouse gestures
+    document.querySelector('#assets .hint').textContent = 'Drag an item sideways out of the list onto the floor to spawn it.';
+    document.querySelector('#stage .hint').textContent = 'Double-tap a body to select it, press and hold on it, then drag, to pull it. Joints can be set while paused.';
   }
 
   // Double-click selects a body, Shift+drag pulls the selection (inspect.js).
+  // On a touch screen: double tap, and press and hold on a body, then drag.
   const canvas = document.getElementById('canvas');
   let dragging = false;
   // Dragging an IK marker (Teleop panel) moves it instead of the camera.
   app.orbit.intercept = (e) => e.button === 0 && app.teleop.grab(app.pointerRay(e.clientX, e.clientY), [e.clientX, e.clientY]);
+  app.orbit.busy = () => dragging || !!app.teleop.dragging;
+  const fingers = new Map();  // pointerId -> [x, y] on the canvas (touch only)
+  let hold = null;            // {timer, id, x, y}: a finger that may become a long press
+  let goalTurn = null;        // the angle between two fingers while one drags the goal marker
+  let lastTap = null;         // {t, x, y} of the last short tap
+  const angle = () => {
+    const [a, b] = [...fingers.values()];
+    return Math.atan2(b[1] - a[1], b[0] - a[0]);
+  };
+  const beginPull = (x, y, id) => {
+    if (app.model && app.perturb.begin(app.pointerRay(x, y))) {
+      dragging = true;
+      app.orbit.stop();
+      canvas.setPointerCapture(id);
+      return true;
+    }
+    return false;
+  };
   canvas.addEventListener('pointerdown', (e) => {
     if (app.teleop.dragging) canvas.setPointerCapture(e.pointerId);
-    if (!e.shiftKey) return;
-    if (app.model && app.perturb.begin(app.pointerRay(e.clientX, e.clientY))) {
-      dragging = true;
-      canvas.setPointerCapture(e.pointerId);
+    if (e.pointerType === 'touch') {
+      fingers.set(e.pointerId, [e.clientX, e.clientY]);
+      clearTimeout(hold?.timer);
+      hold = null;
+      if (fingers.size === 2 && app.teleop.dragging?.goal) goalTurn = angle();
+      else if (fingers.size === 1 && !app.teleop.dragging) {
+        const { pointerId: id, clientX: x, clientY: y } = e;
+        // Held still: select the body under the finger and pull it.
+        hold = { id, x, y, t: performance.now(), timer: setTimeout(async () => {
+          hold = null;
+          const hit = app.model && await app.pickBody(x, y);  // a promise in network mode
+          if (!hit || !fingers.has(id) || fingers.size !== 1) return;
+          app.perturb.select(hit);
+          beginPull(x, y, id);
+        }, 450) };
+      }
+      return;
     }
+    if (e.shiftKey) beginPull(e.clientX, e.clientY, e.pointerId);
   });
   canvas.addEventListener('pointermove', (e) => {
+    if (fingers.has(e.pointerId)) {
+      fingers.set(e.pointerId, [e.clientX, e.clientY]);
+      if (hold && Math.hypot(e.clientX - hold.x, e.clientY - hold.y) > 10) { clearTimeout(hold.timer); hold = null; }
+      if (goalTurn !== null && fingers.size === 2 && app.teleop.dragging?.goal) {
+        const a = angle(), d = Math.atan2(Math.sin(a - goalTurn), Math.cos(a - goalTurn));
+        goalTurn = a;
+        app.teleop.turnGoal(-d);  // screen y points down: a clockwise twist turns it clockwise
+        return;
+      }
+    }
     if (dragging) app.perturb.move(app.pointerRay(e.clientX, e.clientY));
     if (app.teleop.dragging) app.teleop.dragTo(app.pointerRay(e.clientX, e.clientY), [e.clientX, e.clientY]);
-    else if (!e.buttons) canvas.style.cursor = app.teleop.hoverAt(app.pointerRay(e.clientX, e.clientY)) ? 'grab' : '';
-  });
-  canvas.addEventListener('pointerup', () => {
-    app.teleop.release();
-    if (dragging) { dragging = false; app.perturb.end(); }
+    else if (!e.buttons && e.pointerType !== 'touch') canvas.style.cursor = app.teleop.hoverAt(app.pointerRay(e.clientX, e.clientY)) ? 'grab' : '';
   });
   // Double-clicking a controllable robot also makes it the driven one;
   // double-clicking anything else releases control.
-  canvas.addEventListener('dblclick', async (e) => {
-    const hit = await app.pickBody(e.clientX, e.clientY);  // a promise in network mode
+  const selectAt = async (x, y) => {
+    const hit = await app.pickBody(x, y);  // a promise in network mode
     app.perturb.select(hit);
     const robot = hit && app.robots.find((r) => hit.body >= r.bodyOffset && hit.body < r.bodyOffset + r.visual.inertia.nbody - 1);
     app.teleop.drive(robot ?? null);
+  };
+  let lastTouchEnd = -Infinity;
+  const up = (e) => {
+    if (e.pointerType === 'touch') lastTouchEnd = performance.now();
+    const tap = hold?.id === e.pointerId && performance.now() - hold.t < 300 && fingers.size === 1;
+    clearTimeout(hold?.timer);
+    hold = null;
+    fingers.delete(e.pointerId);
+    if (fingers.size < 2) goalTurn = null;
+    if (fingers.size) return;  // the drag goes on with the other finger
+    app.teleop.release();
+    if (dragging) { dragging = false; app.perturb.end(); }
+    if (tap && e.type === 'pointerup') {
+      const now = performance.now();
+      if (lastTap && now - lastTap.t < 350 && Math.hypot(e.clientX - lastTap.x, e.clientY - lastTap.y) < 30) {
+        lastTap = null;
+        selectAt(e.clientX, e.clientY);
+      } else {
+        lastTap = { t: now, x: e.clientX, y: e.clientY };
+      }
+    }
+  };
+  canvas.addEventListener('pointerup', up);
+  canvas.addEventListener('pointercancel', up);
+  canvas.addEventListener('dblclick', (e) => {
+    // Some browsers make a dblclick of a double tap too: handled above.
+    if (performance.now() - lastTouchEnd < 700) return;
+    selectAt(e.clientX, e.clientY);
   });
   const pauseButton = document.getElementById('pause');
   pauseButton.onclick = (e) => {

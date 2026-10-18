@@ -34,6 +34,15 @@ simulation: Undo removes the last one, Clear all of them, Reset puts every
 robot back in its spawn pose. The toggles at the top right show or hide the
 Assets, Stage and Teleop panels.
 
+On a touch screen (phone, tablet): one finger orbits the camera, two pinch
+to zoom and move together to pan; double tap selects a body, press and hold
+on one, then drag, pulls it; an asset is dragged sideways out of its list
+(swiping up or down scrolls it; the panel fades so it can be dropped on the
+floor behind it); a second finger twisted around the dragged goal marker
+turns it; and in keyboard mode two sticks at the bottom drive (left walks,
+right turns). On a narrow screen the panels start hidden and show one at a
+time, across the width.
+
 Like MuJoCo's simulate: double-click a body to select it (double-click the
 floor to deselect) and Shift+drag to pull it with a spring
 on `xfrc_applied`. The Stage panel lists everything spawned, each with its

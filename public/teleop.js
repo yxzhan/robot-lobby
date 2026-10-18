@@ -41,10 +41,17 @@ function isTyping(target) {
   return target.tagName === 'INPUT' && !['range', 'checkbox', 'radio', 'button', 'submit'].includes(target.type);
 }
 
-// WASD walk, QE turn, held R/F raise/lower the commanded base height.
+// Whether this is a touch screen (on-screen sticks, touch hints).
+export const TOUCH = matchMedia('(pointer: coarse)').matches || navigator.maxTouchPoints > 0;
+
+// WASD walk, QE turn, held R/F raise/lower the commanded base height; on a
+// touch screen also two on-screen sticks (TouchSticks), left to walk and
+// right to turn.
 export class KeyboardInput {
   constructor() {
     this.held = new Set();
+    this.stick = [0, 0, 0];  // [forward, left, turn left], each in [-1, 1]
+    this.sticks = TOUCH ? new TouchSticks(this.stick) : null;
     const onKey = (e) => {
       const k = e.key.toLowerCase();
       if (!(k in DRIVE) && k !== 'r' && k !== 'f') return;
@@ -64,7 +71,62 @@ export class KeyboardInput {
   read(dt, drive) {
     const cmd = [0, 0, 0];
     for (const k of this.held) if (DRIVE[k]) cmd[DRIVE[k][0]] += DRIVE[k][1] * drive[DRIVE[k][2]];
+    const [f, l, t] = this.stick;
+    cmd[0] += f * (f > 0 ? drive.forward : drive.back);
+    cmd[1] += l * drive.side;
+    cmd[2] += t * drive.turn;
     return { cmd, dh: (this.held.has('r') - this.held.has('f')) * HEIGHT_RATE * dt };
+  }
+}
+
+// Two on-screen sticks at the bottom of the screen: the left one walks
+// (up forward, sideways strafes), the right one turns. They write `stick`
+// ([forward, left, turn left] in [-1, 1]) and spring back when let go.
+class TouchSticks {
+  constructor(stick) {
+    this.el = el('div', { id: 'sticks', hidden: true });
+    const pad = (axes, label) => {
+      const knob = el('div', { className: 'knob' });
+      const p = el('div', { className: `stick ${label}` }, knob);
+      let id = null, c = null;
+      const set = (x, y) => {
+        const r = p.clientWidth / 2;
+        let dx = (x - c[0]) / r, dy = (y - c[1]) / r;
+        const n = Math.hypot(dx, dy);
+        if (n > 1) { dx /= n; dy /= n; }
+        if (axes === 'move' && Math.abs(dx) < 0.15) dx = 0;  // a dead zone across: straight ahead stays straight
+        knob.style.transform = `translate(${dx * r}px, ${dy * r}px)`;
+        if (axes === 'move') { stick[0] = -dy; stick[1] = -dx; } else stick[2] = -dx;
+      };
+      p.addEventListener('pointerdown', (e) => {
+        if (id !== null) return;
+        e.preventDefault();
+        id = e.pointerId;
+        p.setPointerCapture(id);
+        const b = p.getBoundingClientRect();
+        c = [b.left + b.width / 2, b.top + b.height / 2];
+        set(e.clientX, e.clientY);
+      });
+      p.addEventListener('pointermove', (e) => { if (e.pointerId === id) set(e.clientX, e.clientY); });
+      const end = (e) => {
+        if (e.pointerId !== id) return;
+        id = null;
+        knob.style.transform = '';
+        if (axes === 'move') { stick[0] = 0; stick[1] = 0; } else stick[2] = 0;
+      };
+      p.addEventListener('pointerup', end);
+      p.addEventListener('pointercancel', end);
+      return p;
+    };
+    this.el.append(pad('move', 'left'), pad('turn', 'right'));
+    document.body.append(this.el);
+    this.stick = stick;
+  }
+
+  show(on) {
+    if (this.el.hidden === !on) return;
+    this.el.hidden = !on;
+    if (!on) this.stick.fill(0);
   }
 }
 
@@ -372,15 +434,18 @@ export class TeleopPanel {
       }));
       const keys = el('div', { className: 'hint' });
       if (this.mode === 'goal') {
-        keys.innerHTML = 'Drag the ring on the floor to where the robot should go; while dragging, the mouse wheel or '
-          + '<kbd>Q</kbd><kbd>E</kbd> turn it (the arrow is the heading), <kbd>Esc</kbd> puts it back.';
+        keys.innerHTML = TOUCH
+          ? 'Drag the ring on the floor to where the robot should go; a second finger twisted around it turns it (the arrow is the heading).'
+          : 'Drag the ring on the floor to where the robot should go; while dragging, the mouse wheel or '
+            + '<kbd>Q</kbd><kbd>E</kbd> turn it (the arrow is the heading), <kbd>Esc</kbd> puts it back.';
         this.goalReadout = el('span', { className: 'note' });
         this.body.append(keys, el('div', { className: 'bar' },
           this.button('Stop', 'Forget the goal: the robot stops where it is', () => this.setGoal(r, null)), this.goalReadout));
       } else {
         this.goalReadout = null;
         keys.innerHTML = '<kbd>W</kbd><kbd>S</kbd> forward/back · ' + (locos.some((c) => c.drive.side) ? '<kbd>A</kbd><kbd>D</kbd> sideways · ' : '')
-          + '<kbd>Q</kbd><kbd>E</kbd> turn' + (locos.some((c) => 'height' in c) ? ' · hold <kbd>R</kbd><kbd>F</kbd> height' : '');
+          + '<kbd>Q</kbd><kbd>E</kbd> turn' + (locos.some((c) => 'height' in c) ? ' · hold <kbd>R</kbd><kbd>F</kbd> height' : '')
+          + (TOUCH ? ' · or the sticks at the bottom: left walks, right turns' : '');
         this.body.append(keys);
       }
       this.readout = el('div', { className: 'readout' });
@@ -685,6 +750,7 @@ export class TeleopPanel {
     const locos = locomotion(this.active);
     const keyboard = this.mode === 'keyboard';
     this.input.enabled = locos.length > 0 && keyboard;
+    this.input.sticks?.show(this.input.enabled);
     for (const r of robots) {
       const mine = r === this.active ? locos : [];
       // A goal is followed until it is cleared, also while another robot is

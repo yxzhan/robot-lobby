@@ -12,6 +12,9 @@
 // world +x axis and turns in 15° steps with the mouse wheel or Q/E; Shift+wheel or
 // R/F raise and lower it in 5 cm steps (the height is kept for the next
 // drag); Esc cancels. The drag label shows the position and heading.
+// With a finger, swiping up or down scrolls the list and a sideways drag
+// takes the item out; the panel fades while it is dragged, so it can be
+// dropped on the floor behind it.
 
 export const CATEGORIES = [['environment', 'Environments'], ['robot', 'Robots'], ['object', 'Objects']];
 const TABS = [['recent', 'Recent'], ...CATEGORIES];
@@ -87,7 +90,7 @@ export class AssetPanel {
     this.list.addEventListener('pointerdown', (e) => this.begin(e));
     window.addEventListener('pointermove', (e) => this.move(e));
     window.addEventListener('pointerup', (e) => this.end(e));
-    window.addEventListener('pointercancel', () => this.cancel());
+    window.addEventListener('pointercancel', () => { this.pending = null; this.cancel(); });
     // Capture phase on window: runs before the camera's zoom and the WASD/QE
     // drive keys, which must not see these while dragging.
     window.addEventListener('wheel', (e) => {
@@ -196,7 +199,15 @@ export class AssetPanel {
   begin(e) {
     const li = e.target.closest('li[data-rel]');
     if (!li || e.button !== 0) return;
+    if (e.pointerType === 'touch') {  // a drag only once it goes sideways (move)
+      this.pending = { li, x: e.clientX, y: e.clientY };
+      return;
+    }
     e.preventDefault();  // no text selection / native drag
+    this.start(li, e);
+  }
+
+  start(li, e) {
     const asset = this.assets.find((a) => a.rel === li.dataset.rel);
     const ghost = document.createElement('div');
     ghost.className = 'drag-ghost';
@@ -205,10 +216,18 @@ export class AssetPanel {
     document.body.append(ghost);
     this.drag = { asset, ghost, readout: ghost.lastChild, pos: null, turn: 0, x: e.clientX, y: e.clientY };
     li.classList.add('dragging');
+    if (e.pointerType === 'touch') this.el.classList.add('fading');
     this.move(e);
   }
 
   move(e) {
+    const p = this.pending;
+    if (p) {
+      const dx = Math.abs(e.clientX - p.x), dy = Math.abs(e.clientY - p.y);
+      if (dy > 12) this.pending = null;  // the list scrolls (touch-action: pan-y)
+      else if (dx > 12) { this.pending = null; this.start(p.li, e); }
+      return;
+    }
     const d = this.drag;
     if (!d) return;
     d.x = e.clientX;
@@ -258,6 +277,7 @@ export class AssetPanel {
   }
 
   end(e) {
+    this.pending = null;
     const d = this.drag;
     if (!d) return;
     this.move(e);
@@ -274,6 +294,7 @@ export class AssetPanel {
     if (!this.drag) return;
     this.drag.ghost.remove();
     this.list.querySelector('.dragging')?.classList.remove('dragging');
+    this.el.classList.remove('fading');
     this.drag = null;
     this.app.setSpawnMarker(null);
   }
