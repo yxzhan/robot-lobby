@@ -6,7 +6,9 @@ also cmd, drive, height), with a synchronous step.
 
 GrootController is a port of public/groot.js (see there for the
 observation, the two MLPs and the PD gains); PlaygroundController of
-public/playground.js (policies from training/: policy.onnx + policy.json).
+public/playground.js (policies from training/: policy.onnx + policy.json);
+MicroduckController and BamServos of public/microduck.js (microduck_rl's
+policies on the BAM servo model: scripts/export_microduck.py).
 """
 
 import json
@@ -298,6 +300,165 @@ def load_playground(directory):
 
 
 # ---------------------------------------------------------------------------
+# Microduck (microduck_rl, mjlab): scripts/export_microduck.py
+
+
+class BamServos:
+  """XL330 servos as BAM models them (see public/microduck.js): the firmware's
+  P loop gives a duty cycle, the DC motor a torque, and the M6 friction budget
+  goes into the joints' friction loss and damping, where MuJoCo's solver
+  applies it. update() runs before every physics step."""
+
+  def __init__(self, p, model, acts, dofs):
+    self.p, self.model, self.acts, self.dofs = p, model, acts, dofs
+    self.target = np.zeros(len(acts))
+    self.prev = np.zeros(len(acts))  # last motor torques: the battery sag
+
+  def update(self, data):
+    p, d = self.p, self.dofs
+    q, dq = data.qpos[self.qadr], data.qvel[d]
+    vin = max(p['vin'] - p['vin_drop_gain'] * np.abs(self.prev).sum(), p['vin_min'])
+    duty = (self.target - q) * p['kp'] * p['error_gain']
+    if p.get('max_current'):  # the firmware's current limit, a window on the duty cycle
+      center, span = p['kt'] * dq / vin, p['R'] * p['max_current'] / vin
+      duty = np.clip(duty, center - span, center + span)
+    duty = np.clip(duty, -p['max_pwm'], p['max_pwm'])
+    tau = p['kt'] * vin * duty / p['R'] - p['kt'] ** 2 * dq / p['R']
+    data.ctrl[self.acts] = tau
+    self.prev = tau
+    # The load on the gearbox: bias and constraint forces without our own joint friction.
+    fric = np.zeros(self.model.nv)
+    n = data.nefc
+    rows = data.efc_type[:n] == mujoco.mjtConstraint.mjCNSTR_FRICTION_DOF
+    np.add.at(fric, data.efc_id[:n][rows], data.efc_force[:n][rows])
+    ext = -data.qfrc_bias[d] + data.qfrc_constraint[d] - fric[d]
+    mot = data.qfrc_actuator[d]  # applied on the last step
+    s = np.exp(-(np.abs(dq) / p['dtheta_stribeck']) ** p['alpha'])
+    loss = (p['friction_base'] + s * p['friction_stribeck']
+            + np.abs(ext * p['load_friction_external'] - mot * p['load_friction_motor'])
+            + s * np.abs(ext * p['load_friction_external_stribeck'] - mot * p['load_friction_motor_stribeck']))
+    drive = np.abs(mot) > np.abs(ext)
+    loss += s * np.where(drive, p['load_friction_external_quad'] * ext ** 2, p['load_friction_motor_quad'] * mot ** 2)
+    self.model.dof_frictionloss[d] = loss
+    self.model.dof_damping[d] = p['friction_viscous']
+
+
+class MicroduckController:
+  """See public/microduck.js: a microduck_rl policy (walk or stand-up) on
+  the BAM servo model."""
+
+  def __init__(self, policy, prefix, name='Microduck policy', onnx='walk.onnx'):
+    self.sessions, self.spec = policy
+    self.session = self.sessions[onnx]
+    self.prefix = prefix
+    self.name = name
+    r = self.spec['command_range']
+    self.drive = drive_of(r, self.spec.get('min_command')) if onnx == 'walk.onnx' else None
+    self.cmd = [0.0, 0.0, 0.0]
+    self.model = None
+    self.saved = None
+    self.driven = set()
+    self.default = np.array(self.spec['default_pose'])
+    self.reset()
+
+  def reset(self):
+    n = len(self.default)
+    self.action = np.zeros(n, np.float32)
+    self.qvel = np.zeros(n)  # the joint velocities of the last tick: the observation's
+    self.pending = []        # [(time, targets)]: commands reach the servos after the delay
+
+  def bind(self, model):
+    s, b = self.spec, self.spec['bam']
+
+    def find(obj, name):
+      i = mujoco.mj_name2id(model, obj, self.prefix + name)
+      if i < 0:
+        raise ValueError(f'{self.name}: no {self.prefix}{name} in the model')
+      return i
+    joints = [find(OBJ.mjOBJ_JOINT, n) for n in s['joints']]
+    acts = np.array([find(OBJ.mjOBJ_ACTUATOR, n) for n in s['actuators']])
+    root = find(OBJ.mjOBJ_BODY, s['root'])
+    free = model.body_jntadr[root]
+    if free < 0 or model.jnt_type[free] != mujoco.mjtJoint.mjJNT_FREE:
+      raise ValueError(f"{self.name}: {self.prefix}{s['root']} has no free joint")
+    self.model, self.root, self.act = model, root, acts
+    self.free_v = model.jnt_dofadr[free]
+    self.qadr = model.jnt_qposadr[joints]
+    self.dofs = model.jnt_dofadr[joints]
+    self.driven = set(joints)
+    d = self.dofs
+    # Motors driven by BAM in place of the position servos, as bam.mjlab does in training.
+    self.saved = (model.actuator_gainprm[acts].copy(), model.actuator_biasprm[acts].copy(),
+                  model.actuator_ctrllimited[acts].copy(), model.actuator_forcelimited[acts].copy(),
+                  model.actuator_forcerange[acts].copy(), model.dof_damping[d].copy(),
+                  model.dof_armature[d].copy(), model.dof_frictionloss[d].copy(),
+                  model.dof_solref[d].copy(), model.dof_solimp[d].copy())
+    model.actuator_gainprm[acts] = 0
+    model.actuator_gainprm[acts, 0] = 1 / model.actuator_gear[acts, 0]
+    model.actuator_biasprm[acts] = 0
+    model.actuator_ctrllimited[acts] = 0
+    model.actuator_forcelimited[acts] = 1
+    model.actuator_forcerange[acts] = (-b['force_limit'], b['force_limit'])
+    model.dof_armature[d] = b['armature']
+    model.dof_solref[d] = b['solref_friction']
+    model.dof_solimp[d] = b['solimp_friction']
+    self.servos = BamServos(b, model, acts, d)
+    self.servos.qadr = self.qadr
+    self.servos.target = self.default.copy()
+
+  def unbind(self):
+    if self.saved is None:
+      return
+    m, a, d = self.model, self.act, self.dofs
+    (m.actuator_gainprm[a], m.actuator_biasprm[a], m.actuator_ctrllimited[a], m.actuator_forcelimited[a],
+     m.actuator_forcerange[a], m.dof_damping[d], m.dof_armature[d], m.dof_frictionloss[d],
+     m.dof_solref[d], m.dof_solimp[d]) = self.saved
+    self.saved = None
+    self.driven = set()
+
+  def owns(self, j):
+    return self.name if j in self.driven else None
+
+  def pose(self, data):
+    data.qpos[self.qadr] = self.default
+    self.servos.target = self.default.copy()
+
+  def substep(self, data):
+    while self.pending and data.time >= self.pending[0][0] - 1e-9:
+      self.servos.target = self.pending.pop(0)[1]
+    self.servos.update(data)
+
+  def observe(self, data):
+    R = data.xmat[self.root].reshape(3, 3)
+    v = self.free_v
+    cmd = np.zeros(13)
+    if self.drive:  # the stand-up policy was trained on a zero twist
+      cmd[:3] = self.cmd
+    obs = np.concatenate([data.qvel[v + 3:v + 6], -R[2], data.qpos[self.qadr] - self.default,
+                          self.qvel, self.action, cmd]).astype(np.float32)
+    self.qvel = data.qvel[self.dofs].copy()
+    return obs[None]
+
+  def step(self, data):
+    s = self.spec
+    self.action = np.asarray(self.session.run(None, {s['input']: self.observe(data)})[0], np.float32).reshape(-1)
+    self.pending.append((data.time + s['bam']['delay'], self.default + self.action * s['action_scale']))
+
+  def describe(self):
+    return {'name': self.name, 'drive': self.drive} if self.drive else {'name': self.name}
+
+
+def load_microduck(directory):
+  import onnxruntime as ort
+  spec = json.loads((directory / 'policy.json').read_text())
+  opts = ort.SessionOptions()
+  opts.intra_op_num_threads = 1
+  sessions = {f: ort.InferenceSession(str(directory / f), opts, providers=['CPUExecutionProvider'])
+              for f in ('walk.onnx', 'stand.onnx') if (directory / f).exists()}
+  return sessions, spec
+
+
+# ---------------------------------------------------------------------------
 # Registry (ids as in policy.js)
 
 POLICIES = [
@@ -312,6 +473,13 @@ POLICIES = [
      'defaultFor': re.compile(r'(^|/)mujoco_menagerie/unitree_go2/go2\.xml$'),
      'load': load_playground,
      'create': lambda policy, prefix: PlaygroundController(policy, prefix, 'Go2 joystick policy')},
+    {'id': 'microduck-walk', 'name': 'microduck_rl walking · Microduck', 'dir': 'microduck_rl',
+     'defaultFor': re.compile(r'(^|/)digital_twin/microduck/microduck\.xml$'),
+     'load': load_microduck,
+     'create': lambda policy, prefix: MicroduckController(policy, prefix, 'Microduck walking policy', 'walk.onnx')},
+    {'id': 'microduck-stand', 'name': 'microduck_rl stand-up · Microduck', 'dir': 'microduck_rl',
+     'load': load_microduck,
+     'create': lambda policy, prefix: MicroduckController(policy, prefix, 'Microduck stand-up policy', 'stand.onnx')},
 ]
 
 _loaded = {}
@@ -326,7 +494,7 @@ def installed(p):
 
 
 def default_policy(key):
-  return next((p['id'] for p in POLICIES if p['defaultFor'].search(key) and installed(p)), '')
+  return next((p['id'] for p in POLICIES if p.get('defaultFor') and p['defaultFor'].search(key) and installed(p)), '')
 
 
 def create(pid, prefix):

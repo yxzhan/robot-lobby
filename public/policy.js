@@ -33,6 +33,7 @@
 
 import { G1_MODELS, GrootController, loadGrootPolicy } from './groot.js';
 import { PlaygroundController, loadPlaygroundPolicy } from './playground.js';
+import { MicroduckController, loadMicroduckPolicy } from './microduck.js';
 
 // onnxruntime-web, loaded on first use.
 let ort = null;
@@ -73,6 +74,23 @@ export const POLICIES = [
     defaultFor: /(^|\/)mujoco_menagerie\/unitree_go2\/go2\.xml$/,
     load: async (file) => loadPlaygroundPolicy(await onnxRuntime(), file),
     create: (weights, prefix) => new PlaygroundController(weights, prefix, 'Go2 joystick policy'),
+  },
+  {
+    id: 'microduck-walk',
+    name: 'microduck_rl walking · Microduck',
+    about: 'Walking on flat ground (14 servos, 50 Hz), trained in microduck_rl (mjlab) on the BAM model of its XL330 servos, which drives the joints here too.',
+    dir: 'microduck_rl',  // scripts/export_microduck.py
+    defaultFor: /(^|\/)digital_twin\/microduck\/microduck\.xml$/,
+    load: async (file) => loadMicroduckPolicy(await onnxRuntime(), file),
+    create: (weights, prefix) => new MicroduckController(weights, prefix, 'Microduck walking policy', 'walk.onnx'),
+  },
+  {
+    id: 'microduck-stand',
+    name: 'microduck_rl stand-up · Microduck',
+    about: 'Stands up from sitting and holds the stand (from lying down it rarely gets up); no drive command. BAM servos as for walking.',
+    dir: 'microduck_rl',
+    load: async (file) => loadMicroduckPolicy(await onnxRuntime(), file),
+    create: (weights, prefix) => new MicroduckController(weights, prefix, 'Microduck stand-up policy', 'stand.onnx'),
   },
 ];
 

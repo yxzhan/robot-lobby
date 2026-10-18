@@ -258,6 +258,34 @@ for Go2 body velocity, gravity and joint velocities) and sets the targets
 `default + action * scale` every 0.02 s; on `go2.xml`'s torque motors it
 computes the trained PD torque itself before every physics step.
 
+## Walking Microduck (trained in microduck_rl)
+
+Pollen Robotics' [microduck_rl](https://github.com/pollen-robotics/microduck_rl)
+(mjlab, MuJoCo Warp, rsl_rl PPO) trains its 14-servo bipedal duck; with a
+clone next to `package.json`, `scripts/import_microduck.py` copies the
+robot (`digital_twin/microduck/microduck.xml`) and two of its scenes into
+the library, and after training `scripts/export_microduck.py` (run in the
+clone's environment, see its docstring) exports the walking and stand-up
+policies to `pretrained_policies/microduck_rl/` (`walk.onnx`, `stand.onnx`,
+`policy.json`). The duck starts with `microduck-walk` on (keys and goal
+marker); `microduck-stand` stands up from sitting and holds the stand, but
+rarely gets up from lying on its belly or back.
+
+Both were trained on the BAM model of the XL330 servos (firmware P loop,
+DC motor with back-EMF and battery sag, load-dependent friction), not on
+plain position actuators, and do not stand without it. `public/microduck.js`
+(and `MicroduckController` / `BamServos` in `server/policies.py`) turns the
+robot's position actuators into motors on bind, computes the servo torques
+and writes the friction budget into the joints before every physics step,
+delays the targets by the training's command delay, and builds mjlab's 61-D
+observation (trunk angular velocity and gravity, joint positions and
+velocities, last action, command). In the viewer's world it walks without
+falling at ~2/3 of the commanded speed forward and back, turns at the
+commanded rate, but sidesteps slowly (0.2 m/s → 0.05); standing still it
+does not start below ~0.2 m/s or ~0.6 rad/s (`min_command`, so the goal
+marker commands at least that) and often does not turn right in place, as
+in microduck_rl's own CPU rehearsal (`scripts/infer_policy.py`).
+
 ## Mobile bases
 
 Every robot gets a `BaseController` (`public/base.js`), driven
