@@ -4,8 +4,9 @@
   "description": "MuJoCo WASM physics rendered with Filament.js",
   "scripts": {
     "postinstall": "node scripts/vendor.mjs && python3 scripts/thumbnails.py",
-    "start": "python3 scripts/serve.py 4007",
-    "server": "python3 server/server.py 4007"
+    "client": "python3 scripts/serve.py 4007",
+    "server": "python3 server/server.py 4007",
+    "all": "node scripts/vendor.mjs && python3 scripts/thumbnails.py && python3 server/server.py 4007"
   },
   "license": "ISC",
   "dependencies": {
