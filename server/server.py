@@ -19,7 +19,8 @@ Protocol (client -> server, JSON {op, ...}; `rid` asks for a reply):
   ray {eye, dir} -> {body, point} or {body: -1}        ping {t} -> pong {t}
   Teleop (robot `id`): use {kind: policy|base|ik, on (policy: its id or '')}
   cmd {kind: policy|base, cmd: [vx, vy, yaw rate], height?} (repeated while
-  not zero; stops after CMD_TIMEOUT without one)
+  not zero; stops after CMD_TIMEOUT without one; a moving one drops the goal)
+  goal {goal: {x, y, yaw} or null} (the robot drives there: goal.py)
   ik_config {config}   ik_target {chain, pos, rot} (in the chain's ref body
   frame)   ik_reset_target {chain or null}   ik_gripper {chain}   ik_save
   ik_defaults   base_config {config}   base_save   base_defaults
@@ -30,8 +31,9 @@ Server -> client:
   {type: 'robot', item}                     a robot's controllers changed
                               (item.use, item.errors, item.ik / base / policy:
                               their describe())
-  {type: 'status', robots: {id: {ik: {targets, err}, base: {measured}}}}
-                                                     STATUS_HZ times a second
+  {type: 'status', robots: {id: {ik: {targets, err}, base: {measured},
+                              goal: {phase, dist, dyaw}}}}  STATUS_HZ times a second
+  {type: 'goal', id, goal}       a robot's goal changed (null: none)
   {type: 'reset', id}            after reset (id null) / reset_robot {id}
   {type: 'reply', rid, ...} / {type: 'error', op, msg, rid?}
   {type: 'pong', t}
@@ -47,7 +49,9 @@ which lays the world out from each robot's own model.
 The Teleop panel's controllers run here, ticked every IK.CONTROL_DT of sim
 time with their software servos before every step, like App.advance does in
 the browser: trained policies (policies.py, GR00T on onnxruntime), mobile
-bases (base.py) and IK (ik.py), ports of groot.js, base.js and ik.js. Setups
+bases (base.py), IK (ik.py) and the goal marker (goal.py), ports of
+groot.js, base.js, ik.js and goal.js; a goal is one per robot, for every
+browser. Setups
 saved from the panel go to server/saved/{ik,base}.json. Not yet: the World
 panel's default geom properties.
 """
@@ -69,6 +73,7 @@ from aiohttp import WSMsgType, web
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import base as BASE  # noqa: E402
+import goal as GOAL  # noqa: E402
 import ik as IK  # noqa: E402
 import policies as POL  # noqa: E402
 import render_asset  # noqa: E402
@@ -170,6 +175,7 @@ class Robot:
     self.use = self.policy = self.base = self.ik = None
     self.policy_id = ''
     self.cmd_at = {}  # 'policy' / 'base' -> (when its drive command last came, from which browser)
+    self.goal, self.goal_state, self.goal_result = None, {}, None  # the goal marker's pose (goal.py)
     if self.key:
       self.use = {'policy': POL.default_policy(self.key), 'base': None, 'ik': True}
       self.base = BASE.BaseController(self.key, self.prefix, BASE_SAVED)
@@ -186,7 +192,7 @@ class Robot:
   def item(self):
     out = {'id': self.id, 'rel': self.rel, 'label': self.label, 'pos': self.pos, 'yaw': self.yaw}
     if self.key:
-      out.update(key=self.key, use=self.use, errors=self.errors,
+      out.update(key=self.key, use=self.use, errors=self.errors, goal=self.goal,
                  ik=self.ik.describe() if self.ik.model is not None else None,
                  base=self.base.describe() if self.base.model is not None else None,
                  policy=self.policy.describe() if self.policy and self.use['policy'] else None)
@@ -258,8 +264,32 @@ class Robot:
       out.append(self.ik)
     return out
 
+  def locomotion(self):
+    """The switched-on controllers that take a drive command (teleop.js locomotion)."""
+    return [c for c in self.controllers() if c is not self.ik and getattr(c, 'drive', None)]
+
+  def set_goal(self, goal):
+    self.goal = goal and {k: float(goal[k]) for k in ('x', 'y', 'yaw')}
+    self.goal_state, self.goal_result = {}, None
+    if goal is None:
+      for c in self.locomotion():
+        c.cmd = [0.0, 0.0, 0.0]
+
+  def follow_goal(self, data):
+    """Sets the drive command towards the goal, if there is one."""
+    locos = self.locomotion() if self.goal else []
+    self.goal_result = None
+    if not locos:
+      return
+    pose = GOAL.body_pose(data, self.body_offset)
+    for c in locos:
+      self.goal_result = GOAL.goal_command(pose, self.goal, c.drive, self.goal_state)
+      c.cmd = list(self.goal_result['cmd'])
+
   def status(self):
     out = {}
+    if self.goal_result:
+      out['goal'] = {k: self.goal_result[k] for k in ('phase', 'dist', 'dyaw')}
     if self.use['ik'] and self.ik.model is not None:
       out['ik'] = self.ik.status()
     if self.use['base'] and self.base.ready:
@@ -460,6 +490,7 @@ class World:
         self.write_initial(r, layout[r.id])
       mujoco.mj_forward(m, d)
       for r in self.robots:
+        r.set_goal(None)
         for c in r.controllers():
           c.reset()
       self.sim_start = time.monotonic()
@@ -473,6 +504,7 @@ class World:
       d.qvel[at['qvel']:at['qvel'] + r.dims['nv']] = 0
       d.act[at['act']:at['act'] + r.dims['na']] = 0
       mujoco.mj_forward(m, d)
+      r.set_goal(None)
       for c in (r.policy, r.base, r.ik):
         if c:
           c.reset()
@@ -498,7 +530,7 @@ class World:
       self.set_perturb(ws, msg)
     elif op == 'ray':
       return self.ray(msg['eye'], msg['dir'])
-    elif op in ('use', 'cmd', 'ik_config', 'ik_target', 'ik_reset_target', 'ik_gripper', 'ik_save', 'ik_defaults',
+    elif op in ('use', 'cmd', 'goal', 'ik_config', 'ik_target', 'ik_reset_target', 'ik_gripper', 'ik_save', 'ik_defaults',
                 'base_config', 'base_save', 'base_defaults'):
       await self.controller_op(ws, op, self.robot(msg['id']), msg)
     else:
@@ -519,6 +551,16 @@ class World:
         if msg.get('height') is not None and hasattr(c, 'height'):
           c.height = max(0.3, min(1.2, float(msg['height'])))
         r.cmd_at[msg['kind']] = (time.monotonic(), ws)
+        if r.goal and any(c.cmd):  # driven with the keys: the goal is dropped
+          r.set_goal(None)
+          c.cmd = [max(-5.0, min(5.0, float(v))) for v in msg['cmd'][:3]]
+          await self.send_all(json.dumps({'type': 'goal', 'id': r.id, 'goal': None}))
+      return
+    elif op == 'goal':
+      r.set_goal(msg.get('goal'))
+      for kind in list(r.cmd_at):  # a goal replaces the keys' last command
+        del r.cmd_at[kind]
+      await self.send_all(json.dumps({'type': 'goal', 'id': r.id, 'goal': r.goal}))
       return
     elif (ik.model is None and op.startswith('ik_')) or (base.model is None and op.startswith('base_')):
       raise ValueError(f'{r.label}: {op.split("_")[0]} is not set up')
@@ -757,6 +799,8 @@ class World:
         controllers = [c for r in self.robots for c in r.controllers()]
         while d.time < target and time.perf_counter() - t0 < STEP_BUDGET:
           if controllers and d.time >= self.next_control - 1e-9:
+            for r in self.robots:
+              r.follow_goal(d)
             for c in controllers:
               try:
                 c.step(d)

@@ -3,7 +3,8 @@
 // (assets.js); every frame goalCommand turns the robot's base pose and the
 // goal into the body twist command [vx, vy, yaw rate] the keys would give,
 // within the controller's key speeds (`drive`), so it drives a walking
-// policy and a wheeled base alike, locally or on the server.
+// policy and a wheeled base alike (in network mode the server does this:
+// server/goal.py is a port).
 //
 // Far from the goal the robot turns towards it and goes forward (slower the
 // more it is turned away), backwards for a goal behind a robot that cannot

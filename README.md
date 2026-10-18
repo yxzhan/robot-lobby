@@ -195,8 +195,9 @@ the goal and goes forward (a robot that cannot strafe backs up to a goal
 just behind it), near it a mecanum base or a walking robot closes the rest
 sideways, and at the point it turns to the goal heading (6 cm, 3.5°, with
 hysteresis). A robot keeps going to its goal while another one is driven;
-**Stop** forgets the goal, and so does Reset (in network mode a reset by
-any client).
+**Stop** forgets the goal, and so does Reset or driving it with the keys.
+In network mode a robot has one goal for everyone: the server follows it
+(`server/goal.py`), every client shows it, and the last one set wins.
 
 Pretrained policies live in `pretrained_policies/<dir>/`, one checkout per
 model (not tracked by git). `npm install` (or `node scripts/vendor.mjs`)

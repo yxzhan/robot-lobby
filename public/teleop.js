@@ -13,8 +13,10 @@
 // drive). Inputs (the Input select, where a ROS bridge or a gamepad would
 // plug in too): the keyboard, or a goal marker on the floor (goal.js) that
 // the robot drives to, dragged like a spawn marker (wheel or Q/E turn it).
-// A robot keeps going to its goal while another one is driven. Setups are
-// saved per robot file.
+// A robot keeps going to its goal while another one is driven. In network
+// mode a robot's goal is the server's (server/goal.py), one for every
+// browser: changes go there and come back to everyone (fromServer). Setups
+// are saved per robot file.
 
 import { dragPose, markerScale, pickMarker, startDrag } from './marker.js';
 import { BaseController, KINDS } from './base.js';
@@ -71,6 +73,8 @@ const INPUT = 'mujoco-filament/teleop-input';
 const INPUTS = [['keyboard', 'Keyboard'], ['goal', 'Goal marker']];
 const GOAL_TURN = Math.PI / 12;  // per wheel notch or Q/E press while dragging a goal (like assets.js)
 const GOAL_GRAB = 0.35;          // m: grab radius around the goal marker's center
+const GOAL_GAP_MS = 50;          // network mode: a dragged goal goes to the server at most this often
+const GOAL_ECHO_MS = 600;        // and the server's echoes of it are ignored for this long
 const DEG = 180 / Math.PI;
 const CONTROLLERS = [['policy', 'Policy', 'A trained policy (locomotion, hands, …)'],
   ['base', 'Base', 'Mobile base: wheels or planar joints'], ['ik', 'IK', 'IK chains with interactive markers']];
@@ -115,7 +119,7 @@ export class TeleopPanel {
       if (!this.dragging?.goal) return;
       const k = e.key.toLowerCase();
       if (k === 'q' || k === 'e') this.turnGoal(k === 'q' ? GOAL_TURN : -GOAL_TURN);
-      else if (k === 'escape') { this.dragging.robot.goal = this.dragging.before; this.release(); }
+      else if (k === 'escape') { this.setGoal(this.dragging.robot, this.dragging.before); this.release(); }
       else return;
       e.preventDefault();
       e.stopImmediatePropagation();
@@ -223,15 +227,42 @@ export class TeleopPanel {
   }
 
   turnGoal(delta) {
-    const g = this.dragging?.robot.goal;
-    if (!g) return;
-    g.yaw += delta;
+    const r = this.dragging?.robot;
+    if (!r?.goal) return;
+    r.goal.yaw += delta;
+    this.setGoal(r, r.goal);
     this.showGoal();
+  }
+
+  // Sets robot r's goal ({x, y, yaw} or null); in network mode it goes to
+  // the server, at most every GOAL_GAP_MS while it is dragged.
+  setGoal(r, goal) {
+    r.goal = goal;
+    r.goalState = {};
+    const net = this.app.net;
+    if (!net) return;
+    clearTimeout(r.goalTimer);
+    const send = () => {
+      r.goalSentAt = performance.now();
+      net.send('goal', { id: r.netId, goal: r.goal && { x: r.goal.x, y: r.goal.y, yaw: r.goal.yaw } });
+    };
+    const wait = (r.goalSentAt ?? -Infinity) + GOAL_GAP_MS - performance.now();
+    if (wait <= 0) send();
+    else r.goalTimer = setTimeout(send, wait);
+  }
+
+  // Network mode: robot r's goal as the server has it (set by any browser).
+  fromServer(r, goal) {
+    if (this.dragging?.goal && this.dragging.robot === r) return;
+    if (performance.now() - (r.goalSentAt ?? -Infinity) < GOAL_ECHO_MS) return;  // ours, or an older one
+    r.goal = goal;
+    r.goalState = {};
   }
 
   // Forgets the goals of `robots` (Reset): they stop where they are.
   clearGoals(robots) {
     for (const r of robots) {
+      clearTimeout(r.goalTimer);
       r.goal = null;
       r.goalState = {};
       r.goalResult = null;
@@ -261,8 +292,7 @@ export class TeleopPanel {
     if (p) {
       const r = this.active, g = this.goalOf();
       this.dragging = { goal: true, robot: r, before: r.goal, offset: [g.x - p[0], g.y - p[1]] };
-      r.goal = { ...g };
-      r.goalState = {};
+      this.setGoal(r, { ...g });
       this.showGoal(at);
       return true;
     }
@@ -281,8 +311,7 @@ export class TeleopPanel {
     const g = this.dragging;
     if (g?.goal) {
       const p = TeleopPanel.floorHit(ray);
-      if (p) Object.assign(g.robot.goal, { x: p[0] + g.offset[0], y: p[1] + g.offset[1] });
-      g.robot.goalState = {};
+      if (p) this.setGoal(g.robot, { ...g.robot.goal, x: p[0] + g.offset[0], y: p[1] + g.offset[1] });
       this.showGoal(at);
       return;
     }
@@ -338,7 +367,7 @@ export class TeleopPanel {
       field('Input', this.select(INPUTS, this.mode, (v) => {
         this.mode = v;
         try { localStorage.setItem(INPUT, v); } catch { /* no storage */ }
-        r.goal = null;  // a new goal starts where the robot is
+        this.setGoal(r, null);  // a new goal starts where the robot is
         this.render();
       }));
       const keys = el('div', { className: 'hint' });
@@ -347,7 +376,7 @@ export class TeleopPanel {
           + '<kbd>Q</kbd><kbd>E</kbd> turn it (the arrow is the heading), <kbd>Esc</kbd> puts it back.';
         this.goalReadout = el('span', { className: 'note' });
         this.body.append(keys, el('div', { className: 'bar' },
-          this.button('Stop', 'Forget the goal: the robot stops where it is', () => { r.goal = null; }), this.goalReadout));
+          this.button('Stop', 'Forget the goal: the robot stops where it is', () => this.setGoal(r, null)), this.goalReadout));
       } else {
         this.goalReadout = null;
         keys.innerHTML = '<kbd>W</kbd><kbd>S</kbd> forward/back · ' + (locos.some((c) => c.drive.side) ? '<kbd>A</kbd><kbd>D</kbd> sideways · ' : '')
@@ -658,12 +687,15 @@ export class TeleopPanel {
     this.input.enabled = locos.length > 0 && keyboard;
     for (const r of robots) {
       const mine = r === this.active ? locos : [];
-      // A goal is followed until it is cleared, also while another robot is driven.
+      // A goal is followed until it is cleared, also while another robot is
+      // driven: here, or on the server (which sends goalResult) in network mode.
+      const net = !!this.app.net;
       const goal = r.goal && !(r === this.active && keyboard) && this.app.data ? r.goal : null;
-      const pose = goal && bodyPose(this.app.data, r.bodyOffset);
-      r.goalResult = null;
+      const pose = goal && !net && bodyPose(this.app.data, r.bodyOffset);
+      if (!net) r.goalResult = null;
       for (const c of [r.policy, r.base]) {
         if (!c) continue;
+        if (goal && net && locomotion(r).includes(c)) continue;
         if (goal && locomotion(r).includes(c)) {
           r.goalResult = goalCommand(pose, goal, c.drive, r.goalState ??= {});
           c.cmd = r.goalResult.cmd;

@@ -1695,6 +1695,7 @@ try {
   function applyRobot(r, it) {
     if (!it.key) return;
     Object.assign(r, { key: it.key, use: it.use, errors: it.errors ?? {} });
+    app.teleop.fromServer(r, it.goal ?? null);
     if (r.ik) r.ik.update(it.ik);
     else r.ik = new RemoteIk(app, r, it.ik);
     if (r.base) r.base.update(it.base);
@@ -1893,7 +1894,14 @@ try {
           if (!r) continue;
           if (s.ik) r.ik?.status(s.ik);
           if (r.base) r.base.measured = s.base?.measured ?? null;
+          r.goalResult = s.goal ?? null;
         }
+        for (const r of robots) if (!msg.robots[r.netId]) r.goalResult = null;
+      },
+      // A robot's goal, set by any client (the server follows it).
+      goal: (msg) => {
+        const r = robots.find((x) => x.netId === msg.id);
+        if (r) app.teleop.fromServer(r, msg.goal);
       },
       // Reset by any client: goals set here would drive the robots off again.
       reset: (msg) => app.teleop.clearGoals(msg.id == null ? robots : robots.filter((r) => r.netId === msg.id)),
