@@ -1,7 +1,7 @@
 {
-  "name": "mujoco-filament-web",
+  "name": "robot-lobby",
   "version": "1.0.0",
-  "description": "MuJoCo WASM physics rendered with Filament.js",
+  "description": "A multiplayer MuJoCo sandbox in the browser: MuJoCo physics (WASM or a shared Python server), Filament rendering",
   "scripts": {
     "postinstall": "node scripts/vendor.mjs && python3 scripts/thumbnails.py",
     "client": "python3 scripts/serve.py 4007",

@@ -1,6 +1,11 @@
-# MuJoCo + Filament on the web
+# Robot Lobby
 
-Minimal example: physics from the official MuJoCo WASM bindings
+An unofficial multiplayer MuJoCo sandbox in the browser: spawn robots,
+drive them, pull them around, in one physics world shared by everyone
+connected (a Python server, e.g. on Binder), or alone with the physics in
+the page.
+
+Physics from the official MuJoCo WASM bindings
 (`@mujoco/mujoco`), rendering with Filament.js (WebGL2, PBR, sun shadows, SSAO).
 No bundler — `public/` is a static site.
 
@@ -563,6 +568,58 @@ the server process. Local mode keeps everything in the browser as before.
 
 `?local` in the URL keeps the page fully local (WASM physics) even when the
 server serves it.
+
+## GitHub Pages and Binder
+
+The page and the server can also live apart: the page as a static site on
+GitHub Pages with a part of the library, running locally, and the server on
+Binder with the whole library, joined from the page's **Server** panel.
+`public/endpoint.js` decides where the server is: `?server=<url>`, else
+the last one joined while it still answers, else the page's own origin
+(server.py serving the page, as above), else none. With a server, every
+data file (assets.json, thumbnails, `mjcf_assets/`, `pretrained_policies/`)
+and `/render` come from it. The server answers any origin (CORS); on Binder
+the session's token, which the page puts on every request, WebSockets
+included, is what guards it.
+
+**The static site.** `pages.json` lists the model and policy directories
+it carries (the default: Go2, Spot, Panda, G1, the microduck, Garmi, the
+custom environments, the digital_twin objects, the banana and the four
+policies; ~290 MB). Then:
+
+```sh
+node scripts/vendor.mjs && python3 scripts/thumbnails.py
+node scripts/build_pages.mjs                 # into dist/
+node scripts/build_pages.mjs --push origin   # and force-push it as branch gh-pages
+```
+
+Set the repository's Pages source to the `gh-pages` branch. It is one
+commit each time, so model files never pile up in its history. The build
+fails on a file over 100 MB and warns over 1 GB, GitHub's limits.
+`deploy.json` on the site names the Binder repository the panel starts:
+`pages.json`'s `binder`, by default this checkout's GitHub remote and branch
+on mybinder.org (`--binder gh/<owner>/<repo>/<ref>`, `--hub <url>` to
+change it).
+
+**The Binder repository** is this one (`binder/`): `environment.yml`
+(Python, MuJoCo, onnxruntime, Node), `postBuild`, which clones
+mujoco_menagerie, runs `scripts/basic_scenes.py`, downloads what
+`binder/library.txt` lists (GR00T's policies from Hugging Face by default)
+and indexes it all (`npm ci`), and `jupyter_server_config.py`, which puts
+server.py behind the session's jupyter-server-proxy at `<session>/mujoco/`,
+started on the first request. The rest of a local library (digital_twin,
+robocasa, your own policies) has to be downloadable for the build:
+`python3 scripts/pack_library.py` packs it as one .tar.gz per source (e.g.
+for GitHub release assets, 2 GB each at most) and prints the lines for
+`library.txt`.
+
+**Joining.** *Start a server on Binder* in the Server panel calls
+BinderHub's build API, shows the build and launch, and reloads the page on
+the new session's `<url>mujoco/?token=…`. *Join a server* takes such a URL
+directly (or any server.py's). *Copy link* gives a link to the page on that
+server, token included, so others join the same world; *Go local* leaves
+it. A Binder session ends after a while without anyone connected (on
+mybinder.org about 10 minutes); the page then starts locally again.
 
 ## How it works
 
