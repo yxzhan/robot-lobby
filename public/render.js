@@ -13,7 +13,8 @@
 //   decodeImage); a change decodes the scene's images again.
 //
 // The presets leave the resolution at the screen's: on an iPhone 15 it made
-// little difference.
+// little difference. A browser without saved settings starts on Medium, a
+// phone or tablet (a finger for its main pointer) on Low.
 
 const STORE = 'mujoco-filament/render';
 
@@ -24,7 +25,7 @@ export const PRESETS = {
   ultralow: { pixelRatio: 'screen', antialiasing: 'fxaa', ao: 'off', shadows: 'off', textures: 64 },  // Low, but textures
 };
 const PRESET_NAMES = { high: 'High', medium: 'Medium', low: 'Low', ultralow: 'Ultra low' };
-const DEFAULT = 'medium';
+const DEFAULT = matchMedia('(pointer: coarse)').matches ? 'low' : 'medium';
 
 // [key, label, [[value, text]], tooltip]
 const FIELDS = [
