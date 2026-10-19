@@ -1,0 +1,17 @@
+# The Binder image (repo2docker): the shared-world server, server/server.py,
+# behind jupyter-server-proxy (jupyter_server_config.py), and Node for
+# scripts/vendor.mjs, which indexes the model library (postBuild).
+name: robot-lobby
+channels:
+  - conda-forge
+dependencies:
+  - python=3.12
+  - nodejs=22
+  - pip
+  - pip:
+      - mujoco==3.16.0
+      - numpy
+      - aiohttp
+      - onnxruntime
+      - pillow
+      - jupyter-server-proxy

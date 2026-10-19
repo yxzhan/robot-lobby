@@ -974,6 +974,31 @@ async def no_store(request, handler):
   return resp
 
 
+@web.middleware
+async def cors(request, handler):
+  """Lets a page from anywhere (the static site on GitHub Pages) fetch from
+  here: the asset files, /render, /server.json, the API. Behind Binder's
+  jupyter-server-proxy the token in the URL is what guards the server; on
+  its own the server was never guarded (WebSockets ignore CORS anyway)."""
+  origin = request.headers.get('Origin')
+  if request.method == 'OPTIONS' and origin:  # preflight (a POST with JSON)
+    resp = web.Response(status=204, headers={
+      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+      'Access-Control-Allow-Headers': request.headers.get('Access-Control-Request-Headers', 'Content-Type'),
+      'Access-Control-Max-Age': '600'})
+  else:
+    try:
+      resp = await handler(request)
+    except web.HTTPException as err:  # the page reads the error's text too
+      if origin:
+        err.headers['Access-Control-Allow-Origin'] = origin
+      raise
+  if origin:
+    resp.headers['Access-Control-Allow-Origin'] = origin
+    resp.headers['Vary'] = 'Origin'
+  return resp
+
+
 async def index(_request):
   return web.FileResponse(PUBLIC / 'index.html')
 
@@ -1026,7 +1051,7 @@ async def main():
   sys.stdout.reconfigure(line_buffering=True)
   port = int(sys.argv[1]) if len(sys.argv) > 1 else 4007
   await world.set_scene([])
-  app = web.Application(middlewares=[no_store])
+  app = web.Application(middlewares=[cors, no_store])
   app.router.add_get('/ws', ws_handler)
   app.router.add_get('/server.json', server_json)
   app.router.add_get('/api/robots', api_robots)

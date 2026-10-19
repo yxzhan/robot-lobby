@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>MuJoCo + Filament</title>
+  <title>Robot Lobby</title>
   <style>
     html, body { margin: 0; height: 100%; overflow: hidden; background: #1b1d22; font: 13px system-ui, sans-serif; }
     canvas { display: block; width: 100%; height: 100%; touch-action: none; }
@@ -111,23 +111,27 @@
     #teleop .joints label.off { color: #777; }
     #teleop .joints .why { margin-left: auto; color: #888; font-style: italic; }
     #teleop .error { color: #f88; margin: 4px 0; }
-    :is(#world, #render) { overflow: hidden auto; min-height: 0; flex: 0 5 auto; font-size: 12px; }
-    :is(#world, #render) h3 { margin: 0 0 6px; font-size: 13px; }
-    :is(#world, #render) .field { display: grid; grid-template-columns: 64px 1fr 38px; align-items: center; gap: 6px; margin: 3px 0; }
-    :is(#world, #render) .ctl { display: flex; gap: 4px; min-width: 0; }
-    :is(#world, #render) .unit { color: #888; font-size: 11px; }
-    :is(#world, #render) input[type=number] { width: 0; flex: 1; min-width: 0; font: inherit; color: #eee; background: #222;
+    :is(#world, #render, #server) { overflow: hidden auto; min-height: 0; flex: 0 5 auto; font-size: 12px; }
+    :is(#world, #render, #server) h3 { margin: 0 0 6px; font-size: 13px; }
+    :is(#world, #render, #server) .field { display: grid; grid-template-columns: 64px 1fr 38px; align-items: center; gap: 6px; margin: 3px 0; }
+    :is(#world, #render, #server) .ctl { display: flex; gap: 4px; min-width: 0; }
+    :is(#world, #render, #server) .unit { color: #888; font-size: 11px; }
+    :is(#world, #render, #server) input[type=number] { width: 0; flex: 1; min-width: 0; font: inherit; color: #eee; background: #222;
                                 border: 1px solid #555; border-radius: 4px; padding: 1px 3px; }
-    :is(#world, #render) select { flex: 1; min-width: 0; font: inherit; color: #eee; background: #222; border: 1px solid #555; border-radius: 4px; }
-    :is(#world, #render) .hint { color: #999; margin: 4px 0; line-height: 1.5; }
-    :is(#world, #render) .sub { margin-top: 8px; padding-top: 6px; border-top: 1px solid #3a3d44; font-weight: 600; }
-    :is(#world, #render) .sub.minor { border-top: 0; margin-top: 4px; padding-top: 0; color: #aaa; font-weight: 400; }
-    :is(#world, #render) .bar { display: flex; align-items: center; gap: 4px; margin-top: 6px; }
-    :is(#world, #render) button { cursor: pointer; font: inherit; font-size: 11px; color: #ddd; background: #333;
+    :is(#world, #render, #server) select { flex: 1; min-width: 0; font: inherit; color: #eee; background: #222; border: 1px solid #555; border-radius: 4px; }
+    :is(#world, #render, #server) .hint { color: #999; margin: 4px 0; line-height: 1.5; }
+    :is(#world, #render, #server) .sub { margin-top: 8px; padding-top: 6px; border-top: 1px solid #3a3d44; font-weight: 600; }
+    :is(#world, #render, #server) .sub.minor { border-top: 0; margin-top: 4px; padding-top: 0; color: #aaa; font-weight: 400; }
+    :is(#world, #render, #server) .bar { display: flex; align-items: center; gap: 4px; margin-top: 6px; }
+    :is(#world, #render, #server) button { cursor: pointer; font: inherit; font-size: 11px; color: #ddd; background: #333;
                     border: 1px solid #555; border-radius: 4px; padding: 2px 8px; }
-    :is(#world, #render) button.primary { background: #2f5a3c; border-color: #4d8a5f; }
-    :is(#world, #render) button:disabled { opacity: .5; cursor: default; }
-    :is(#world, #render) .note { color: #c9a; font-size: 11px; }
+    :is(#world, #render, #server) button.primary { background: #2f5a3c; border-color: #4d8a5f; }
+    :is(#world, #render, #server) button:disabled { opacity: .5; cursor: default; }
+    :is(#world, #render, #server) .note { color: #c9a; font-size: 11px; }
+    #server input[type=url] { flex: 1; min-width: 0; font: inherit; color: #eee; background: #222; border: 1px solid #555;
+                              border-radius: 4px; padding: 2px 4px; }
+    #server .log { margin-top: 6px; font: 11px ui-monospace, monospace; color: #9cd; overflow-wrap: anywhere; }
+    #server .log .error { color: #f88; }
     #teleop .chips { display: flex; gap: 4px; flex-wrap: wrap; }
     #teleop .chip { display: flex; align-items: center; gap: 3px; padding: 1px 7px 1px 3px; border: 1px solid #555;
                     border-radius: 10px; background: #2a2c31; cursor: pointer; }
@@ -236,6 +240,7 @@
     <button data-panel="world" title="World physics: gravity, medium, default geom properties">World</button>
     <button data-panel="teleop" title="Teleoperate a robot: controller and input">Teleop</button>
     <button data-panel="render" title="Rendering quality: resolution, anti-aliasing, occlusion, shadows, textures">Render</button>
+    <button data-panel="server" title="Where the world runs: in this browser, or on a server shared with others (Binder)">Server</button>
   </div>
   <div id="assets">
     <div class="tabs"></div>
@@ -264,6 +269,10 @@
   </div>
   <div id="render" hidden>
     <h3>Render</h3>
+    <div class="body"></div>
+  </div>
+  <div id="server" hidden>
+    <h3>Server</h3>
     <div class="body"></div>
   </div>
   </div>

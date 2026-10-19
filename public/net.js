@@ -10,7 +10,9 @@
 //
 // Requests (spawn, remove, reset, drag, picking, …) go to the server, which
 // applies them and sends everyone the result. See server/server.py for the
-// protocol.
+// protocol. Which server, if any, endpoint.js decides.
+
+import { serverUrl, wsUrl } from './endpoint.js';
 
 const MIN_DELAY = 0.04, MAX_DELAY = 0.25;  // s of server time the view runs behind the newest snapshot
 const KEEP = 40;    // snapshots kept
@@ -18,17 +20,6 @@ const PING_EVERY = 1000;  // ms
 const SILENT_MAX = 5000;  // ms without a word from the server: the connection is gone
 const RETRY_MAX = 10000;  // ms between reconnect attempts, at most
 
-// The server's description, or null when the page is served statically
-// (scripts/serve.py) or `?local` is in the URL.
-export async function findServer() {
-  if (new URLSearchParams(location.search).has('local')) return null;
-  try {
-    const res = await fetch('server.json', { cache: 'no-store' });
-    return res.ok ? await res.json() : null;
-  } catch {
-    return null;
-  }
-}
 
 // Stands in for the MuJoCo module where the page's code asks it for names
 // (inspect.js, teleop.js, main.js buildVisual): models made here carry them.
@@ -67,9 +58,7 @@ export class NetClient {
   connect() {
     clearTimeout(this.retry);
     this.retry = null;
-    const url = new URL('ws', location.href);
-    url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
-    const ws = this.ws = new WebSocket(url);
+    const ws = this.ws = new WebSocket(wsUrl());
     ws.binaryType = 'arraybuffer';
     ws.onopen = () => {
       if (ws !== this.ws) return;
@@ -243,7 +232,7 @@ const ARRAY_TYPES = { f4: Float32Array, f8: Float64Array, i4: Int32Array, u1: Ui
 // the fields main.js buildVisual reads, plus the kinematic tree; `images`
 // maps texture names to image paths under public/ (like vfs.js).
 export async function loadRender(rel) {
-  const res = await fetch(`render?rel=${encodeURIComponent(rel)}`);
+  const res = await fetch(serverUrl('render', { rel }));
   if (!res.ok) throw new Error(`${rel}: ${(await res.text()) || `HTTP ${res.status}`}`);
   const buf = await res.arrayBuffer();
   const n = new DataView(buf).getUint32(0, true);

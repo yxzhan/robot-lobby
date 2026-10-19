@@ -34,6 +34,7 @@
 import { G1_MODELS, GrootController, loadGrootPolicy } from './groot.js';
 import { PlaygroundController, loadPlaygroundPolicy } from './playground.js';
 import { MicroduckController, loadMicroduckPolicy } from './microduck.js';
+import { dataUrl } from './endpoint.js';
 
 // onnxruntime-web, loaded on first use.
 let ort = null;
@@ -94,7 +95,7 @@ export const policyById = (id) => POLICIES.find((p) => p.id === id) ?? null;
 let installed = {};
 export async function loadPolicyIndex(index = 'policies.json') {
   try {
-    const res = await fetch(index);
+    const res = await fetch(dataUrl(index));
     if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
     installed = await res.json();
   } catch (err) {
@@ -113,7 +114,7 @@ export function loadPolicy(p, progress = () => {}) {
   if (!isInstalled(p)) return Promise.reject(new Error(`${POLICY_ROOT}/${p.dir}/ is not installed`));
   if (!loaded.has(p.id)) {
     progress(`loading ${p.name}…`);
-    const file = (name) => `${POLICY_ROOT}/${p.dir}/${name}`;
+    const file = (name) => dataUrl(`${POLICY_ROOT}/${p.dir}/${name}`);
     loaded.set(p.id, p.load(file).catch((err) => { loaded.delete(p.id); throw err; }));
   }
   return loaded.get(p.id);

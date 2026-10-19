@@ -1,0 +1,12 @@
+# What postBuild downloads into the checkout besides mujoco_menagerie (cloned)
+# and the scenes of scripts/basic_scenes.py (generated): one per line,
+#   <url> <directory>
+# an archive (.tar.gz, .tgz, .tar, .zip) is unpacked into <directory>, any
+# other file saved in it. scripts/pack_library.py packs the parts of a local
+# library that cannot be fetched otherwise (digital_twin, robocasa, your own
+# policies) for uploading, e.g. as GitHub release assets, and prints these
+# lines.
+
+# GR00T walking policies for the G1 (README: Walking G1)
+https://huggingface.co/nepyope/GR00T-WholeBodyControl_g1/resolve/main/GR00T-WholeBodyControl-Balance.onnx pretrained_policies/GR00T-WholeBodyControl_g1
+https://huggingface.co/nepyope/GR00T-WholeBodyControl_g1/resolve/main/GR00T-WholeBodyControl-Walk.onnx pretrained_policies/GR00T-WholeBodyControl_g1

@@ -1,0 +1,16 @@
+{
+  "_comment": "What scripts/build_pages.mjs puts on the static site (GitHub Pages) besides the page itself: model directories under mjcf_assets/, policy directories under pretrained_policies/, and the Binder repository the Server panel starts sessions of (repo null: this checkout's GitHub remote and branch).",
+  "models": [
+    "robots/mujoco_menagerie/unitree_go2",
+    "robots/mujoco_menagerie/boston_dynamics_spot",
+    "robots/mujoco_menagerie/franka_emika_panda",
+    "robots/mujoco_menagerie/unitree_g1",
+    "robots/digital_twin/microduck",
+    "robots/digital_twin/garmi",
+    "environments/custom",
+    "objects/digital_twin",
+    "objects/robocasa/banana"
+  ],
+  "policies": ["GR00T-WholeBodyControl_g1", "playground_go2", "playground_spot", "microduck_rl"],
+  "binder": { "hub": "https://mybinder.org", "repo": null, "path": "mujoco/" }
+}

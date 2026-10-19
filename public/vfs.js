@@ -28,10 +28,11 @@ function exists(mujoco, path) {
   return mujoco.FS.analyzePath(path).exists;
 }
 
-// A source maps a relative path to its bytes (rejecting if it does not exist).
-export function urlSource(baseUrl) {
+// A source maps a relative path to its bytes (rejecting if it does not exist);
+// `toUrl` maps it to the URL to fetch.
+export function urlSource(toUrl) {
   return async (rel) => {
-    const res = await fetch(`${baseUrl}/${rel}`);
+    const res = await fetch(toUrl(rel));
     if (!res.ok) throw new Error(`${rel}: HTTP ${res.status}`);
     return new Uint8Array(await res.arrayBuffer());
   };

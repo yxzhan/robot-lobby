@@ -16,6 +16,8 @@
 // takes the item out; the panel fades while it is dragged, so it can be
 // dropped on the floor behind it.
 
+import { dataUrl } from './endpoint.js';
+
 export const CATEGORIES = [['environment', 'Environments'], ['robot', 'Robots'], ['object', 'Objects']];
 const TABS = [['recent', 'Recent'], ...CATEGORIES];
 const RECENT_STORE = 'mujoco-filament/recent';
@@ -43,13 +45,13 @@ export async function loadRecent(index = 'recent.json') {
 // The library index; `rel` is the file to spawn, relative to public/.
 export async function loadAssets(index = 'assets.json') {
   try {
-    const res = await fetch(index);
+    const res = await fetch(dataUrl(index));
     if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
     return (await res.json()).map((m) => ({
       name: m.name, rel: `${m.dir}/${m.main}`, lib: m.source, category: m.category, group: m.group ?? null,
       // Written by scripts/thumbnails.py, also for a <name>.png the index has
       // not seen yet; a missing one falls back to initials (img.onerror).
-      thumb: thumbPath(m),
+      thumb: dataUrl(thumbPath(m)),
     }));
   } catch (err) {
     console.warn(`no asset index (${index}): run node scripts/vendor.mjs`, err);

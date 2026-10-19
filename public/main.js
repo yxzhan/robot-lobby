@@ -28,10 +28,12 @@ import { IkController } from './ik.js';
 import { applyOptions, geomOverrides, geomSignature, injectGeomDefaults, loadPhysics, needsRebuild, savePhysics } from './physics.js';
 import { WorldPanel } from './worldpanel.js';
 import { RenderPanel, loadQuality } from './render.js';
+import { ServerPanel } from './serverpanel.js';
 import { MARKER } from './marker.js';
 import { CHAIN_COLORS } from './teleop.js';
 import Stats from './vendor/stats/Stats.js';
-import { NET_MUJOCO, NetClient, findServer, loadRender, worldData, worldModel } from './net.js';
+import { NET_MUJOCO, NetClient, loadRender, worldData, worldModel } from './net.js';
+import { dataUrl, problem, server } from './endpoint.js';
 import { RemoteBase, RemoteIk, RemotePolicy } from './remote.js';
 
 // Filament.init() replaces the global with the loaded module, so re-read it after init.
@@ -1375,13 +1377,14 @@ try {
   // The model library index written by scripts/vendor.mjs (empty without
   // mjcf_assets/).
   const [assets, recent] = await Promise.all([loadAssets(), loadRecent(), loadPolicyIndex()]);
+  new ServerPanel(app, document.getElementById('server'), { models: assets.length });
 
   // Asset paths (`rel`) are under public/:
   // 'mjcf_assets/<category>/<source>/<model>/<file>.xml'.
   // Every rebuild writes the robots' files into a fresh MuJoCo FS, so keep
   // them in memory.
   const fetched = new Map();
-  const publicUrl = urlSource('.');
+  const publicUrl = urlSource(dataUrl);
   const models = (rel) => {
     if (!fetched.has(rel)) {
       const bytes = publicUrl(rel);
@@ -2154,8 +2157,7 @@ try {
     };
   }
 
-  // Network mode (served by server/server.py): the world is the server's.
-  const server = await findServer();
+  // Network mode (a server/server.py, endpoint.js): the world is the server's.
   if (server) {
     // Lost the server: a banner counting down to the next try (net.js keeps
     // trying; on reconnecting the server sends its world again).
@@ -2216,12 +2218,12 @@ try {
       connected: () => offline(null),
     });
     await app.net.opened;
-    console.log(`network mode: ${server.server}, MuJoCo ${server.mujoco}`);
+    console.log(`network mode: ${server.info.server}, MuJoCo ${server.info.mujoco}, at ${server.base}`);
     app.world.render();
     app.panel.showSaved(savedStage());
   } else {
     await rebuild([]);
-    status.textContent = hint();
+    status.textContent = problem ? `${problem}: running locally (Server panel)` : hint();
     const stage = savedStage();
     app.panel.showSaved(stage);
     if (stage?.items?.length) {
