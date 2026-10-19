@@ -43,7 +43,8 @@ export function goalCommand(pose, goal, drive, state) {
   const c = Math.cos(pose.yaw), s = Math.sin(pose.yaw);
   const dx = c * dxw + s * dyw, dy = -s * dxw + c * dyw;  // the goal in the robot's frame
   const dist = Math.hypot(dx, dy), dyaw = wrap(goal.yaw - pose.yaw);
-  if (dist > 2 * tolPos) state.phase = 'drive';
+  // A new goal starts driving (also one at the robot's feet: a turn in place).
+  if (dist > 2 * tolPos || !state.phase) state.phase = 'drive';
   else if (state.phase === 'drive' && dist < tolPos) state.phase = 'turn';
   if (state.phase === 'turn' && Math.abs(dyaw) < tolYaw) state.phase = 'arrived';
   if (state.phase === 'arrived' && Math.abs(dyaw) > 2 * tolYaw) state.phase = 'turn';

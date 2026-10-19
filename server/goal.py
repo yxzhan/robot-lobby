@@ -43,7 +43,8 @@ def goal_command(pose, goal, drive, state):
   c, s = math.cos(pose['yaw']), math.sin(pose['yaw'])
   dx, dy = c * dxw + s * dyw, -s * dxw + c * dyw  # the goal in the robot's frame
   dist, dyaw = math.hypot(dx, dy), wrap(goal['yaw'] - pose['yaw'])
-  if dist > 2 * tol_pos:
+  # A new goal starts driving (also one at the robot's feet: a turn in place).
+  if dist > 2 * tol_pos or not state.get('phase'):
     state['phase'] = 'drive'
   elif state.get('phase') == 'drive' and dist < tol_pos:
     state['phase'] = 'turn'
