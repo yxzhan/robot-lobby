@@ -1,7 +1,7 @@
 // Trained policies a robot can run as its "Policy" controller (Teleop
 // panel). Their files live in pretrained_policies/<dir>/ (one checkout per
 // model), which scripts/vendor.mjs links as public/pretrained_policies and
-// lists in public/policies.json. Add a model by putting its directory there
+// lists in public/json/policies.json. Add a model by putting its directory there
 // and adding an entry to POLICIES:
 //
 //   id          stable key, saved in the robot's controller choice
@@ -40,7 +40,7 @@ import { dataUrl } from './endpoint.js';
 let ort = null;
 export function onnxRuntime() {
   ort ??= (async () => {
-    const m = await import('./vendor/onnxruntime/ort.wasm.min.mjs');
+    const m = await import('../vendor/onnxruntime/ort.wasm.min.mjs');
     m.env.wasm.wasmPaths = new URL('vendor/onnxruntime/', location.href).href;
     m.env.wasm.numThreads = 1;  // tiny MLPs; threads would need cross-origin isolation
     return m;
@@ -91,9 +91,9 @@ export const POLICY_ROOT = 'pretrained_policies';
 
 export const policyById = (id) => POLICIES.find((p) => p.id === id) ?? null;
 
-// The installed policy directories ({dir: [files]}), from public/policies.json.
+// The installed policy directories ({dir: [files]}), from public/json/policies.json.
 let installed = {};
-export async function loadPolicyIndex(index = 'policies.json') {
+export async function loadPolicyIndex(index = 'json/policies.json') {
   try {
     const res = await fetch(dataUrl(index));
     if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);

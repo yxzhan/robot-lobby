@@ -13,7 +13,7 @@
 // never shrinks, and MjSpec.delete() does not give back what a compile used:
 // dropping the whole instance is the only way to get that memory back.
 
-import loadMujoco from './vendor/mujoco/mujoco.js';
+import loadMujoco from '../vendor/mujoco/mujoco.js';
 import { loadModelFiles, readFirst, urlSource } from './vfs.js';
 import { bodyInertia, compileWorld, firstKey, referencedNames } from './world.js';
 import { CONTROL_DT } from './groot.js';
@@ -32,7 +32,7 @@ import { ServerPanel } from './serverpanel.js';
 import { SharePanel } from './share.js';
 import { MARKER } from './marker.js';
 import { CHAIN_COLORS } from './teleop.js';
-import Stats from './vendor/stats/Stats.js';
+import Stats from '../vendor/stats/Stats.js';
 import { NET_MUJOCO, NetClient, loadRender, worldData, worldModel } from './net.js';
 import { dataUrl, problem, server } from './endpoint.js';
 import { RemoteBase, RemoteIk, RemotePolicy } from './remote.js';

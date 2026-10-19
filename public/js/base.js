@@ -28,7 +28,7 @@ import { CONTROL_DT } from './groot.js';
 // feedforward. Stretch 3's wheel velocity servos chatter (the left one flips
 // ±2.3 rad/s every step, in MuJoCo too), so its wheels run on software
 // servos.
-export const BASE_DEFAULTS = await fetch(new URL('./base_defaults.json', import.meta.url)).then((r) => r.json()).catch(() => ({}));
+export const BASE_DEFAULTS = await fetch(new URL('../json/base_defaults.json', import.meta.url)).then((r) => r.json()).catch(() => ({}));
 
 export const KINDS = [['', 'none'], ['wheels', 'wheels (differential, skid, mecanum)'], ['planar', 'planar joints (x, y, yaw)']];
 const STORE = 'mujoco-filament/base/';

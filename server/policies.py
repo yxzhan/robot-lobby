@@ -1,13 +1,13 @@
-"""Trained policies on the server: the ones of public/policy.js's POLICIES
+"""Trained policies on the server: the ones of public/js/policy.js's POLICIES
 that have a port here (same ids, so the Teleop panel's choice carries
 over), running on onnxruntime. A policy controller has the interface
 policy.js describes (bind, unbind, owns, pose, reset, step; locomotion ones
 also cmd, drive, height), with a synchronous step.
 
-GrootController is a port of public/groot.js (see there for the
+GrootController is a port of public/js/groot.js (see there for the
 observation, the two MLPs and the PD gains); PlaygroundController of
-public/playground.js (policies from training/: policy.onnx + policy.json);
-MicroduckController and BamServos of public/microduck.js (microduck_rl's
+public/js/playground.js (policies from training/: policy.onnx + policy.json);
+MicroduckController and BamServos of public/js/microduck.js (microduck_rl's
 policies on the BAM servo model: scripts/export_microduck.py).
 """
 
@@ -143,7 +143,7 @@ def load_groot(directory):
 
 def drive_of(r, low=None):
   """Key speeds a bit inside the trained command ranges, and the dead band
-  (minSpeed / minTurn: the goal marker's least command, public/goal.js)."""
+  (minSpeed / minTurn: the goal marker's least command, public/js/goal.js)."""
   top = lambda v: round(0.8 * abs(v), 2)
   d = {'forward': top(r['lin_vel_x'][1]), 'back': top(r['lin_vel_x'][0]),
        'side': min(top(r['lin_vel_y'][0]), top(r['lin_vel_y'][1])),
@@ -154,7 +154,7 @@ def drive_of(r, low=None):
 
 
 class PlaygroundController:
-  """See public/playground.js: position servos get the trained gains, torque
+  """See public/js/playground.js: position servos get the trained gains, torque
   motors the trained servo's torque every physics step (substep); sensor
   values are the forward pass's at the start of the last step, in the imu
   site's frame (the root body's without one)."""
@@ -304,7 +304,7 @@ def load_playground(directory):
 
 
 class BamServos:
-  """XL330 servos as BAM models them (see public/microduck.js): the firmware's
+  """XL330 servos as BAM models them (see public/js/microduck.js): the firmware's
   P loop gives a duty cycle, the DC motor a torque, and the M6 friction budget
   goes into the joints' friction loss and damping, where MuJoCo's solver
   applies it. update() runs before every physics step."""
@@ -344,7 +344,7 @@ class BamServos:
 
 
 class MicroduckController:
-  """See public/microduck.js: the microduck_rl walking policy on the BAM
+  """See public/js/microduck.js: the microduck_rl walking policy on the BAM
   servo model."""
 
   def __init__(self, policy, prefix, name='Microduck walking policy'):

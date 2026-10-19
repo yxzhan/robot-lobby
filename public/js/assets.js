@@ -1,11 +1,11 @@
-// The asset panel: the models of the library index (public/assets.json,
+// The asset panel: the models of the library index (public/json/assets.json,
 // written by scripts/vendor.mjs from mjcf_assets/) under the tabs recent /
 // environments / robots / objects, with a name filter; within a tab, models
 // are listed under foldable group headers (their source, or menagerie's
 // README sections), in the index's order.
 // Recent (the default tab) lists the last MAX_RECENT models spawned from the
 // panel, newest first, kept in this browser's localStorage; a browser
-// without one starts from public/recent.json (a list of `rel`s, edited by
+// without one starts from public/json/recent.json (a list of `rel`s, edited by
 // hand).
 // An item is spawned by dragging it onto the floor: while dragging, a marker
 // on the floor shows the spawn point and heading, which starts out along the
@@ -25,7 +25,7 @@ const MAX_RECENT = 30;
 
 // The recently spawned models' `rel`s, newest first: this browser's, else
 // the default list.
-export async function loadRecent(index = 'recent.json') {
+export async function loadRecent(index = 'json/recent.json') {
   try {
     const saved = JSON.parse(localStorage.getItem(RECENT_STORE) ?? 'null');
     if (Array.isArray(saved)) return saved;
@@ -43,7 +43,7 @@ export async function loadRecent(index = 'recent.json') {
 }
 
 // The library index; `rel` is the file to spawn, relative to public/.
-export async function loadAssets(index = 'assets.json') {
+export async function loadAssets(index = 'json/assets.json') {
   try {
     const res = await fetch(dataUrl(index));
     if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);

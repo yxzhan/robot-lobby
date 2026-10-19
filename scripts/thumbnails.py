@@ -1,9 +1,9 @@
 """Compresses each asset's screenshot into a small WebP thumbnail for the
 asset panel: public/thumbs/<category>/<source>/<model>.webp (thumbPath in
-public/assets.js), at most WIDTH x HEIGHT, aspect kept. The originals are
+public/js/assets.js), at most WIDTH x HEIGHT, aspect kept. The originals are
 not touched.
 
-Reads the library index written by scripts/vendor.mjs (public/assets.json,
+Reads the library index written by scripts/vendor.mjs (public/json/assets.json,
 whose `screenshot` names the image in the model's `dir`), so run that first.
 A model the index has no screenshot for still gets one from `<dir>/<name>.png`
 (the naming convention) if that image was added after indexing; models with
@@ -25,7 +25,7 @@ QUALITY = 80
 def main():
   total_in = total_out = made = 0
   missing = []
-  index = PUBLIC / 'assets.json'
+  index = PUBLIC / 'json' / 'assets.json'
   if not index.exists():
     raise SystemExit(f'no {index}: run node scripts/vendor.mjs first')
   for model in json.loads(index.read_text()):

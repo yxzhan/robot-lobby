@@ -4,7 +4,7 @@
 // with its whole model library.
 //
 // A server is joined by its URL, or started on Binder from here when the
-// page knows a Binder repository for it (deploy.json, written by
+// page knows a Binder repository for it (json/deploy.json, written by
 // scripts/build_pages.mjs):
 //   {"binder": {"hub": "https://mybinder.org", "repo": "gh/<owner>/<repo>/<ref>", "path": "robot-lobby/"}}
 // BinderHub's build API reports the build and launch as server-sent events
@@ -22,7 +22,7 @@ const el = (tag, props = {}, ...children) => {
 
 async function loadDeploy() {
   try {
-    const res = await fetch('deploy.json', { cache: 'no-store' });
+    const res = await fetch('json/deploy.json', { cache: 'no-store' });
     return res.ok ? await res.json() : {};
   } catch {
     return {};

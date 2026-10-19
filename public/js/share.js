@@ -131,7 +131,7 @@ export class SharePanel {
     b.append(el('div', { className: 'pair' },
       el('div', { className: 'hint' }, 'On the other device open ', link, ' and enter'), code, qr, note));
     if (p) {
-      import('./vendor/qrcode/qrcode.mjs').then(({ default: qrcode }) => {
+      import('../vendor/qrcode/qrcode.mjs').then(({ default: qrcode }) => {
         const q = qrcode(0, 'M');
         q.addData(codeLink(service, p.code));
         q.make();

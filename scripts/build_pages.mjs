@@ -3,7 +3,7 @@
 // policies that pages.json names, with their slice of assets.json,
 // policies.json and the thumbnails. The page runs locally on those; its
 // Server panel joins a server (server/server.py, e.g. on Binder) for the
-// whole library and a shared world (public/endpoint.js).
+// whole library and a shared world (public/js/endpoint.js).
 //
 //   node scripts/vendor.mjs && python3 scripts/thumbnails.py   # public/ up to date
 //   node scripts/build_pages.mjs [--out dist] [--binder gh/<owner>/<repo>/<ref>] [--hub https://mybinder.org]
@@ -15,7 +15,7 @@
 // Pages takes files up to 100 MB and sites up to about 1 GB: both are
 // checked.
 //
-// deploy.json tells the Server panel which Binder repository to start:
+// json/deploy.json tells the Server panel which Binder repository to start:
 // pages.json's binder, its repo by default this checkout's GitHub remote and
 // branch.
 import { execFileSync } from 'node:child_process';
@@ -33,24 +33,25 @@ const out = opt('out', 'dist');
 const config = JSON.parse(readFileSync('pages.json', 'utf8'));
 const git = (...a) => execFileSync('git', a, { encoding: 'utf8' }).trim();
 
-for (const f of ['public/assets.json', 'public/policies.json', 'public/vendor']) {
+for (const f of ['public/json/assets.json', 'public/json/policies.json', 'public/vendor']) {
   if (!existsSync(f)) throw new Error(`no ${f}: run node scripts/vendor.mjs first`);
 }
 rmSync(out, { recursive: true, force: true });
 mkdirSync(out, { recursive: true });
 
-// The page: public/ but for the library, its index and the thumbnails,
+// The page: public/ but for the library, its indexes and the thumbnails,
 // which follow in their pages.json slice.
-const LIBRARY = ['mjcf_assets', 'pretrained_policies', 'thumbs', 'assets.json', 'policies.json'];
-for (const f of readdirSync('public')) {
-  if (!LIBRARY.includes(f)) cpSync(join('public', f), join(out, f), { recursive: true, dereference: true });
-}
+const LIBRARY = ['mjcf_assets', 'pretrained_policies', 'thumbs', 'json/assets.json', 'json/policies.json', 'json/deploy.json'];
+cpSync('public', out, {
+  recursive: true, dereference: true,
+  filter: (src) => !LIBRARY.includes(src.slice('public/'.length)),
+});
 
 // The models: whole directories (a menagerie directory holds several), but
 // not the screenshots thumbnails.py made the thumbnails from.
 const picked = config.models.map((d) => `mjcf_assets/${d.replace(/\/$/, '')}`);
 const isPicked = (dir) => picked.some((p) => dir === p || dir.startsWith(`${p}/`));
-const assets = JSON.parse(readFileSync('public/assets.json', 'utf8')).filter((m) => isPicked(m.dir));
+const assets = JSON.parse(readFileSync('public/json/assets.json', 'utf8')).filter((m) => isPicked(m.dir));
 for (const p of picked) if (!existsSync(p)) throw new Error(`pages.json: no ${p}`);
 const screenshots = new Set(assets.filter((m) => m.screenshot).map((m) => join(m.dir, m.screenshot)));
 for (const p of picked) {
@@ -59,10 +60,10 @@ for (const p of picked) {
     filter: (src) => !src.split('/').includes('.git') && !screenshots.has(src),
   });
 }
-writeFileSync(join(out, 'assets.json'), JSON.stringify(assets, null, 1));
+writeFileSync(join(out, 'json', 'assets.json'), JSON.stringify(assets, null, 1));
 let thumbs = 0;
 for (const m of assets) {
-  const t = `thumbs/${m.category}/${m.source}/${m.name}.webp`;  // thumbPath in public/assets.js
+  const t = `thumbs/${m.category}/${m.source}/${m.name}.webp`;  // thumbPath in public/js/assets.js
   if (!existsSync(`public/${t}`)) continue;
   mkdirSync(dirname(join(out, t)), { recursive: true });
   cpSync(`public/${t}`, join(out, t));
@@ -70,7 +71,7 @@ for (const m of assets) {
 }
 
 // The policies.
-const installed = JSON.parse(readFileSync('public/policies.json', 'utf8'));
+const installed = JSON.parse(readFileSync('public/json/policies.json', 'utf8'));
 const policies = Object.fromEntries(config.policies.filter((p) => {
   if (!installed[p]) console.warn(`pages.json: policy ${p} is not installed, left out`);
   return installed[p];
@@ -81,7 +82,7 @@ for (const [p, files] of Object.entries(policies)) {
     cpSync(join('pretrained_policies', p, f), join(out, 'pretrained_policies', p, f), { dereference: true });
   }
 }
-writeFileSync(join(out, 'policies.json'), JSON.stringify(policies, null, 1));
+writeFileSync(join(out, 'json', 'policies.json'), JSON.stringify(policies, null, 1));
 
 // The Binder repository for the Server panel: gh/<owner>/<repo>/<branch>.
 function githubRepo() {
@@ -94,7 +95,7 @@ function githubRepo() {
   }
 }
 const binder = { ...config.binder, repo: opt('binder') ?? config.binder?.repo ?? githubRepo(), hub: opt('hub') ?? config.binder?.hub };
-if (binder.repo) writeFileSync(join(out, 'deploy.json'), JSON.stringify({ binder }, null, 1));
+if (binder.repo) writeFileSync(join(out, 'json', 'deploy.json'), JSON.stringify({ binder }, null, 1));
 else console.warn('no Binder repository (no GitHub remote, no --binder): the Server panel can only join a server by its URL');
 writeFileSync(join(out, '.nojekyll'), '');  // serve files as they are
 

@@ -13,7 +13,7 @@
 //   the page's own  when it answers /server.json (server.py serves the page)
 // With none the page runs MuJoCo itself on the files next to it.
 //
-// With a server every data file (assets.json, thumbnails, mjcf_assets/,
+// With a server every data file (json/assets.json, thumbnails, mjcf_assets/,
 // pretrained_policies/) comes from it: dataUrl.
 
 const STORE = 'mujoco-filament/server';
@@ -78,7 +78,7 @@ if (!params.has('local')) {
   }
 }
 
-// A data file (`rel` relative to public/, as in assets.json) as a URL.
+// A data file (`rel` relative to public/, as in json/assets.json) as a URL.
 export function dataUrl(rel) {
   return server ? withToken(new URL(rel, server.base), server.token).href : rel;
 }

@@ -2,7 +2,7 @@
 (github.com/pollen-robotics/microduck_rl) for the viewer:
 
   pretrained_policies/microduck_rl/walk.onnx    Mjlab-Velocity-Flat-MicroDuck
-  pretrained_policies/microduck_rl/policy.json  what public/microduck.js and
+  pretrained_policies/microduck_rl/policy.json  what public/js/microduck.js and
                                                 server/policies.py need
 
 The ONNX file comes from the clone's own scripts/export.py (observation
@@ -14,7 +14,7 @@ runs in place of the model's position actuators.
 
     cd microduck_rl
     uv run python ../scripts/export_microduck.py --walk logs/rsl_rl/velocity/<run>/model_4999.pt
-    cd .. && node scripts/vendor.mjs   # re-index public/policies.json
+    cd .. && node scripts/vendor.mjs   # re-index public/json/policies.json
 
 Without --walk the ONNX is kept and only policy.json is rewritten.
 """

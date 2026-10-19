@@ -7,7 +7,7 @@ const copies = {
   'node_modules/@mujoco/mujoco/mujoco.wasm': 'public/vendor/mujoco/mujoco.wasm',
   'node_modules/filament/filament.js': 'public/vendor/filament/filament.js',
   'node_modules/filament/filament.wasm': 'public/vendor/filament/filament.wasm',
-  // onnxruntime-web, WASM backend only (runs the ONNX policies, public/policy.js).
+  // onnxruntime-web, WASM backend only (runs the ONNX policies, public/js/policy.js).
   'node_modules/onnxruntime-web/dist/ort.wasm.min.mjs': 'public/vendor/onnxruntime/ort.wasm.min.mjs',
   'node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.mjs': 'public/vendor/onnxruntime/ort-wasm-simd-threaded.mjs',
   'node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.wasm': 'public/vendor/onnxruntime/ort-wasm-simd-threaded.wasm',
@@ -24,7 +24,7 @@ console.log('vendored', Object.keys(copies).length, 'files into public/vendor');
 
 // The model library: mjcf_assets/<category>/<source>/<model>/, exposed as
 // public/mjcf_assets (symlink; the server follows it) and indexed into
-// public/assets.json for the asset panel. <category> is the panel tab
+// public/json/assets.json for the asset panel. <category> is the panel tab
 // (environments, robots, objects); <source> where the models come from
 // (digital_twin, mujoco_menagerie, robocasa, …).
 //
@@ -154,7 +154,7 @@ function indexLibrary() {
   const linked = !existsSync(LIBRARY) && existsSync(link);
   if (!existsSync(LIBRARY) && !linked) {
     console.warn(`no ${LIBRARY}/: the asset panel will be empty`);
-    writeFileSync('public/assets.json', '[]');
+    writeFileSync('public/json/assets.json', '[]');
     return;
   }
   if (!existsSync(link) && !lstatSync(link, { throwIfNoEntry: false })) symlinkSync(`../${LIBRARY}`, link);
@@ -182,18 +182,18 @@ function indexLibrary() {
   models.sort((a, b) => a.rank.reduce((c, v, k) => c || cmp(v, b.rank[k]), 0));
   for (const m of models) delete m.rank;
   if (linked) process.chdir('..');
-  writeFileSync('public/assets.json', JSON.stringify(models, null, 1));
+  writeFileSync('public/json/assets.json', JSON.stringify(models, null, 1));
   const count = {};
   for (const m of models) count[`${m.category}/${m.source}`] = (count[`${m.category}/${m.source}`] ?? 0) + 1;
-  console.log('indexed', models.length, `models of ${LIBRARY}/ into public/assets.json:`, count);
+  console.log('indexed', models.length, `models of ${LIBRARY}/ into public/json/assets.json:`, count);
 }
 indexLibrary();
 
 // Pretrained policies: pretrained_policies/<name>/ (one checkout per model,
 // e.g. git clone https://huggingface.co/nepyope/GR00T-WholeBodyControl_g1),
 // exposed as public/pretrained_policies (symlink) and listed in
-// public/policies.json ({<name>: [its files]}) so the page knows which of
-// the policies it registers (POLICIES in public/policy.js) are installed.
+// public/json/policies.json ({<name>: [its files]}) so the page knows which of
+// the policies it registers (POLICIES in public/js/policy.js) are installed.
 const POLICY_DIR = 'pretrained_policies';
 function indexPolicies() {
   const stale = lstatSync('public/groot', { throwIfNoEntry: false });  // the old single-policy link
@@ -209,7 +209,7 @@ function indexPolicies() {
   } else {
     console.warn(`no ${POLICY_DIR}/: no policy can run`);
   }
-  writeFileSync('public/policies.json', JSON.stringify(index, null, 1));
-  console.log('indexed', Object.keys(index).length, `policies of ${POLICY_DIR}/ into public/policies.json:`, Object.keys(index));
+  writeFileSync('public/json/policies.json', JSON.stringify(index, null, 1));
+  console.log('indexed', Object.keys(index).length, `policies of ${POLICY_DIR}/ into public/json/policies.json:`, Object.keys(index));
 }
 indexPolicies();

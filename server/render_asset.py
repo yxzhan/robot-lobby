@@ -1,6 +1,6 @@
 """What a browser needs to draw a model file without compiling it: the
 visible geoms with their materials, textures and meshes, and the kinematic
-tree (to place bodies from qpos itself, public/net.js forwardKinematics).
+tree (to place bodies from qpos itself, public/js/net.js forwardKinematics).
 
 Arrays keep the names (and dtypes) of the compiled MjModel's fields, so the
 page builds its Filament parts with the same code as from a WASM model

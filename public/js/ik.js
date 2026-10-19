@@ -38,7 +38,7 @@ import { CONTROL_DT } from './groot.js';
 // server, server/ik.py). Garmi and the Panda put the Franka TCP 0.1034 m past
 // the hand flange, between the fingertips (panda.xml has no TCP site; only
 // mjx_panda.xml's "gripper", 0.1 m out).
-export const IK_DEFAULTS = await fetch(new URL('./ik_defaults.json', import.meta.url)).then((r) => r.json()).catch(() => ({}));
+export const IK_DEFAULTS = await fetch(new URL('../json/ik_defaults.json', import.meta.url)).then((r) => r.json()).catch(() => ({}));
 
 const STORE = 'mujoco-filament/ik/';
 const MIN_CHAIN = 3;  // fewest joints for an automatic chain (a 2-joint head is left alone)

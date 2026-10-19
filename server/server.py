@@ -7,7 +7,7 @@ It serves public/ (like scripts/serve.py, Cache-Control: no-store), the
 render data of each model file at /render?rel=… (render_asset.py) and a
 WebSocket at /ws, and a small HTTP API for scripts (GET /api/robots, POST
 /api/goal: goal markers, see api_goal). The page sees /server.json and switches to network mode
-(public/net.js): it loads no MuJoCo at all. It draws each model from its
+(public/js/net.js): it loads no MuJoCo at all. It draws each model from its
 render data and places its bodies from the qpos / mocap state broadcast
 here (its own forward kinematics); picking and everything else that needs
 the model are requests to this server.
@@ -589,7 +589,7 @@ class World:
       raise ValueError(f'unknown op {op!r}')
 
   async def controller_op(self, ws, op, r, msg):
-    """Teleop panel requests for robot `r` (public/remote.js)."""
+    """Teleop panel requests for robot `r` (public/js/remote.js)."""
     if not r.key:
       raise ValueError(f'{r.label} has no controllers')
     ik, base, d = r.ik, r.base, self.data

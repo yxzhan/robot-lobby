@@ -35,7 +35,7 @@ function findChrome() {
   throw new Error('no Chrome found: set CHROME=/path/to/chrome');
 }
 
-const index = 'public/assets.json';
+const index = 'public/json/assets.json';
 if (!existsSync(index)) throw new Error(`no ${index}: run node scripts/vendor.mjs`);
 const todo = [];
 for (const m of JSON.parse(readFileSync(index, 'utf8'))) {

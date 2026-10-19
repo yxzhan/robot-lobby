@@ -17,17 +17,17 @@ npm start        # python3 scripts/serve.py 4000: public/ with Cache-Control: no
 Open http://localhost:4000 (in JupyterHub: `.../user/<name>/proxy/4000/` — all
 URLs are relative, so the path proxy works). Left-drag orbits, right-drag pans,
 wheel zooms. The gizmo in the bottom-left corner shows the world axes (Z up);
-click an axis to look along it (`public/gizmo.js`); the same colored axes
+click an axis to look along it (`public/js/gizmo.js`); the same colored axes
 (30 cm) mark the world origin on the floor. The meter in the
 bottom-right corner is stats.js: click it to cycle FPS / ms per frame / MB.
 
 ## Spawning robots
 
-The scene starts as an empty floor (`BASE_XML` in `public/world.js`). The
+The scene starts as an empty floor (`BASE_XML` in `public/js/world.js`). The
 Assets panel lists every model under three tabs — Environments, Robots,
-Objects (`public/assets.js`) — after a **Recent** tab (the default): the
+Objects (`public/js/assets.js`) — after a **Recent** tab (the default): the
 last 30 models spawned from the panel, newest first, kept in the browser's
-localStorage; a browser without that list starts from `public/recent.json`
+localStorage; a browser without that list starts from `public/json/recent.json`
 (model files relative to `public/`, edited by hand). Drag one onto the
 floor to spawn it there. While
 dragging, a marker on the floor shows the spawn point and heading (the model's
@@ -53,7 +53,7 @@ floor to deselect) and Shift+drag to pull it with a spring
 on `xfrc_applied`. The Stage panel lists everything spawned, each with its
 joint positions (settable while paused), actuator controls, a Reset button
 (back to its spawn pose, at rest, while the rest keeps going) and a remove
-button (`public/inspect.js`). Its **Pose** section places it: position (m)
+button (`public/js/inspect.js`). Its **Pose** section places it: position (m)
 and roll / pitch / yaw (deg) of its root. On a free joint that is its
 qpos, set at once with no rebuild (Reset and a saved stage then use the new
 pose); a fixed base (an arm, an environment) is placed by its attach frame,
@@ -106,7 +106,7 @@ Picking uses `mj_ray` on the physics world, so it hits collision geoms.
 - **Loading** — Spawning fetches only the files it
   references — the `<include>` tree, then the mesh/texture/hfield/skin files
   resolved via `<compiler meshdir/texturedir/assetdir>` — into MuJoCo's
-  in-memory filesystem (`public/vfs.js`).
+  in-memory filesystem (`public/js/vfs.js`).
 
 A compiled `MjModel` cannot grow, so each spawn rebuilds the world: parse
 `BASE_XML` into an `MjSpec`, `mjs_attach` every robot's spec under a frame at
@@ -165,7 +165,7 @@ drawn.
 
 ## World physics
 
-The World panel (`public/worldpanel.js`, settings in `public/physics.js`,
+The World panel (`public/js/worldpanel.js`, settings in `public/js/physics.js`,
 saved in this browser) sets MuJoCo's global options and default geom
 properties:
 - **Gravity, wind, magnetic field, medium density and viscosity,
@@ -197,7 +197,7 @@ properties:
 
 ## Render panel
 
-The Render panel (`public/render.js`, hidden by default, saved in this
+The Render panel (`public/js/render.js`, hidden by default, saved in this
 browser) trades drawing quality for GPU load, applied at once: **Preset**
 (High, Medium (the default; Low on a phone or tablet), Low, Ultra low; Custom once a field differs),
 **Resolution** (canvas pixels per CSS pixel, at most the screen's; the
@@ -213,7 +213,7 @@ occlusion settings too.
 
 ## Teleop panel and controllers
 
-The Teleop panel (`public/teleop.js`, open by default) picks which robot is
+The Teleop panel (`public/js/teleop.js`, open by default) picks which robot is
 driven (the newest by default, or the one double-clicked; double-clicking
 anything else releases it; the others get a zero command and stand or
 brake) and which of its controllers are on: **Policy**, **Base**, **IK**,
@@ -229,7 +229,7 @@ gets leg chains). Keyboard: **WASD** walk / drive, **QE** turn, hold
 into a text field are ignored); the sections fold.
 
 The **Input** select picks the keys or a **goal marker** (the default,
-`public/goal.js`): an orange ring with a heading arrow, like the spawn
+`public/js/goal.js`): an orange ring with a heading arrow, like the spawn
 marker, that sits under the driven robot until it is dragged along the
 floor (the mouse wheel or **Q**/**E** turn it while dragging, **Esc** puts
 it back; a label by the pointer shows its position and heading). It is
@@ -268,9 +268,9 @@ goal, as with the marker.
 Pretrained policies live in `pretrained_policies/<dir>/`, one checkout per
 model (not tracked by git). `npm install` (or `node scripts/vendor.mjs`)
 links the folder as `public/pretrained_policies` and lists what is there in
-`public/policies.json`; a registered policy whose directory is missing is
+`public/json/policies.json`; a registered policy whose directory is missing is
 shown as "not installed" and never switched on by default. Policies are
-registered in `POLICIES` (`public/policy.js`): each entry has an id, a
+registered in `POLICIES` (`public/js/policy.js`): each entry has an id, a
 name, its `dir`, the robot files it starts on for (`defaultFor`),
 `load(file)` for its weights (`file(name)` is the URL of a file in its
 directory; shared, loaded on first use; onnxruntime-web is there as
@@ -282,7 +282,7 @@ An entry's optional `physics` names World settings it needs (e.g.
 `{cone: 'elliptic', impratio: 100}`): the Policy section shows them when
 the world differs, with a button that applies them. The panel's Policy
 section picks the model; a hand or quadruped policy is one more entry.
-`public/torchscript.js` reads the tensors of a TorchScript `.pt` (a zip
+`public/js/torchscript.js` reads the tensors of a TorchScript `.pt` (a zip
 of raw storages) in the browser, so small exported MLPs/RNNs need no
 conversion.
 
@@ -291,7 +291,7 @@ conversion.
 If the GR00T locomotion policies are checked out into `pretrained_policies/`
 (`git clone https://huggingface.co/nepyope/GR00T-WholeBodyControl_g1
 pretrained_policies/GR00T-WholeBodyControl_g1`), they load the first time a
-robot runs the `groot-g1` policy. `public/groot.js` is a port of lerobot's
+robot runs the `groot-g1` policy. `public/js/groot.js` is a port of lerobot's
 `GrootLocomotionController` running on onnxruntime-web (WASM, one thread,
 ~0.2 ms per inference): two MLPs (Balance when the command is ~0, Walk
 otherwise) at 50 Hz on 6 stacked 86-D observations, driving legs and waist,
@@ -315,7 +315,7 @@ menagerie Spot (`boston_dynamics_spot/spot.xml`) and Go2
 `playground-go2` policy on. Playground has no Go2 task: `training/envs/go2.py`
 runs its Go1 task on a Go2 built from `go2.xml`; the Go2 policy walks
 without falling, the Spot one (Playground's own config) still tips over
-under quickly changing commands. `public/playground.js` (and `PlaygroundController` in
+under quickly changing commands. `public/js/playground.js` (and `PlaygroundController` in
 `server/policies.py`) runs any such policy from its `policy.json`: it writes
 the trained PD gains and joint damping / armature / friction loss into the
 robot, builds the observation (body gyro and up vector, joint positions,
@@ -337,7 +337,7 @@ starts with `microduck-walk` on (keys and goal marker).
 
 It was trained on the BAM model of the XL330 servos (firmware P loop,
 DC motor with back-EMF and battery sag, load-dependent friction), not on
-plain position actuators, and does not stand without it. `public/microduck.js`
+plain position actuators, and does not stand without it. `public/js/microduck.js`
 (and `MicroduckController` / `BamServos` in `server/policies.py`) turns the
 robot's position actuators into motors on bind, computes the servo torques
 and writes the friction budget into the joints before every physics step,
@@ -352,7 +352,7 @@ in microduck_rl's own CPU rehearsal (`scripts/infer_policy.py`).
 
 ## Mobile bases
 
-Every robot gets a `BaseController` (`public/base.js`), driven
+Every robot gets a `BaseController` (`public/js/base.js`), driven
 from the Teleop panel like the G1 (**WASD**, **QE**), with a PI loop on the
 floating base's measured twist (ground truth as odometry) and an
 acceleration limit on the command (a step to full speed tips a tall robot
@@ -395,8 +395,8 @@ and 1 rad/s tracked).
 ## IK chains
 
 Every robot under `mjcf_assets/robots/` gets an `IkController`
-(`public/ik.js`), on by default: IK chains whose targets are RViz-style
-interactive markers (`public/marker.js`, a fixed 0.15 m in the world):
+(`public/js/ik.js`), on by default: IK chains whose targets are RViz-style
+interactive markers (`public/js/marker.js`, a fixed 0.15 m in the world):
 drag an arrow to move the target along that axis, a ring to turn it about
 that axis, the center ball (colored by chain) to move it in the plane
 facing the camera. Axes are the target's own (red x, green y, blue z); the
@@ -512,7 +512,7 @@ npm run server   # python3 server/server.py 4007
 `server/server.py` steps one MuJoCo world in Python and serves `public/`
 too; every browser that opens it (http://localhost:4007, or through the
 JupyterHub proxy) sees and changes the same world. The page notices the
-server (`server.json`) and switches to network mode (`public/net.js`), in
+server (`server.json`) and switches to network mode (`public/js/net.js`), in
 which it loads no MuJoCo at all:
 
 - **Drawing.** The server compiles each model file once and serves what is
@@ -537,18 +537,18 @@ which it loads no MuJoCo at all:
   bases (`server/base.py`) and IK (`server/ik.py`) are ports of `groot.js`,
   `playground.js`, `base.js` and `ik.js`,
   ticked at 50 Hz with the physics; ten G1s walking under GR00T keep real
-  time. The Teleop panel works as in local mode through `public/remote.js`.
+  time. The Teleop panel works as in local mode through `public/js/remote.js`.
   The keys' drive command goes to the server when it changes and is
   repeated while held; the server stops a command not repeated for 1 s
   (a closed or frozen tab), and the base's measured twist comes back for
   the readout. Base setups saved from the panel go to
-  `server/saved/base.json`; `base_defaults.json` holds the built-in ones.
+  `server/saved/base.json`; `public/json/base_defaults.json` holds the built-in ones.
 - **IK markers.** They work as in local mode:
   dragging a marker moves it at once and sends its target (in the chain's
   reference body frame, so it rides with the robot); the server sends
   targets and tracking errors back 5 times a second, so every browser sees
   the markers move. Chain edits, Save (to `server/saved/ik.json`, for
-  everyone) and Defaults are requests too. `ik_defaults.json` holds the
+  everyone) and Defaults are requests too. `public/json/ik_defaults.json` holds the
   built-in setups for both sides.
 - **Network meter.** Bottom right, next to the frame meter: round trip
   (ping, includes the page's own frame time), states per second, download
@@ -582,10 +582,10 @@ server serves it.
 The page and the server can also live apart: the page as a static site on
 GitHub Pages with a part of the library, running locally, and the server on
 Binder with the whole library, joined from the page's **Server** panel.
-`public/endpoint.js` decides where the server is: `?server=<url>`, else
+`public/js/endpoint.js` decides where the server is: `?server=<url>`, else
 the last one joined while it still answers, else the page's own origin
 (server.py serving the page, as above), else none. With a server, every
-data file (assets.json, thumbnails, `mjcf_assets/`, `pretrained_policies/`)
+data file (`json/assets.json`, thumbnails, `mjcf_assets/`, `pretrained_policies/`)
 and `/render` come from it. The server answers any origin (CORS); on Binder
 the session's token, which the page puts on every request, WebSockets
 included, is what guards it.
@@ -604,7 +604,7 @@ node scripts/build_pages.mjs --push origin   # and force-push it as branch gh-pa
 Set the repository's Pages source to the `gh-pages` branch. It is one
 commit each time, so model files never pile up in its history. The build
 fails on a file over 100 MB and warns over 1 GB, GitHub's limits.
-`deploy.json` on the site names the Binder repository the panel starts:
+`json/deploy.json` on the site names the Binder repository the panel starts:
 `pages.json`'s `binder`, by default this checkout's GitHub remote and branch
 on mybinder.org (`--binder gh/<owner>/<repo>/<ref>`, `--hub <url>` to
 change it).
@@ -636,7 +636,7 @@ it. A Binder session ends after a while without anyone connected (on
 mybinder.org about 10 minutes); the page then starts locally again.
 
 **Share panel.** Gets the page onto another device (a phone, a headset)
-without typing its URL (`public/share.js`, after bambot's `shareLink.ts`):
+without typing its URL (`public/js/share.js`, after bambot's `shareLink.ts`):
 the pairing service at join.aicor.dev (`?pair=<url>` for another) keeps a
 short code for the link for 30 minutes; the other device opens the service
 and types the code, or scans the QR code of `join.aicor.dev/<code>`. The
@@ -649,7 +649,7 @@ was opened behind the proxy without a token.
 
 ## How it works
 
-`public/main.js`: for each visible geom (group < 3) of a robot's own model a
+`public/js/main.js`: for each visible geom (group < 3) of a robot's own model a
 Filament renderable is built once, with vertices baked from `geom_size`
 (plane, sphere, capsule, ellipsoid, cylinder, box, mesh; hfield/sdf skipped).
 Meshes use MuJoCo's per-corner normals (`mesh_facenormal` → `mesh_normal`),
