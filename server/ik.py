@@ -515,22 +515,16 @@ class IkController:
 
     ep, er = cap(ep, MAX_STEP[0]), cap(er, MAX_STEP[1])
 
-    def col(j, scale=1.0):
-      a = s.xaxis[j]
-      if self.model.jnt_type[j] == 2:
-        return a * scale, np.zeros(3)
-      return np.cross(a, tp - s.xanchor[j]) * scale, a * scale
-
+    # Each joint's column (a slide moves the tip along its axis, a hinge
+    # turns it about its axis), scaled into the dof that drives it, all at
+    # once: numpy's per-call overhead on 3-vectors is most of the cost.
+    terms = [(jj['j'], c, jj['c'] / dof['k']) for c, dof in enumerate(active) for jj in dof['joints']]
+    terms += [(f['j'], k, coef) for f, k, coef in chain['followers']]
+    js, cols, scale = (np.array(v) for v in zip(*terms))
+    axes = s.xaxis[js] * scale[:, None]
+    slide = (self.model.jnt_type[js] == 2)[:, None]
     J = np.zeros((6, n))
-    for c, dof in enumerate(active):
-      for jj in dof['joints']:
-        p, r = col(jj['j'], jj['c'] / dof['k'])
-        J[:3, c] += p
-        J[3:, c] += r
-    for f, k, coef in chain['followers']:
-      p, r = col(f['j'], coef)
-      J[:3, k] += p
-      J[3:, k] += r
+    np.add.at(J.T, cols, np.hstack([np.where(slide, axes, np.cross(axes, tp - s.xanchor[js])), np.where(slide, 0.0, axes)]))
     J[3:] *= ROT_WEIGHT
     e = np.concatenate([ep, er * ROT_WEIGHT])
     q = np.array([self.value(d, data) for d in active])

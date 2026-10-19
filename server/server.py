@@ -63,10 +63,12 @@ import gzip
 import hashlib
 import json
 import math
+import os
 import pathlib
 import re
 import sys
 import time
+import traceback
 import warnings
 
 import mujoco
@@ -85,6 +87,26 @@ STATE_HZ = 30         # state broadcasts per second
 STATUS_HZ = 5         # controller status (IK targets and errors) broadcasts per second
 CTRL_EVERY = 6        # ctrl goes with every 6th state (5 Hz): only the panels show it
 STEP_BUDGET = 0.02     # s of wall time stepping per loop iteration at most
+
+
+def cpus():
+  """The CPUs this process may use: its affinity, capped by a container's
+  CPU quota (a Binder pod sees the host's cores but may use one or two)."""
+  n = len(os.sched_getaffinity(0))
+  try:
+    quota, period = pathlib.Path('/sys/fs/cgroup/cpu.max').read_text().split()
+    if quota != 'max':
+      n = min(n, max(1, math.ceil(int(quota) / int(period))))
+  except (OSError, ValueError):
+    pass
+  return n
+
+
+# MuJoCo's own thread pool for each world: it solves the constraint islands
+# (robots apart from each other) side by side, the same result as one
+# thread; eight G1s step in 0.78 ms instead of 1.3. PHYSICS_THREADS in the
+# environment overrides it (1: none).
+PHYSICS_THREADS = int(os.environ.get('PHYSICS_THREADS') or min(8, cpus()))
 
 PHYSICS_DEFAULTS = {
     'gravity': [0, 0, -9.81], 'wind': [0, 0, 0], 'magnetic': [0, -0.5, 0],
@@ -390,6 +412,9 @@ class World:
     self.next_control = 0   # sim time of the next controller tick (IK.CONTROL_DT apart)
     self.clients = set()
     self.lock = asyncio.Lock()  # one scene change at a time
+    # The model and data belong to the stepping thread while it holds this
+    # (run); requests that change or read them take it in between.
+    self.stepping = asyncio.Lock()
     self.dirty = True
 
   # -- scene changes (compiled off the event loop, stepping goes on) --------
@@ -397,13 +422,16 @@ class World:
   async def set_scene(self, robots, fresh=(), after=None):
     async with self.lock:
       model = await asyncio.to_thread(compile_world, robots, self.physics)
-      self.swap(model, robots, fresh)
-      if after:
-        after()
-      await self.broadcast_scene()
+      async with self.stepping:
+        self.swap(model, robots, fresh)
+        if after:
+          after()
+        await self.broadcast_scene()
 
   def swap(self, model, robots, fresh):
     data = mujoco.MjData(model)
+    if PHYSICS_THREADS > 1:
+      mujoco.mju_threadpool(data, PHYSICS_THREADS)
     old, old_layout = self.data, state_layout(self.robots)
     layout = state_layout(robots)
     old_ids = {r.id for r in self.robots}
@@ -480,6 +508,14 @@ class World:
   # -- requests -------------------------------------------------------------
 
   async def handle(self, ws, msg):
+    # These may rebuild the world: they take the stepping lock themselves,
+    # around everything but compiling, so stepping goes on meanwhile.
+    if msg['op'] in ('spawn', 'remove', 'physics', 'move'):
+      return await self.handle_op(ws, msg)
+    async with self.stepping:
+      return await self.handle_op(ws, msg)
+
+  async def handle_op(self, ws, msg):
     op = msg.get('op')
     m, d = self.model, self.data
     if op == 'spawn':
@@ -528,11 +564,12 @@ class World:
       await self.broadcast_meta()
     elif op == 'physics':
       old, self.physics = self.physics, {k: msg['physics'].get(k, v) for k, v in PHYSICS_DEFAULTS.items()}
-      apply_options(m, self.physics)
       if bool(old.get('sleep')) != bool(self.physics['sleep']):
         await self.set_scene(list(self.robots))  # compiled in (the state carries over)
       else:
-        await self.broadcast_meta()
+        async with self.stepping:
+          apply_options(self.model, self.physics)
+          await self.broadcast_meta()
     elif op == 'qpos':
       d.qpos[int(msg['adr'])] = float(msg['v'])
       d.qvel[int(msg['dof'])] = 0
@@ -678,8 +715,7 @@ class World:
           del r.cmd_at[kind]
 
   async def controller_failed(self, c, err):
-    import traceback
-    traceback.print_exc()
+    traceback.print_exception(err)
     r = next(r for r in self.robots if c in (r.policy, r.base, r.ik))
     kind = 'policy' if c is r.policy else 'base' if c is r.base else 'ik'
     if hasattr(c, 'release'):
@@ -804,37 +840,55 @@ class World:
 
   # -- stepping and broadcasting -------------------------------------------
 
+  def advance(self, target):
+    """Steps the world towards sim time `target`, for STEP_BUDGET of wall
+    time at most, ticking the controllers every IK.CONTROL_DT. Runs in a
+    thread of its own (run) while the event loop goes on with the network
+    (mj_step lets go of the GIL). The controllers tick one after the other:
+    they are mostly Python, which threads would only take turns at.
+    Returns the goals reached [(robot, goal)] and the controllers that
+    failed [(controller, error)], for run to tell the clients."""
+    m, d = self.model, self.data
+    t0 = time.perf_counter()
+    reached, failed = [], []
+    controllers = [c for r in self.robots for c in r.controllers()]
+    while d.time < target and time.perf_counter() - t0 < STEP_BUDGET:
+      if controllers and d.time >= self.next_control - 1e-9:
+        for r in self.robots:
+          goal = r.follow_goal(d)
+          if goal:
+            reached.append((r, goal))
+        for c in list(controllers):
+          try:
+            c.step(d)
+          except Exception as err:  # a broken controller stops alone
+            failed.append((c, err))
+            controllers.remove(c)
+        self.next_control += IK.CONTROL_DT
+      if self.perturbs or self.perturbed:  # once more after the last one let go: clears its force
+        self.apply_perturbs()
+        self.perturbed = bool(self.perturbs)
+      for c in controllers:
+        if hasattr(c, 'substep'):
+          c.substep(d)  # software servos
+      mujoco.mj_step(m, d)
+    return reached, failed
+
   async def run(self):
     next_broadcast, next_status, sent = 0, 0, 0
     while True:
       now = time.monotonic()
       if self.model is not None and not self.paused:
-        m, d = self.model, self.data
-        target, t0 = now - self.sim_start, time.perf_counter()
-        controllers = [c for r in self.robots for c in r.controllers()]
-        while d.time < target and time.perf_counter() - t0 < STEP_BUDGET:
-          if controllers and d.time >= self.next_control - 1e-9:
-            for r in self.robots:
-              reached = r.follow_goal(d)
-              if reached:
-                await self.send_all(json.dumps({'type': 'goal', 'id': r.id, 'goal': None, 'arrived': reached}))
-            for c in controllers:
-              try:
-                c.step(d)
-              except Exception as err:  # a broken controller stops alone
-                await self.controller_failed(c, err)
-                controllers = [c for r in self.robots for c in r.controllers()]
-            self.next_control += IK.CONTROL_DT
-          if self.perturbs or self.perturbed:  # once more after the last one let go: clears its force
-            self.apply_perturbs()
-            self.perturbed = bool(self.perturbs)
-          for c in controllers:
-            if hasattr(c, 'substep'):
-              c.substep(d)  # software servos
-          mujoco.mj_step(m, d)
-        if d.time < target:  # slower than real time: let it slip
-          self.sim_start = now - d.time
-        self.dirty = True
+        async with self.stepping:
+          target = now - self.sim_start
+          reached, failed = await asyncio.to_thread(self.advance, target)
+          if self.data.time < target:  # slower than real time: let it slip
+            self.sim_start = now - self.data.time
+          self.dirty = True
+          for r, goal in reached:
+            await self.send_all(json.dumps({'type': 'goal', 'id': r.id, 'goal': None, 'arrived': goal}))
+          for c, err in failed:
+            await self.controller_failed(c, err)
       if self.dirty and now >= next_broadcast and self.model is not None:
         self.dirty = False
         next_broadcast = max(next_broadcast + 1 / STATE_HZ, now)
@@ -961,8 +1015,9 @@ async def ws_handler(request):
         await ws.send_str(json.dumps({'type': 'error', 'op': req.get('op'), 'msg': str(err), 'rid': req.get('rid')}))
   finally:
     world.clients.discard(ws)
-    world.perturbs.pop(ws, None)
-    world.expire_commands(time.monotonic(), gone=ws)
+    async with world.stepping:
+      world.perturbs.pop(ws, None)
+      world.expire_commands(time.monotonic(), gone=ws)
     print(f'client left ({len(world.clients)} connected)')
   return ws
 
@@ -1037,7 +1092,8 @@ async def api_goal(request):
     goal = msg.get('goal')
     if goal is not None:
       goal = {k: float(goal[k]) for k in ('x', 'y', 'yaw')}
-    await world.set_goals(robots, goal, *(float(msg.get(k, 0)) for k in ('forward', 'left', 'turn')))
+    async with world.stepping:
+      await world.set_goals(robots, goal, *(float(msg.get(k, 0)) for k in ('forward', 'left', 'turn')))
   except (ValueError, KeyError, TypeError) as err:
     raise web.HTTPBadRequest(text=str(err))
   return web.json_response([world.robot_info(r) for r in robots])

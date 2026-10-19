@@ -199,7 +199,7 @@ properties:
 
 The Render panel (`public/render.js`, hidden by default, saved in this
 browser) trades drawing quality for GPU load, applied at once: **Preset**
-(High, Medium (the default), Low, Ultra low; Custom once a field differs),
+(High, Medium (the default; Low on a phone or tablet), Low, Ultra low; Custom once a field differs),
 **Resolution** (canvas pixels per CSS pixel, at most the screen's; the
 presets keep the screen's, which on an iPhone 15 made little difference),
 **Anti-alias** (off, FXAA, MSAA 4×), **Occlusion** (SSAO off, on at half
@@ -562,6 +562,14 @@ which it loads no MuJoCo at all:
   (empty) world replaces the old one.
 - **Memory.** Copies of a model share its meshes in the server's world:
   ten G1s compile to ~75 MB instead of ~750 MB.
+- **CPU.** One world steps on one thread of its own, apart from the event
+  loop that talks to the browsers, with MuJoCo's thread pool solving the
+  robots' constraint islands side by side (up to 8 threads, fewer when the
+  container's CPU quota is lower; `PHYSICS_THREADS=n` sets it). Same result
+  as one thread, bit for bit. The controllers tick one after the other:
+  they are mostly Python, which threads would only take turns at. Twelve
+  G1s walking under GR00T keep real time (eight before). More worlds are
+  more servers, e.g. one per Binder pod.
 
 Not yet in network mode: the World panel's default geom properties. The scene lives as long as
 the server process. Local mode keeps everything in the browser as before.
