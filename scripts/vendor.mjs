@@ -145,13 +145,18 @@ function conventionModels(sourceDir, source) {
 }
 
 function indexLibrary() {
-  if (!existsSync(LIBRARY)) {
+  const link = `public/${LIBRARY}`;
+  // Without mjcf_assets/ next to package.json, public/mjcf_assets may link
+  // to the library elsewhere (on Binder: a volume mounted into the pod,
+  // binder/postBuild): index it from public/, where paths are the same.
+  const linked = !existsSync(LIBRARY) && existsSync(link);
+  if (!existsSync(LIBRARY) && !linked) {
     console.warn(`no ${LIBRARY}/: the asset panel will be empty`);
     writeFileSync('public/assets.json', '[]');
     return;
   }
-  const link = `public/${LIBRARY}`;
   if (!existsSync(link) && !lstatSync(link, { throwIfNoEntry: false })) symlinkSync(`../${LIBRARY}`, link);
+  if (linked) process.chdir('public');
 
   const models = [];
   for (const catDir of subdirs(LIBRARY)) {
@@ -174,6 +179,7 @@ function indexLibrary() {
   const cmp = (a, b) => (typeof a === 'string' ? a.localeCompare(b) : a - b);
   models.sort((a, b) => a.rank.reduce((c, v, k) => c || cmp(v, b.rank[k]), 0));
   for (const m of models) delete m.rank;
+  if (linked) process.chdir('..');
   writeFileSync('public/assets.json', JSON.stringify(models, null, 1));
   const count = {};
   for (const m of models) count[`${m.category}/${m.source}`] = (count[`${m.category}/${m.source}`] ?? 0) + 1;

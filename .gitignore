@@ -9,8 +9,6 @@ public/assets.json
 public/thumbs/
 # the GitHub Pages site, scripts/build_pages.mjs
 dist/
-# scripts/pack_library.py
-library_packs/
 # model library / policies checked out next to package.json
 mjcf_assets/
 # IK setups saved from the Teleop panel in network mode

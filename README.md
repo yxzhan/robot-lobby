@@ -601,17 +601,19 @@ fails on a file over 100 MB and warns over 1 GB, GitHub's limits.
 on mybinder.org (`--binder gh/<owner>/<repo>/<ref>`, `--hub <url>` to
 change it).
 
-**The Binder repository** is this one (`binder/`): `environment.yml`
-(Python, MuJoCo, onnxruntime, Node), `postBuild`, which clones
-mujoco_menagerie, runs `scripts/basic_scenes.py`, downloads what
-`binder/library.txt` lists (GR00T's policies from Hugging Face by default)
-and indexes it all (`npm ci`), and `jupyter_server_config.py`, which puts
-server.py behind the session's jupyter-server-proxy at `<session>/mujoco/`,
-started on the first request. The rest of a local library (digital_twin,
-robocasa, your own policies) has to be downloadable for the build:
-`python3 scripts/pack_library.py` packs it as one .tar.gz per source (e.g.
-for GitHub release assets, 2 GB each at most) and prints the lines for
-`library.txt`.
+**The Binder repository** is this one (`binder/`), with the policies of
+`pretrained_policies/` in git. The model library is not in the image: it is
+a volume mounted into the user pod, `/mnt/dev-tools/mjcf_assets`
+(`MJCF_ASSETS` at build time to change it). `environment.yml` has Python,
+MuJoCo, onnxruntime and Node; `postBuild` vendors the page's runtimes
+(`npm ci`), links the volume as `public/mjcf_assets` and installs
+`jupyter_server_config.py`, which puts server.py behind the session's
+jupyter-server-proxy at `<session>/mujoco/`, started on the first request.
+`start` runs as the pod starts, when the volume is there: it indexes the
+library and the policies (`scripts/vendor.mjs`, which indexes through
+`public/mjcf_assets` when there is no `mjcf_assets/` next to
+`package.json`) and makes the thumbnails, a few seconds; the log is
+`/tmp/index.log`.
 
 **Joining.** *Start a server on Binder* in the Server panel calls
 BinderHub's build API, shows the build and launch, and reloads the page on

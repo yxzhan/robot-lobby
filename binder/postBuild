@@ -1,27 +1,14 @@
 #!/bin/bash
-# Fills the Binder image's checkout with the model library and policies,
-# indexes them for the page (scripts/vendor.mjs, thumbnails.py) and sets up
-# the world server behind jupyter-server-proxy (jupyter_server_config.py).
+# The Binder image: vendors the page's runtimes (npm ci), links the model
+# library, which is not in the image but a volume mounted into the user pod
+# at MJCF_ASSETS, as public/mjcf_assets, and sets up the world server behind
+# jupyter-server-proxy (jupyter_server_config.py). The library is only there
+# once the pod runs, so binder/start indexes it then.
 set -euo pipefail
 
-git clone --depth 1 https://github.com/google-deepmind/mujoco_menagerie.git mjcf_assets/robots/mujoco_menagerie
-rm -rf mjcf_assets/robots/mujoco_menagerie/.git
-python3 scripts/basic_scenes.py
-
-grep -v '^\s*#' binder/library.txt | while read -r url dir; do
-  [ -n "$url" ] || continue
-  mkdir -p "$dir"
-  echo "$url -> $dir"
-  case "$url" in
-    *.tar.gz|*.tgz) curl -fsSL "$url" | tar -xz -C "$dir" ;;
-    *.tar) curl -fsSL "$url" | tar -x -C "$dir" ;;
-    *.zip) curl -fsSL -o /tmp/library.zip "$url" && python3 -m zipfile -e /tmp/library.zip "$dir" && rm /tmp/library.zip ;;
-    *) (cd "$dir" && curl -fsSLO "$url") ;;
-  esac
-done
-
-npm ci  # its postinstall: scripts/vendor.mjs, scripts/thumbnails.py
+npm ci  # its postinstall indexes an empty library here
 npm cache clean --force
+ln -sfn "${MJCF_ASSETS:-/mnt/dev-tools/mjcf_assets}" public/mjcf_assets
 
 mkdir -p ~/.jupyter
 cp binder/jupyter_server_config.py ~/.jupyter/
