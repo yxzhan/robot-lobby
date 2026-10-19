@@ -21,7 +21,8 @@ import { defaultPolicy, loadPolicy, loadPolicyIndex, policyById } from './policy
 import { Perturb, StagePanel } from './inspect.js';
 import { AssetPanel, loadAssets, loadRecent } from './assets.js';
 import { AxisGizmo } from './gizmo.js';
-import { TeleopPanel, TOUCH } from './teleop.js';
+import { TeleopPanel, TOUCH, locomotion } from './teleop.js';
+import { bodyPose } from './goal.js';
 import { BaseController } from './base.js';
 import { IkController } from './ik.js';
 import { applyOptions, geomOverrides, geomSignature, injectGeomDefaults, loadPhysics, needsRebuild, savePhysics } from './physics.js';
@@ -1948,6 +1949,51 @@ try {
   // For devtools and scripts/render_previews.mjs.
   window.spawnAsset = (rel, pos = [0, 0, 0], yaw = 0) => spawn(assets.find((a) => a.rel === rel) ?? { rel, name: rel }, pos, yaw);
   window.clearAssets = () => respawn([]);
+
+  // Goal markers from a script (the devtools console, page automation), as
+  // the Teleop panel sets them, in local and network mode alike (the server
+  // has the same as an HTTP API: /api/goal). `which`: 'all' (every robot
+  // whose walking policy or base is on), a name ('r3'), a label, or a list.
+  // A robot driven with the keys in the Teleop panel ignores its goal.
+  //   goals.move('all', { forward: 1 }); await goals.wait(); goals.move('all', { forward: -1 });
+  const pickRobots = (which = 'all') => {
+    if (which === 'all') return robots.filter((r) => locomotion(r).length);
+    return [which].flat().map((w) => {
+      const r = robots.find((x) => w === x.prefix.slice(0, -1) || w === x.label);
+      if (!r) throw new Error(`no robot ${w}`);
+      return r;
+    });
+  };
+  const goalInfo = (r) => ({
+    name: r.prefix.slice(0, -1), label: r.label, drives: locomotion(r).length > 0,
+    pose: bodyPose(app.data, r.bodyOffset), goal: r.goal ?? null, arrived: !!r.arrived,
+  });
+  window.goals = {
+    list: () => robots.map(goalInfo),
+    // Relative to each robot's pose: forward / left (m, its own frame), turn (rad).
+    move(which, { forward = 0, left = 0, turn = 0 } = {}) {
+      return pickRobots(which).map((r) => {
+        const p = bodyPose(app.data, r.bodyOffset), c = Math.cos(p.yaw), s = Math.sin(p.yaw);
+        app.teleop.setGoal(r, { x: p.x + c * forward - s * left, y: p.y + s * forward + c * left, yaw: p.yaw + turn });
+        return goalInfo(r);
+      });
+    },
+    // {x, y, yaw} in the world frame.
+    set: (which, goal) => pickRobots(which).map((r) => (app.teleop.setGoal(r, { ...goal }), goalInfo(r))),
+    clear: (which) => pickRobots(which).map((r) => (app.teleop.setGoal(r, null), goalInfo(r))),
+    // Resolves once none of them has a goal left (reached, or cleared).
+    wait(which, timeout = 60) {
+      const list = pickRobots(which), t0 = performance.now();
+      return new Promise((resolve, reject) => {
+        const check = () => {
+          if (list.every((r) => !r.goal)) resolve(list.map(goalInfo));
+          else if (performance.now() - t0 > timeout * 1000) reject(new Error(`goals not reached in ${timeout} s`));
+          else setTimeout(check, 100);
+        };
+        check();
+      });
+    },
+  };
 
   // Assets are spawned by dragging them from the asset panel onto the floor.
   new AssetPanel(app, document.getElementById('assets'), assets, {

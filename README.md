@@ -240,6 +240,26 @@ off afterwards, the robot stays put). **Stop** forgets the goal, and so does Res
 In network mode a robot has one goal for everyone: the server follows it
 (`server/goal.py`), every client shows it, and the last one set wins.
 
+Goals can also come from a script, for several robots at once:
+
+- **In the page** (devtools console or page automation, local and network
+  mode): `goals.move(which, {forward, left, turn})` sets each robot's goal
+  relative to its own pose (m, rad), `goals.set(which, {x, y, yaw})` an
+  absolute one, `goals.clear(which)` stops them, `await goals.wait(which)`
+  resolves once all have arrived, `goals.list()` shows names, poses and
+  goals. `which` is `'all'` (every robot whose walking policy or base is
+  on), a name (`'r3'`), a label, or a list of those. E.g.
+  `goals.move('all', {forward: 1}); await goals.wait('all'); goals.move('all', {forward: -1})`.
+- **On the server** (HTTP): `GET /api/robots` lists the robots
+  (`name`, `pose`, `goal`, `drives`, `arrived`); `POST /api/goal` with JSON
+  `{robots, forward, left, turn}` or `{robots, goal: {x, y, yaw}}` sets
+  goals, `{robots}` alone clears them. `scripts/goal_demo.py` drives robots
+  back and forth with it:
+  `python3 scripts/goal_demo.py --robots r1,r2 --distance 2 --times 3`.
+
+A robot that is being driven with the keys in the Teleop panel ignores its
+goal, as with the marker.
+
 Pretrained policies live in `pretrained_policies/<dir>/`, one checkout per
 model (not tracked by git). `npm install` (or `node scripts/vendor.mjs`)
 links the folder as `public/pretrained_policies` and lists what is there in

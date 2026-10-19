@@ -5,7 +5,8 @@ connected browser renders it.
 
 It serves public/ (like scripts/serve.py, Cache-Control: no-store), the
 render data of each model file at /render?rel=… (render_asset.py) and a
-WebSocket at /ws. The page sees /server.json and switches to network mode
+WebSocket at /ws, and a small HTTP API for scripts (GET /api/robots, POST
+/api/goal: goal markers, see api_goal). The page sees /server.json and switches to network mode
 (public/net.js): it loads no MuJoCo at all. It draws each model from its
 render data and places its bodies from the qpos / mocap state broadcast
 here (its own forward kinematics); picking and everything else that needs
@@ -178,6 +179,7 @@ class Robot:
     self.policy_id = ''
     self.cmd_at = {}  # 'policy' / 'base' -> (when its drive command last came, from which browser)
     self.goal, self.goal_state, self.goal_result = None, {}, None  # the goal marker's pose (goal.py)
+    self.arrived = False
     if self.key:
       self.use = {'policy': POL.default_policy(self.key), 'base': None, 'ik': True}
       self.base = BASE.BaseController(self.key, self.prefix, BASE_SAVED)
@@ -270,9 +272,10 @@ class Robot:
     """The switched-on controllers that take a drive command (teleop.js locomotion)."""
     return [c for c in self.controllers() if c is not self.ik and getattr(c, 'drive', None)]
 
-  def set_goal(self, goal):
+  def set_goal(self, goal, arrived=False):
     self.goal = goal and {k: float(goal[k]) for k in ('x', 'y', 'yaw')}
     self.goal_state, self.goal_result = {}, None
+    self.arrived = arrived  # the last goal was reached (rather than cleared or replaced)
     if goal is None:
       for c in self.locomotion():
         c.cmd = [0.0, 0.0, 0.0]
@@ -292,7 +295,7 @@ class Robot:
     if self.goal_result['phase'] != 'arrived':
       return None
     reached = self.goal
-    self.set_goal(None)
+    self.set_goal(None, arrived=True)
     return reached
 
   def status(self):
@@ -868,6 +871,46 @@ class World:
     return {'type': 'scene', 'version': self.version, 'items': [r.item() for r in self.robots],
             'physics': self.physics, 'paused': self.paused, 'world': self.world_tables()}
 
+  # -- the HTTP API (scripts) -----------------------------------------------
+
+  def find_robots(self, which):
+    """Robots by id (3), prefix ('r3') or label, a list of those, or 'all':
+    every robot with a switched-on walking policy or base."""
+    if which in (None, 'all'):
+      return [r for r in self.robots if r.locomotion()]
+    out = []
+    for w in which if isinstance(which, list) else [which]:
+      r = next((r for r in self.robots if w in (r.id, f'r{r.id}', r.label, str(r.id))), None)
+      if r is None:
+        raise ValueError(f'no robot {w!r}')
+      out.append(r)
+    return out
+
+  def robot_info(self, r):
+    pose = GOAL.body_pose(self.data, r.body_offset) if self.data is not None else None
+    res = r.goal_result and {k: r.goal_result[k] for k in ('phase', 'dist', 'dyaw')}
+    return {'id': r.id, 'name': f'r{r.id}', 'label': r.label, 'rel': r.rel, 'drives': bool(r.locomotion()),
+            'pose': pose, 'goal': r.goal, 'progress': res, 'arrived': r.arrived}
+
+  async def set_goals(self, robots, goal=None, forward=0.0, left=0.0, turn=0.0):
+    """Each robot's goal: `goal` ({x, y, yaw}, world frame) if given, else
+    the robot's pose moved `forward` / `left` (m, in its own frame) and
+    turned by `turn` (rad); goal None and no move clears it. Like the
+    Teleop panel's goal marker: every browser sees it."""
+    for r in robots:
+      if goal is None and not (forward or left or turn):
+        g = None
+      elif goal is not None:
+        g = goal
+      else:
+        p = GOAL.body_pose(self.data, r.body_offset)
+        c, s = math.cos(p['yaw']), math.sin(p['yaw'])
+        g = {'x': p['x'] + c * forward - s * left, 'y': p['y'] + s * forward + c * left, 'yaw': p['yaw'] + turn}
+      r.set_goal(g)
+      for kind in list(r.cmd_at):  # a goal replaces the keys' last command
+        del r.cmd_at[kind]
+      await self.send_all(json.dumps({'type': 'goal', 'id': r.id, 'goal': r.goal}))
+
   async def broadcast_scene(self):
     await self.send_all(json.dumps(self.scene_msg()))
     await self.send_all(self.state_bytes())
@@ -949,6 +992,32 @@ async def render(request):
                       headers={**headers, 'Content-Encoding': 'gzip', 'X-Raw-Size': str(info['render_size'])})
 
 
+async def api_robots(_request):
+  """[{id, name, label, rel, drives, pose {x, y, yaw}, goal, progress, arrived}]"""
+  return web.json_response([world.robot_info(r) for r in world.robots])
+
+
+async def api_goal(request):
+  """Goal markers from a script. JSON body:
+    robots   'all' (default: every robot that walks or drives), an id, 'r3',
+             a label, or a list of those
+    forward, left (m), turn (rad)   relative to each robot's current pose, or
+    goal     {x, y, yaw} in the world frame, the same for all, or
+    neither (or goal null)          clears their goals: they stop
+  Replies with the robots as GET /api/robots. A robot's `arrived` turns true
+  when it reaches its goal (which is then let go)."""
+  try:
+    msg = await request.json()
+    robots = world.find_robots(msg.get('robots', 'all'))
+    goal = msg.get('goal')
+    if goal is not None:
+      goal = {k: float(goal[k]) for k in ('x', 'y', 'yaw')}
+    await world.set_goals(robots, goal, *(float(msg.get(k, 0)) for k in ('forward', 'left', 'turn')))
+  except (ValueError, KeyError, TypeError) as err:
+    raise web.HTTPBadRequest(text=str(err))
+  return web.json_response([world.robot_info(r) for r in robots])
+
+
 async def server_json(_request):
   return web.json_response({'server': 'mujoco-python', 'mujoco': mujoco.__version__})
 
@@ -960,6 +1029,8 @@ async def main():
   app = web.Application(middlewares=[no_store])
   app.router.add_get('/ws', ws_handler)
   app.router.add_get('/server.json', server_json)
+  app.router.add_get('/api/robots', api_robots)
+  app.router.add_post('/api/goal', api_goal)
   app.router.add_get('/render', render)
   app.router.add_get('/', index)
   app.router.add_static('/', PUBLIC, follow_symlinks=True)

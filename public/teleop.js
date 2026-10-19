@@ -142,7 +142,7 @@ const CONTROLLERS = [['policy', 'Policy', 'A trained policy (locomotion, hands, 
   ['base', 'Base', 'Mobile base: wheels or planar joints'], ['ik', 'IK', 'IK chains with interactive markers']];
 
 // The switched-on controllers of robot `r` that take twist commands.
-function locomotion(r) {
+export function locomotion(r) {
   return [r?.use?.policy && r.policy?.drive && r.policy, r?.use?.base && r.base?.drive && r.base].filter(Boolean);
 }
 
