@@ -111,23 +111,23 @@
     #teleop .joints label.off { color: #777; }
     #teleop .joints .why { margin-left: auto; color: #888; font-style: italic; }
     #teleop .error { color: #f88; margin: 4px 0; }
-    #world { overflow: hidden auto; min-height: 0; flex: 0 5 auto; font-size: 12px; }
-    #world h3 { margin: 0 0 6px; font-size: 13px; }
-    #world .field { display: grid; grid-template-columns: 64px 1fr 38px; align-items: center; gap: 6px; margin: 3px 0; }
-    #world .ctl { display: flex; gap: 4px; min-width: 0; }
-    #world .unit { color: #888; font-size: 11px; }
-    #world input[type=number] { width: 0; flex: 1; min-width: 0; font: inherit; color: #eee; background: #222;
+    :is(#world, #render) { overflow: hidden auto; min-height: 0; flex: 0 5 auto; font-size: 12px; }
+    :is(#world, #render) h3 { margin: 0 0 6px; font-size: 13px; }
+    :is(#world, #render) .field { display: grid; grid-template-columns: 64px 1fr 38px; align-items: center; gap: 6px; margin: 3px 0; }
+    :is(#world, #render) .ctl { display: flex; gap: 4px; min-width: 0; }
+    :is(#world, #render) .unit { color: #888; font-size: 11px; }
+    :is(#world, #render) input[type=number] { width: 0; flex: 1; min-width: 0; font: inherit; color: #eee; background: #222;
                                 border: 1px solid #555; border-radius: 4px; padding: 1px 3px; }
-    #world select { flex: 1; min-width: 0; font: inherit; color: #eee; background: #222; border: 1px solid #555; border-radius: 4px; }
-    #world .hint { color: #999; margin: 4px 0; line-height: 1.5; }
-    #world .sub { margin-top: 8px; padding-top: 6px; border-top: 1px solid #3a3d44; font-weight: 600; }
-    #world .sub.minor { border-top: 0; margin-top: 4px; padding-top: 0; color: #aaa; font-weight: 400; }
-    #world .bar { display: flex; align-items: center; gap: 4px; margin-top: 6px; }
-    #world button { cursor: pointer; font: inherit; font-size: 11px; color: #ddd; background: #333;
+    :is(#world, #render) select { flex: 1; min-width: 0; font: inherit; color: #eee; background: #222; border: 1px solid #555; border-radius: 4px; }
+    :is(#world, #render) .hint { color: #999; margin: 4px 0; line-height: 1.5; }
+    :is(#world, #render) .sub { margin-top: 8px; padding-top: 6px; border-top: 1px solid #3a3d44; font-weight: 600; }
+    :is(#world, #render) .sub.minor { border-top: 0; margin-top: 4px; padding-top: 0; color: #aaa; font-weight: 400; }
+    :is(#world, #render) .bar { display: flex; align-items: center; gap: 4px; margin-top: 6px; }
+    :is(#world, #render) button { cursor: pointer; font: inherit; font-size: 11px; color: #ddd; background: #333;
                     border: 1px solid #555; border-radius: 4px; padding: 2px 8px; }
-    #world button.primary { background: #2f5a3c; border-color: #4d8a5f; }
-    #world button:disabled { opacity: .5; cursor: default; }
-    #world .note { color: #c9a; font-size: 11px; }
+    :is(#world, #render) button.primary { background: #2f5a3c; border-color: #4d8a5f; }
+    :is(#world, #render) button:disabled { opacity: .5; cursor: default; }
+    :is(#world, #render) .note { color: #c9a; font-size: 11px; }
     #teleop .chips { display: flex; gap: 4px; flex-wrap: wrap; }
     #teleop .chip { display: flex; align-items: center; gap: 3px; padding: 1px 7px 1px 3px; border: 1px solid #555;
                     border-radius: 10px; background: #2a2c31; cursor: pointer; }
@@ -178,6 +178,8 @@
             align-items: center; justify-content: center; background: rgba(0,0,0,.55); color: #eee;
             cursor: wait; user-select: none; }
     #busy[hidden] { display: none; }
+    #busy.stopped { cursor: default; } #busy.stopped .spinner { display: none; }
+    #busy .msg { max-width: min(560px, calc(100% - 32px)); text-align: center; line-height: 1.4; }
     /* Network mode: the connection to the server is lost (main.js offline). */
     #offline { position: fixed; top: 12px; left: 50%; transform: translateX(-50%); z-index: 101; display: flex;
                gap: 10px; align-items: center; padding: 7px 10px 7px 14px; border-radius: 6px; font-size: 13px;
@@ -211,7 +213,7 @@
       #views button { padding: 5px 8px; }
       #assets, #side { top: 112px; left: 8px; right: 8px; width: auto; max-height: calc(100% - 112px - 12px); }
       #assets { right: auto; width: min(300px, calc(100% - 16px)); }  /* as on desktop: two columns */
-      #assets input[type=search], #teleop select, #world select, #world input, #teleop input[type=number] { font-size: 16px; }  /* no zoom on focus (iOS) */
+      #assets input[type=search], #teleop select, #world select, #world input, #render select, #teleop input[type=number] { font-size: 16px; }  /* no zoom on focus (iOS) */
       #gizmo { width: 64px; height: 64px; left: 8px; bottom: 8px; }
       #sticks { left: 12px; right: 12px; bottom: 84px; }
       #offline { top: 8px; left: 8px; right: 8px; transform: none; max-width: none; justify-content: space-between; font-size: 12px; }
@@ -233,6 +235,7 @@
     <button data-panel="stage" title="Spawned robots: joints, controls, reset, remove">Stage</button>
     <button data-panel="world" title="World physics: gravity, medium, default geom properties">World</button>
     <button data-panel="teleop" title="Teleoperate a robot: controller and input">Teleop</button>
+    <button data-panel="render" title="Rendering quality: resolution, anti-aliasing, occlusion, shadows, textures">Render</button>
   </div>
   <div id="assets">
     <div class="tabs"></div>
@@ -257,6 +260,10 @@
   </div>
   <div id="teleop">
     <h3>Teleop</h3>
+    <div class="body"></div>
+  </div>
+  <div id="render" hidden>
+    <h3>Render</h3>
     <div class="body"></div>
   </div>
   </div>

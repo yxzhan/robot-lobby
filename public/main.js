@@ -26,6 +26,7 @@ import { BaseController } from './base.js';
 import { IkController } from './ik.js';
 import { applyOptions, geomOverrides, geomSignature, injectGeomDefaults, loadPhysics, savePhysics } from './physics.js';
 import { WorldPanel } from './worldpanel.js';
+import { RenderPanel, loadQuality } from './render.js';
 import { MARKER } from './marker.js';
 import { CHAIN_COLORS } from './teleop.js';
 import Stats from './vendor/stats/Stats.js';
@@ -305,12 +306,19 @@ function mjTexture(engine, model, t) {
 }
 
 // An image file decoded by the browser (off the main thread) -> RGBA8 pixels,
-// top row first like MuJoCo's own PNG loader.
+// top row first like MuJoCo's own PNG loader, scaled down to maxTexture on
+// its longer side (the Render panel's Textures): GPU memory, not looks, is
+// what limits a scene (a RoboCasa kitchen has ten 2048² textures; at 4/3 ×
+// 16 MB each with mipmaps they and a few more scenes take a laptop's or
+// phone's GPU past what it has, and the page loses its WebGL context).
+let maxTexture = 1024;
 async function decodeImage(bytes) {
   const bmp = await createImageBitmap(new Blob([bytes]), { premultiplyAlpha: 'none', colorSpaceConversion: 'none' });
-  const { width: w, height: h } = bmp;
+  const k = Math.min(1, maxTexture / Math.max(bmp.width, bmp.height));
+  const w = Math.max(1, Math.round(bmp.width * k)), h = Math.max(1, Math.round(bmp.height * k));
   const ctx = new OffscreenCanvas(w, h).getContext('2d', { willReadFrequently: true });
-  ctx.drawImage(bmp, 0, 0);
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(bmp, 0, 0, w, h);
   bmp.close();
   return { w, h, rgba: new Uint8Array(ctx.getImageData(0, 0, w, h).data.buffer) };
 }
@@ -507,6 +515,20 @@ class App {
     this.net = null;                   // NetClient in network mode (net.js): the server steps the world
     this.netVersion = -1;              // the server scene this.model describes
 
+    // Chrome turns WebGL off for a page for a while after its GPU process
+    // crashed or the page lost its context (e.g. out of GPU memory).
+    if (!document.createElement('canvas').getContext('webgl2')) {
+      throw new Error('WebGL 2 is not available. If the page just lost its GPU context (too much in the scene), '
+        + 'the browser has turned WebGL off for it for now: close this tab and open the page in a new one, or restart '
+        + 'the browser (chrome://gpu shows whether WebGL is blocked).');
+    }
+    // A lost context does not come back for Filament: say so (the frame stays frozen).
+    canvas.addEventListener('webglcontextlost', (e) => {
+      e.preventDefault();
+      setBusy('The GPU context was lost, most likely out of GPU memory (large scenes and many textures). Reload the page; '
+        + 'if WebGL then fails to start, open the page in a new tab or restart the browser.', true);
+      contextLost = true;
+    });
     // xrCompatible: the same context renders the WebXR session (enterVR).
     const engine = this.engine = Filament.Engine.create(canvas, { xrCompatible: true });
     this.scene = engine.createScene();
@@ -516,8 +538,7 @@ class App {
     this.view = engine.createView();
     this.view.setCamera(this.camera);
     this.view.setScene(this.scene);
-    this.view.setAmbientOcclusionOptions({ enabled: true, radius: 0.2 });
-    this.view.setAntiAliasing(Filament.View$AntiAliasing.FXAA);
+    this.quality = loadQuality();      // the Render panel's settings (render.js), applied below
     this.renderer.setClearOptions({ clearColor: [0.1, 0.11, 0.13, 1], clear: true });
 
     this.matLit = engine.createMaterial(MAT_LIT);
@@ -530,6 +551,7 @@ class App {
     this.sampler.setAnisotropy(8);
     // Bound to textured materials until their image has been decoded.
     this.whiteTexture = uploadTexture(engine, 1, 1, new Uint8Array([255, 255, 255, 255]));
+    this.images = new Map();  // image file(s) -> shared texture entry (bindTexture)
 
     // Sun with shadows + flat-ish ambient (SH band 0 only) so nothing is pitch black.
     this.sun = Filament.EntityManager.get().create();
@@ -628,13 +650,40 @@ class App {
 
     this.orbit = new OrbitCamera(canvas, [0, 0, 0.4], 4);
     this.setSpawnMarker(null);
-    this.resize();
+    this.setQuality(this.quality);  // sizes the canvas too
     window.addEventListener('resize', () => this.resize());
+  }
+
+  // The Render panel's settings (render.js): `q` as loadQuality returns it.
+  setQuality(q) {
+    const textures = q.textures !== this.quality.textures;
+    this.quality = q;
+    maxTexture = q.textures;
+    if (textures) for (const e of this.images.values()) e.reload?.();  // the scene's image textures at the new size
+    this.viewQuality(this.view);
+    for (const { view } of this.xr?.eyes ?? []) this.viewQuality(view);
+    const lm = this.engine.getLightManager(), sun = lm.getInstance(this.sun);
+    lm.setShadowCaster(sun, q.shadows !== 'off');
+    sun.delete();
+    this.resize();
+  }
+
+  // Anti-aliasing and ambient occlusion of `view` (the window's, or a WebXR eye's).
+  viewQuality(view) {
+    const q = this.quality, F = Filament, msaa = q.antialiasing === 'msaa';
+    view.setAntiAliasing(q.antialiasing === 'fxaa' ? F.View$AntiAliasing.FXAA : F.View$AntiAliasing.NONE);
+    view.setMultiSampleAntiAliasingOptions({ enabled: msaa, sampleCount: msaa ? 4 : 1 });
+    const high = q.ao === 'high', Q = F.View$QualityLevel;
+    view.setAmbientOcclusionOptions({
+      enabled: q.ao !== 'off', radius: 0.2,
+      resolution: high ? 1 : 0.5, quality: high ? Q.HIGH : Q.LOW, upsampling: high ? Q.HIGH : Q.LOW,
+    });
   }
 
   resize() {
     if (this.xr) return;  // the session sizes the canvas
-    const dpr = window.devicePixelRatio || 1;
+    const screen = window.devicePixelRatio || 1, pr = this.quality.pixelRatio;
+    const dpr = pr === 'screen' ? screen : Math.min(screen, pr);
     const w = Math.round(this.canvas.clientWidth * dpr), h = Math.round(this.canvas.clientHeight * dpr);
     this.canvas.width = w; this.canvas.height = h;
     this.view.setViewport([0, 0, w, h]);
@@ -646,8 +695,9 @@ class App {
   // every spawned copy, so it is built once per robot file. `images` (texture
   // name -> candidate paths, readable with `read`) supplies the image textures
   // the loader replaced with placeholders (see vfs.js).
+  // Free it with freeVisual once nothing uses it.
   buildVisual(mujoco, model, images, read) {
-    const textures = new Map();  // MuJoCo texture id -> {tex, waiting: [MaterialInstance]}
+    const textures = new Map();  // MuJoCo texture id -> texture entry (bindTexture)
     const parts = [];
     for (let g = 0; g < model.ngeom; g++) {
       const matid = model.geom_matid[g];
@@ -684,35 +734,69 @@ class App {
         rot: quatToMat(model.geom_quat.subarray(4 * g, 4 * g + 4)),
       });
     }
+    parts.textures = [...new Set(textures.values())];
+    for (const e of parts.textures) e.users++;
     return parts;
   }
 
-  // Binds MuJoCo texture `texid` to `mi`, creating it on first use. Image
-  // textures are decoded asynchronously; until then `mi` shows plain white.
-  bindTexture(textures, mujoco, model, images, read, texid, mi) {
-    let entry = textures.get(texid);
-    if (!entry) {
-      entry = { tex: null, waiting: [] };
-      textures.set(texid, entry);
-      const name = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_TEXTURE.value, texid);
-      const cands = images.get(name);
-      if (cands) this.loadImage(entry, read, cands, name);
-      else entry.tex = mjTexture(this.engine, model, texid);
+  // Gives back the GPU memory of buildVisual's `parts` (their entities
+  // removed already): buffers, material instances, and the textures no other
+  // model shares.
+  freeVisual(parts) {
+    const mis = new Set(parts.map((p) => p.mi));
+    for (const p of parts) {
+      this.engine.destroyVertexBuffer(p.vb);
+      this.engine.destroyIndexBuffer(p.ib);
+      this.engine.destroyMaterialInstance(p.mi);
     }
-    if (entry.tex) {
-      mi.setTextureParameter('baseColorMap', entry.tex, this.sampler);
-    } else {
-      mi.setTextureParameter('baseColorMap', this.whiteTexture, this.sampler);
-      entry.waiting.push(mi);
+    for (const e of parts.textures ?? []) {
+      e.mis = e.mis.filter((mi) => !mis.has(mi));
+      if (--e.users > 0) continue;
+      if (e.tex) this.engine.destroyTexture(e.tex);
+      e.tex = null;
+      e.dead = true;  // an image still decoding is dropped when it arrives
+      if (e.key) this.images.delete(e.key);
     }
   }
 
+  // Binds MuJoCo texture `texid` to `mi`, creating it on first use. Image
+  // textures are shared by every model that uses the same file (this.images:
+  // a RoboCasa kitchen alone names its 19 images 69 times) and decoded
+  // asynchronously; until then `mi` shows plain white.
+  bindTexture(textures, mujoco, model, images, read, texid, mi) {
+    let entry = textures.get(texid);
+    if (!entry) {
+      const name = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_TEXTURE.value, texid);
+      const cands = images.get(name);
+      const key = cands && cands.join('\n');
+      entry = key && this.images.get(key);
+      if (!entry) {
+        entry = { tex: null, mis: [], users: 0, key, gen: 0 };
+        if (cands) {
+          this.images.set(key, entry);
+          entry.reload = () => this.loadImage(entry, read, cands, name);
+          entry.reload();
+        } else {
+          entry.tex = mjTexture(this.engine, model, texid);
+        }
+      }
+      textures.set(texid, entry);
+    }
+    entry.mis.push(mi);
+    mi.setTextureParameter('baseColorMap', entry.tex ?? this.whiteTexture, this.sampler);
+  }
+
+  // Decodes an image texture (again, at the current maxTexture: reload) and
+  // puts it on every material instance that uses it.
   async loadImage(entry, read, cands, name) {
+    const gen = ++entry.gen;
     try {
       const { w, h, rgba } = await decodeImage(await readFirst(read, cands));
+      if (entry.dead || gen !== entry.gen) return;  // freed, or a newer load under way
+      const old = entry.tex;
       entry.tex = uploadTexture(this.engine, w, h, rgba);
-      for (const mi of entry.waiting) mi.setTextureParameter('baseColorMap', entry.tex, this.sampler);
-      entry.waiting = [];
+      for (const mi of entry.mis) mi.setTextureParameter('baseColorMap', entry.tex, this.sampler);
+      if (old) this.engine.destroyTexture(old);
     } catch (err) {
       console.warn(`texture ${name}:`, err);
     }
@@ -1101,8 +1185,7 @@ class App {
       const view = this.engine.createView();
       view.setCamera(camera);
       view.setScene(this.scene);
-      view.setAmbientOcclusionOptions({ enabled: true, radius: 0.2 });
-      view.setAntiAliasing(Filament.View$AntiAliasing.FXAA);
+      this.viewQuality(view);
       return { entity, camera, view };
     });
     this.canvas.width = layer.framebufferWidth;
@@ -1201,8 +1284,12 @@ const status = document.getElementById('status');
 // nothing reaches the page meanwhile. Keyups pass, so held keys are released.
 const busyEl = document.getElementById('busy');
 const busyMsg = busyEl.querySelector('.msg');
-function setBusy(msg) {
+let contextLost = false;  // set by App: its message stays
+// `stopped`: nothing more will happen (an error), no spinner.
+function setBusy(msg, stopped = false) {
+  if (contextLost) return;
   busyEl.hidden = msg == null;
+  busyEl.classList.toggle('stopped', stopped);
   if (msg == null) return;
   busyMsg.textContent = msg;
   document.activeElement?.blur?.();  // e.g. the asset filter box
@@ -1254,6 +1341,7 @@ try {
   app.teleop = new TeleopPanel(app, document.getElementById('teleop'));
   app.physics = loadPhysics();  // World panel settings (physics.js)
   app.world = new WorldPanel(app, document.getElementById('world'));
+  app.renderPanel = new RenderPanel(app, document.getElementById('render'));
   // Frame meter (stats.js) in the bottom-right corner; click it to cycle
   // FPS / ms per frame (JS time of App.frame) / MB of JS heap.
   app.stats = new Stats();
@@ -1286,6 +1374,18 @@ try {
   // Per robot file (asset rel), shared by its spawned copies: render parts,
   // full-model inertia, first keyframe, names referenced in its XML.
   const visuals = new Map();
+  // GPU memory back from the render parts of model files no robot uses any
+  // more (after Undo, Clear, ✕, a new scene from the server); they are built
+  // again if spawned again.
+  function dropUnused() {
+    for (const cache of [visuals, netVisuals]) {
+      for (const [rel, pending] of cache) {
+        if (!pending.visual || robots.some((r) => r.visual.rel === rel)) continue;
+        cache.delete(rel);
+        app.freeVisual(pending.visual.parts);
+      }
+    }
+  }
   function robotVisual(rel, label, progress) {
     if (!visuals.has(rel)) {
       const pending = (async () => {
@@ -1305,7 +1405,7 @@ try {
           model.delete();
         }
       })();
-      pending.catch(() => visuals.delete(rel));  // retry on the next click
+      pending.then((v) => { pending.visual = v; }, () => visuals.delete(rel));  // failed: retry on the next click
       visuals.set(rel, pending);
     }
     return visuals.get(rel);
@@ -1602,6 +1702,7 @@ try {
       await rebuild(list, [], (msg) => { status.textContent = msg; setBusy(msg); });
       for (const r of removed) app.removeEntities(r.entities);
       robots.splice(0, robots.length, ...list);
+      dropUnused();
       status.textContent = hint();
     } catch (err) {
       status.textContent = `failed: ${err.message ?? err}`;
@@ -1774,7 +1875,7 @@ try {
           kin: model, dims: model.dims, inertia: { nbody: model.nbody },
         };
       })();
-      pending.catch(() => netVisuals.delete(rel));
+      pending.then((v) => { pending.visual = v; }, () => netVisuals.delete(rel));
       netVisuals.set(rel, pending);
     }
     return netVisuals.get(rel);
@@ -1814,6 +1915,7 @@ try {
       for (const r of robots) if (!list.includes(r)) app.removeEntities(r.entities);
       app.setNetWorld(model, worldData(model), list);
       robots.splice(0, robots.length, ...list);
+      dropUnused();
       app.netVersion = msg.version;
       for (const r of list) { applyRobot(r, r.pendingItem); delete r.pendingItem; }
       app.teleop.build();
@@ -2073,6 +2175,6 @@ try {
   app.frame();
 } catch (err) {
   status.textContent = `error: ${err.message ?? err}`;
-  setBusy(`error: ${err.message ?? err}`);
+  setBusy(`error: ${err.message ?? err}`, true);
   throw err;
 }

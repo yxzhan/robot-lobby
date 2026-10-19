@@ -179,6 +179,22 @@ properties:
   Most models set their own masses (menagerie robots have explicit
   inertials), so these mostly reach plain objects and the floor.
 
+## Render panel
+
+The Render panel (`public/render.js`, hidden by default, saved in this
+browser) trades drawing quality for GPU load, applied at once: **Preset**
+(High, Medium (the default), Low, Ultra low; Custom once a field differs),
+**Resolution** (canvas pixels per CSS pixel, at most the screen's; the
+presets keep the screen's, which on an iPhone 15 made little difference),
+**Anti-alias** (off, FXAA, MSAA 4×), **Occlusion** (SSAO off, on at half
+resolution, high at full), **Shadows** (the sun's, on or off: this Filament
+build binds no shadow-map options, so their size is fixed) and **Textures**
+(64, 512, 1024 or 2048 px on the longer side; a change decodes the scene's
+images again, so it can be compared on the spot: a kitchen's 18 textures
+are 63 MB at 1024 and 0.3 MB at 64). Ultra low is Low with 64 px textures,
+to see what textures cost. The WebXR eyes take the anti-aliasing and
+occlusion settings too.
+
 ## Teleop panel and controllers
 
 The Teleop panel (`public/teleop.js`, open by default) picks which robot is
@@ -432,6 +448,16 @@ flipped/grid textures still come from `tex_data`. Meshes use their `mesh_texcoor
 (e.g. a textured table box, the groundplane) get an object-space planar
 projection per face. `texrepeat`/`texuniform` are baked into the UVs. Planes
 without any material get the built-in checker; otherwise the material color.
+
+GPU memory is what limits a scene, and textures take most of it (RGBA8 plus
+mipmaps: a 2048² image is 21 MB). So images are scaled down on their
+longer side (to 1024 px by default: the Render panel's Textures), one
+texture per image file is shared by every model that uses it (a RoboCasa kitchen names its 19 images 69 times), and a model's
+buffers and textures are freed once no spawned copy uses it. One kitchen went
+from 452 to 84 MB of textures; two kitchens, the Garmi apartment and an
+ANYmal from 1.9 GB to 0.5 GB. If the page still loses its WebGL context, it
+says so (reload); Chrome may then keep WebGL off for the page for a while,
+which the page reports at start-up instead of failing in Filament.
 
 Geoms whose rgba alpha is below 1 (glass doors, …) use the alpha-blended
 variants `lit_transparent` / `lit_textured_transparent` (the texture's own
