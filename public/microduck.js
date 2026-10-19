@@ -1,8 +1,7 @@
-// Microduck policies trained in microduck_rl (github.com/pollen-robotics/
-// microduck_rl: mjlab, MuJoCo Warp, rsl_rl PPO) and exported by
-// scripts/export_microduck.py: walk.onnx (velocity task) and stand.onnx
-// (stand-up task), with the observation normalizer baked in, and
-// policy.json, which has the rest:
+// The Microduck walking policy trained in microduck_rl (github.com/
+// pollen-robotics/microduck_rl: mjlab, MuJoCo Warp, rsl_rl PPO) and exported
+// by scripts/export_microduck.py: walk.onnx (velocity task), with the
+// observation normalizer baked in, and policy.json, which has the rest:
 //
 // - joints / actuators, default_pose, action_scale: the 14 servos in action
 //   order; target = default + action * scale (no clipping, as in training);
@@ -11,9 +10,9 @@
 //   control tick old (joint_vel_lag: training delays it by one step), the
 //   last action, then the command block [vx, vy, yaw rate, head pose (4),
 //   body pose (6)], the poses left at zero (their nominal);
-// - command_range, min_command: what the walking policy was trained to
-//   follow, and its dead band (it stands for less);
-// - bam: the XL330 servo model the policies were trained with (BAM M6,
+// - command_range, min_command: what the policy was trained to follow, and
+//   its dead band (it stands for less);
+// - bam: the XL330 servo model the policy was trained with (BAM M6,
 //   github.com/Rhoban/bam, as bam.mjlab.BamActuator runs it). The robot's
 //   position actuators become torque motors on bind (given back on unbind)
 //   and before every physics step (substep):
@@ -30,15 +29,13 @@
 
 const FRICTION_DOF = 3;  // mjCNSTR_FRICTION_DOF
 
-// {ort, sessions: {file: session}, spec}. `source(name)` returns a file's URL.
+// {ort, session, spec}. `source(name)` returns a file's URL.
 export async function loadMicroduckPolicy(ort, source) {
   const spec = await fetch(source('policy.json')).then((r) => {
     if (!r.ok) throw new Error(`policy.json: ${r.status} ${r.statusText}`);
     return r.json();
   });
-  const sessions = {};
-  for (const f of ['walk.onnx', 'stand.onnx']) sessions[f] = await ort.InferenceSession.create(source(f));
-  return { ort, sessions, spec };
+  return { ort, session: await ort.InferenceSession.create(source('walk.onnx')), spec };
 }
 
 // Key speeds a bit inside the trained command ranges, and the dead band
@@ -54,17 +51,14 @@ function driveOf(r, min) {
 }
 
 export class MicroduckController {
-  // onnx: 'walk.onnx' (takes the drive command) or 'stand.onnx' (none).
-  constructor(policy, prefix = '', name = 'Microduck policy', onnx = 'walk.onnx') {
+  constructor(policy, prefix = '', name = 'Microduck walking policy') {
     this.policy = policy;
     this.spec = policy.spec;
-    this.session = policy.sessions[onnx];
+    this.session = policy.session;
     this.prefix = prefix;
     this.name = name;
-    if (onnx === 'walk.onnx') {
-      this.drive = driveOf(this.spec.command_range, this.spec.min_command);
-      this.cmd = [0, 0, 0];
-    }
+    this.drive = driveOf(this.spec.command_range, this.spec.min_command);
+    this.cmd = [0, 0, 0];
     this.reset();
   }
 
@@ -191,7 +185,7 @@ export class MicroduckController {
     for (let i = 0; i < n; i++) obs[6 + i] = qpos[this.qadr[i]] - s.default_pose[i];
     obs.set(this.qvel, 6 + n);
     obs.set(this.action, 6 + 2 * n);
-    if (this.cmd) obs.set(this.cmd, 6 + 3 * n);
+    obs.set(this.cmd, 6 + 3 * n);
     this.qvel = Float64Array.from(this.dofs, (d) => qvel[d]);
     return obs;
   }

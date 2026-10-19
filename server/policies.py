@@ -344,16 +344,14 @@ class BamServos:
 
 
 class MicroduckController:
-  """See public/microduck.js: a microduck_rl policy (walk or stand-up) on
-  the BAM servo model."""
+  """See public/microduck.js: the microduck_rl walking policy on the BAM
+  servo model."""
 
-  def __init__(self, policy, prefix, name='Microduck policy', onnx='walk.onnx'):
-    self.sessions, self.spec = policy
-    self.session = self.sessions[onnx]
+  def __init__(self, policy, prefix, name='Microduck walking policy'):
+    self.session, self.spec = policy
     self.prefix = prefix
     self.name = name
-    r = self.spec['command_range']
-    self.drive = drive_of(r, self.spec.get('min_command')) if onnx == 'walk.onnx' else None
+    self.drive = drive_of(self.spec['command_range'], self.spec.get('min_command'))
     self.cmd = [0.0, 0.0, 0.0]
     self.model = None
     self.saved = None
@@ -432,8 +430,7 @@ class MicroduckController:
     R = data.xmat[self.root].reshape(3, 3)
     v = self.free_v
     cmd = np.zeros(13)
-    if self.drive:  # the stand-up policy was trained on a zero twist
-      cmd[:3] = self.cmd
+    cmd[:3] = self.cmd
     obs = np.concatenate([data.qvel[v + 3:v + 6], -R[2], data.qpos[self.qadr] - self.default,
                           self.qvel, self.action, cmd]).astype(np.float32)
     self.qvel = data.qvel[self.dofs].copy()
@@ -445,7 +442,7 @@ class MicroduckController:
     self.pending.append((data.time + s['bam']['delay'], self.default + self.action * s['action_scale']))
 
   def describe(self):
-    return {'name': self.name, 'drive': self.drive} if self.drive else {'name': self.name}
+    return {'name': self.name, 'drive': self.drive}
 
 
 def load_microduck(directory):
@@ -453,9 +450,7 @@ def load_microduck(directory):
   spec = json.loads((directory / 'policy.json').read_text())
   opts = ort.SessionOptions()
   opts.intra_op_num_threads = 1
-  sessions = {f: ort.InferenceSession(str(directory / f), opts, providers=['CPUExecutionProvider'])
-              for f in ('walk.onnx', 'stand.onnx') if (directory / f).exists()}
-  return sessions, spec
+  return ort.InferenceSession(str(directory / 'walk.onnx'), opts, providers=['CPUExecutionProvider']), spec
 
 
 # ---------------------------------------------------------------------------
@@ -476,10 +471,7 @@ POLICIES = [
     {'id': 'microduck-walk', 'name': 'microduck_rl walking · Microduck', 'dir': 'microduck_rl',
      'defaultFor': re.compile(r'(^|/)digital_twin/microduck/microduck\.xml$'),
      'load': load_microduck,
-     'create': lambda policy, prefix: MicroduckController(policy, prefix, 'Microduck walking policy', 'walk.onnx')},
-    {'id': 'microduck-stand', 'name': 'microduck_rl stand-up · Microduck', 'dir': 'microduck_rl',
-     'load': load_microduck,
-     'create': lambda policy, prefix: MicroduckController(policy, prefix, 'Microduck stand-up policy', 'stand.onnx')},
+     'create': MicroduckController},
 ]
 
 _loaded = {}

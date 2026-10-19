@@ -279,15 +279,13 @@ Pollen Robotics' [microduck_rl](https://github.com/pollen-robotics/microduck_rl)
 clone next to `package.json`, `scripts/import_microduck.py` copies the
 robot (`digital_twin/microduck/microduck.xml`) and two of its scenes into
 the library, and after training `scripts/export_microduck.py` (run in the
-clone's environment, see its docstring) exports the walking and stand-up
-policies to `pretrained_policies/microduck_rl/` (`walk.onnx`, `stand.onnx`,
-`policy.json`). The duck starts with `microduck-walk` on (keys and goal
-marker); `microduck-stand` stands up from sitting and holds the stand, but
-rarely gets up from lying on its belly or back.
+clone's environment, see its docstring) exports the walking policy to
+`pretrained_policies/microduck_rl/` (`walk.onnx`, `policy.json`). The duck
+starts with `microduck-walk` on (keys and goal marker).
 
-Both were trained on the BAM model of the XL330 servos (firmware P loop,
+It was trained on the BAM model of the XL330 servos (firmware P loop,
 DC motor with back-EMF and battery sag, load-dependent friction), not on
-plain position actuators, and do not stand without it. `public/microduck.js`
+plain position actuators, and does not stand without it. `public/microduck.js`
 (and `MicroduckController` / `BamServos` in `server/policies.py`) turns the
 robot's position actuators into motors on bind, computes the servo torques
 and writes the friction budget into the joints before every physics step,

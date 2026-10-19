@@ -82,15 +82,7 @@ export const POLICIES = [
     dir: 'microduck_rl',  // scripts/export_microduck.py
     defaultFor: /(^|\/)digital_twin\/microduck\/microduck\.xml$/,
     load: async (file) => loadMicroduckPolicy(await onnxRuntime(), file),
-    create: (weights, prefix) => new MicroduckController(weights, prefix, 'Microduck walking policy', 'walk.onnx'),
-  },
-  {
-    id: 'microduck-stand',
-    name: 'microduck_rl stand-up · Microduck',
-    about: 'Stands up from sitting and holds the stand (from lying down it rarely gets up); no drive command. BAM servos as for walking.',
-    dir: 'microduck_rl',
-    load: async (file) => loadMicroduckPolicy(await onnxRuntime(), file),
-    create: (weights, prefix) => new MicroduckController(weights, prefix, 'Microduck stand-up policy', 'stand.onnx'),
+    create: (weights, prefix) => new MicroduckController(weights, prefix, 'Microduck walking policy'),
   },
 ];
 

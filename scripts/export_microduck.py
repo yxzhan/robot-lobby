@@ -1,25 +1,22 @@
-"""Exports Microduck policies trained in a microduck_rl clone
+"""Exports the Microduck walking policy trained in a microduck_rl clone
 (github.com/pollen-robotics/microduck_rl) for the viewer:
 
   pretrained_policies/microduck_rl/walk.onnx    Mjlab-Velocity-Flat-MicroDuck
-  pretrained_policies/microduck_rl/stand.onnx   Mjlab-StandUp-Flat-MicroDuck
   pretrained_policies/microduck_rl/policy.json  what public/microduck.js and
                                                 server/policies.py need
 
-The ONNX files come from the clone's own scripts/export.py (observation
+The ONNX file comes from the clone's own scripts/export.py (observation
 normalizer baked in). policy.json has the joints, default pose and 61-D
-observation layout the policies were trained with, and the BAM model of the
+observation layout the policy was trained with, and the BAM model of the
 XL330 servos (github.com/Rhoban/bam, M6 parameters as bundled with it, and
 microduck_rl's firmware gain, battery and command delay), which the viewer
 runs in place of the model's position actuators.
 
     cd microduck_rl
-    uv run python ../scripts/export_microduck.py --walk logs/rsl_rl/velocity/<run>/model_4999.pt \\
-        --stand logs/rsl_rl/microduck_stand/<run>/model_9998.pt
+    uv run python ../scripts/export_microduck.py --walk logs/rsl_rl/velocity/<run>/model_4999.pt
     cd .. && node scripts/vendor.mjs   # re-index public/policies.json
 
-Either checkpoint can be left out (that ONNX is kept); policy.json is
-always rewritten.
+Without --walk the ONNX is kept and only policy.json is rewritten.
 """
 
 import argparse
@@ -29,7 +26,7 @@ import subprocess
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 OUT = ROOT / 'pretrained_policies' / 'microduck_rl'
-TASKS = {'walk': 'Mjlab-Velocity-Flat-MicroDuck', 'stand': 'Mjlab-StandUp-Flat-MicroDuck'}
+TASKS = {'walk': 'Mjlab-Velocity-Flat-MicroDuck'}
 
 # microduck_rl's src/mjlab_microduck/robot/microduck_constants.py (HOME_FRAME,
 # _BAM_ACTUATOR_KWARGS) and scripts/infer_policy.py (its deployment rehearsal).
@@ -81,7 +78,7 @@ def spec(sources):
               ['last_action', 14], ['command', 3], ['head_command', 4], ['body_command', 6]],
       'joint_vel_lag': 1,
       'command_range': {'lin_vel_x': [-0.4, 0.4], 'lin_vel_y': [-0.3, 0.3], 'ang_vel_yaw': [-1.0, 1.0]},
-      # The walking policy's dead band: standing still, it does not start for
+      # The policy's dead band: standing still, it does not start for
       # less (measured in the viewer's world and in microduck_rl's own CPU
       # rehearsal, scripts/infer_policy.py, alike). Turning right in place it
       # often does not start at all; walking, it turns either way.
@@ -100,11 +97,11 @@ def spec(sources):
 def main():
   ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
   ap.add_argument('--walk', type=pathlib.Path, help='checkpoint of Mjlab-Velocity-Flat-MicroDuck')
-  ap.add_argument('--stand', type=pathlib.Path, help='checkpoint of Mjlab-StandUp-Flat-MicroDuck')
   args = ap.parse_args()
   OUT.mkdir(parents=True, exist_ok=True)
   index = OUT / 'policy.json'
   sources = json.loads(index.read_text()).get('checkpoints', {}) if index.exists() else {}
+  sources = {k: v for k, v in sources.items() if k in TASKS}
   for name, task in TASKS.items():
     ckpt = getattr(args, name)
     if ckpt:
