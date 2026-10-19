@@ -10,6 +10,10 @@ model.xml with:
   - a free joint on the outer body, raised so its bounding box (the reg_bbox
     geom) sits on z = 0,
   - collision geoms moved to group 3, which the viewer does not draw,
+  - mass="0" on the region class (reg_bbox, the invisible bounding box
+    RoboCasa places objects by): its objaverse objects leave it at the
+    default density, 1000 kg/m^3, which made a banana 0.71 kg instead of
+    0.15 and a basket 32 kg instead of 2.6 (the lightwheel ones set it),
 and an asset.json recording where it came from. Screenshots (<name>.png)
 come from scripts/render_previews.mjs.
 
@@ -57,6 +61,8 @@ def convert(model_xml, name):
   for d in root.iter('default'):
     if d.get('class') == 'collision':
       d.find('geom').set('group', '3')
+    if d.get('class') == 'region':
+      d.find('geom').set('mass', '0')
   for g in root.iter('geom'):  # collision geoms that set their group themselves
     if g.get('class') == 'collision' or (g.get('contype') not in ('0', None) and g.get('group') == '0'):
       g.set('group', '3')
