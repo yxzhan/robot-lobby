@@ -88,9 +88,10 @@ STEP_BUDGET = 0.02     # s of wall time stepping per loop iteration at most
 PHYSICS_DEFAULTS = {
     'gravity': [0, 0, -9.81], 'wind': [0, 0, 0], 'magnetic': [0, -0.5, 0],
     'density': 0, 'viscosity': 0, 'impratio': 1, 'cone': 'pyramidal',
+    'sleep': True,  # island sleeping (physics.js): set at compile time
 }
 CONES = ['pyramidal', 'elliptic']
-OPTION_KEYS = list(PHYSICS_DEFAULTS)
+OPTION_KEYS = [k for k in PHYSICS_DEFAULTS if k != 'sleep']
 
 # A model's own <option> loses against the world's (like in the browser):
 # no need to hear about it. Other MuJoCo warnings go to the console, not to
@@ -111,7 +112,7 @@ def base_xml(physics):
   opts = ' '.join(f'{k}="{fmt(physics[k])}"' for k in OPTION_KEYS)
   return f"""
 <mujoco model="world">
-  <option timestep="0.002" integrator="implicitfast" {opts}/>
+  <option timestep="0.002" integrator="implicitfast" {opts}>{'<flag sleep="enable"/>' if physics.get('sleep') else ''}</option>
   <worldbody>
     <geom name="floor" type="plane" size="0 0 0.05"/>
   </worldbody>
@@ -523,9 +524,12 @@ class World:
       self.sim_start = time.monotonic() - d.time
       await self.broadcast_meta()
     elif op == 'physics':
-      self.physics = {k: msg['physics'].get(k, v) for k, v in PHYSICS_DEFAULTS.items()}
+      old, self.physics = self.physics, {k: msg['physics'].get(k, v) for k, v in PHYSICS_DEFAULTS.items()}
       apply_options(m, self.physics)
-      await self.broadcast_meta()
+      if bool(old.get('sleep')) != bool(self.physics['sleep']):
+        await self.set_scene(list(self.robots))  # compiled in (the state carries over)
+      else:
+        await self.broadcast_meta()
     elif op == 'qpos':
       d.qpos[int(msg['adr'])] = float(msg['v'])
       d.qvel[int(msg['dof'])] = 0

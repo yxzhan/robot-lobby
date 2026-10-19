@@ -19,6 +19,7 @@ const OPTIONS = [
   ['viscosity', 'Viscosity', 'Pa·s', 1, 'viscosity of the medium (air ≈ 1.8e-5, water ≈ 0.0009)'],
   ['impratio', 'Impratio', '', 1, 'ratio of frictional to normal constraint impedance (> 1 makes friction harder, less slip)'],
   ['cone', 'Cone', '', CONES, 'friction cone: elliptic is more accurate (legged robots), pyramidal cheaper'],
+  ['sleep', 'Sleep', '', 'bool', 'bodies at rest stop being simulated until something touches, pulls or moves them (robots with actuators never sleep); saves most of the physics time of large scenes. Changing it rebuilds the world'],
 ];
 const GEOM = [
   ['density', 'Density', 'kg/m³', 1, 'for geoms that set neither density nor mass'],
@@ -61,7 +62,11 @@ export class WorldPanel {
         this.app.setPhysics(next).then(() => this.render());
       };
       let inputs;
-      if (Array.isArray(n)) {
+      if (n === 'bool') {
+        const box = el('input', { type: 'checkbox', checked: !!s[k], title });
+        box.onchange = () => set(0)(box.checked);
+        inputs = [box];
+      } else if (Array.isArray(n)) {
         const sel = el('select', { title });
         for (const v of n) sel.append(new Option(v, v, false, v === s[k]));
         sel.onchange = () => { set(0)(sel.value); sel.blur(); };
@@ -69,7 +74,7 @@ export class WorldPanel {
       } else inputs = n === 1 ? [num(s[k], set(0), title)] : s[k].map((v, i) => num(v, set(i), `${title} (${'xyz'[i]})`));
       this.body.append(row(label, unit, title, ...inputs));
     }
-    this.body.append(el('div', { className: 'hint', textContent: 'Applied at once. Wind and fluid drag only act with a medium density or viscosity.' }));
+    this.body.append(el('div', { className: 'hint', textContent: 'Applied at once (Sleep rebuilds the world). Wind and fluid drag only act with a medium density or viscosity.' }));
 
     if (this.app.net) {  // network mode: the server's options (server/server.py)
       this.body.append(el('div', { className: 'hint', textContent: 'Shared world: these are the server\'s settings, for everyone. Default geom properties are not available in server mode yet.' }));

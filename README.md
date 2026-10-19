@@ -178,6 +178,17 @@ properties:
   (`withPhysics` in main.js) and rebuilds the world, keeping its state.
   Most models set their own masses (menagerie robots have explicit
   inertials), so these mostly reach plain objects and the floor.
+- **Sleep** (on by default, unlike MuJoCo): MuJoCo's island sleeping
+  (`<flag sleep="enable"/>`). Bodies at rest stop being simulated until
+  something touches, pulls or moves them; robots with actuators never
+  sleep, nor does what rests on them. Nearly all of a large scene rests (a
+  RoboCasa kitchen: 44 of its 45 trees), and in WASM physics was most of the
+  frame: with two kitchens, the Garmi apartment, a G1 and the duck a step
+  went from 3.8 to 1.0 ms, and the world from 40 % of real time to real
+  time. It is set at compile time (turning it on in a live model crashes
+  MuJoCo), so changing it rebuilds the world. The server does the same.
+  Fixed and sleeping bodies also cost no drawing work: `syncTransforms`
+  only updates the parts of bodies that moved (3.6 → 0.5 ms a frame there).
 
 ## Render panel
 

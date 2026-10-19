@@ -13,10 +13,16 @@
 //   into each spawned model's root default class (only the attributes it
 //   does not set) before it is compiled, and into the world's (the floor).
 //   They change masses and inertias, so they need a rebuild.
+// - Sleep (MuJoCo's island sleeping, <flag sleep>): bodies at rest stop being
+//   simulated until something touches, pulls or moves them; robots with
+//   actuators never sleep. Most of a large scene (a kitchen's drawers, doors
+//   and props) rests, so this saves most of its physics time. On here, unlike
+//   MuJoCo's default; it is set when the model is compiled, so a change
+//   rebuilds the world.
 
 const STORE = 'mujoco-filament/physics';
 
-// MuJoCo's own defaults.
+// MuJoCo's own defaults, but for sleep.
 export const PHYSICS_DEFAULTS = Object.freeze({
   gravity: [0, 0, -9.81],
   wind: [0, 0, 0],
@@ -25,6 +31,7 @@ export const PHYSICS_DEFAULTS = Object.freeze({
   viscosity: 0,
   impratio: 1,
   cone: 'pyramidal',
+  sleep: true,
   geom: { density: 1000, mass: null, friction: [1, 0.005, 0.0001] },
 });
 
@@ -45,9 +52,10 @@ const OPTION_KEYS = ['gravity', 'wind', 'magnetic', 'density', 'viscosity', 'imp
 export const CONES = ['pyramidal', 'elliptic'];  // mjtCone order
 const fmt = (v) => (Array.isArray(v) ? v.join(' ') : String(v));
 
-// The <option> attributes for the world spec.
-export function optionAttrs(s) {
-  return OPTION_KEYS.map((k) => `${k}="${fmt(s[k])}"`).join(' ');
+// The <option> element of the world spec.
+export function optionXml(s) {
+  const attrs = OPTION_KEYS.map((k) => `${k}="${fmt(s[k])}"`).join(' ');
+  return `<option timestep="0.002" integrator="implicitfast" ${attrs}>${s.sleep ? '<flag sleep="enable"/>' : ''}</option>`;
 }
 
 // Sets the global options on a compiled model (takes effect at the next step).
@@ -71,6 +79,9 @@ export function geomOverrides(s) {
 
 // Identifies the default geom attributes in caches of compiled inertias.
 export const geomSignature = (s) => JSON.stringify(geomOverrides(s));
+
+// Whether going from settings a to b needs the world compiled again.
+export const needsRebuild = (a, b) => geomSignature(a) !== geomSignature(b) || !!a.sleep !== !!b.sleep;
 
 // Writes `attrs` into the root default class of a model's XML documents
 // (the parsed include tree, entry file first), keeping what it sets itself.

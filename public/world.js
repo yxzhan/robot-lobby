@@ -1,4 +1,4 @@
-import { geomOverrides, optionAttrs } from './physics.js';
+import { geomOverrides, optionXml } from './physics.js';
 
 // The shared world: an empty floor that robots are spawned into.
 //
@@ -20,7 +20,7 @@ export function baseXml(physics) {
   const geom = Object.entries(geomOverrides(physics)).map(([k, v]) => `${k}="${v}"`).join(' ');
   return `
 <mujoco model="world">
-  <option timestep="0.002" integrator="implicitfast" ${optionAttrs(physics)}/>
+  ${optionXml(physics)}
   <default><geom ${geom}/></default>
   <worldbody>
     <geom name="floor" type="plane" size="0 0 0.05"/>

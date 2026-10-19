@@ -24,7 +24,7 @@ import { AxisGizmo } from './gizmo.js';
 import { TeleopPanel, TOUCH } from './teleop.js';
 import { BaseController } from './base.js';
 import { IkController } from './ik.js';
-import { applyOptions, geomOverrides, geomSignature, injectGeomDefaults, loadPhysics, savePhysics } from './physics.js';
+import { applyOptions, geomOverrides, geomSignature, injectGeomDefaults, loadPhysics, needsRebuild, savePhysics } from './physics.js';
 import { WorldPanel } from './worldpanel.js';
 import { RenderPanel, loadQuality } from './render.js';
 import { MARKER } from './marker.js';
@@ -1063,13 +1063,32 @@ class App {
   // Geom pose = body pose (from the world) * geom pose in the body (from the
   // robot's own model). The robot's body k > 0 is world body bodyOffset + k - 1;
   // its static (worldbody) geoms sit at the spawn point, turned by its yaw.
+  // Only the parts whose body moved since the last call: in a large scene
+  // most bodies are fixed or asleep, and each update is three calls into
+  // Filament.
   syncTransforms() {
     const tcm = this.engine.getTransformManager();
     const xpos = this.data.xpos, xmat = this.data.xmat;
-    for (const { visual, pos, yaw = 0, bodyOffset, entities } of this.robots) {
+    for (const robot of this.robots) {
+      const { visual, pos, yaw = 0, bodyOffset, entities } = robot;
       const c = Math.cos(yaw), s = Math.sin(yaw);
       const Rz = [c, -s, 0, s, c, 0, 0, 0, 1];
+      // The robot's body poses as last drawn (12 per body: rotation, position).
+      const nb = visual.inertia.nbody;
+      if (robot.drawn?.entities !== entities || robot.drawn.pose.length !== 12 * nb) {
+        robot.drawn = { entities, pose: new Float64Array(12 * nb).fill(NaN) };
+      }
+      const drawn = robot.drawn.pose, moved = new Uint8Array(nb);
+      for (let k = 0; k < nb; k++) {
+        const b = bodyOffset + k - 1, o = 12 * k;
+        const B = k > 0 ? xmat.subarray(9 * b, 9 * b + 9) : Rz, t = k > 0 ? xpos.subarray(3 * b, 3 * b + 3) : pos;
+        for (let j = 0; j < 12; j++) {
+          const v = j < 9 ? B[j] : t[j - 9];
+          if (drawn[o + j] !== v) { drawn[o + j] = v; moved[k] = 1; }
+        }
+      }
       for (const [i, part] of visual.parts.entries()) {
+        if (!moved[part.body]) continue;
         let B = Rz, t = pos;
         if (part.body > 0) {
           const b = bodyOffset + part.body - 1;
@@ -1725,7 +1744,7 @@ try {
       app.net.send('physics', { physics: next });
       return true;
     }
-    const rebuildNeeded = geomSignature(next) !== geomSignature(app.physics);
+    const rebuildNeeded = needsRebuild(app.physics, next);
     if (rebuildNeeded && busy) return false;
     app.physics = next;
     savePhysics(next);
@@ -1735,7 +1754,7 @@ try {
     if (!rebuildNeeded || !app.model) return true;
     busy = true;
     const progress = (msg) => { status.textContent = msg; setBusy(msg); };
-    progress('applying default geom properties…');
+    progress('applying physics settings…');
     try {
       for (const r of robots) r.visual = await withPhysics(r.visual, progress);
       await rebuild([...robots], [], progress);
