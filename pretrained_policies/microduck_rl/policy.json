@@ -1,0 +1,152 @@
+{
+ "source": "https://github.com/pollen-robotics/microduck_rl",
+ "checkpoints": {
+  "walk": {
+   "task": "Mjlab-Velocity-Flat-MicroDuck",
+   "checkpoint": "logs/rsl_rl/velocity/2026-10-18_01-24-25_velocity/model_4999.pt"
+  }
+ },
+ "ctrl_dt": 0.02,
+ "root": "trunk_base",
+ "joints": [
+  "left_hip_yaw",
+  "left_hip_roll",
+  "left_hip_pitch",
+  "left_knee",
+  "left_ankle",
+  "neck_pitch",
+  "head_pitch",
+  "head_yaw",
+  "head_roll",
+  "right_hip_yaw",
+  "right_hip_roll",
+  "right_hip_pitch",
+  "right_knee",
+  "right_ankle"
+ ],
+ "actuators": [
+  "left_hip_yaw",
+  "left_hip_roll",
+  "left_hip_pitch",
+  "left_knee",
+  "left_ankle",
+  "neck_pitch",
+  "head_pitch",
+  "head_yaw",
+  "head_roll",
+  "right_hip_yaw",
+  "right_hip_roll",
+  "right_hip_pitch",
+  "right_knee",
+  "right_ankle"
+ ],
+ "default_pose": [
+  0.0,
+  -0.0873,
+  -0.4579,
+  -0.0049,
+  0.453,
+  0.3491,
+  0.3491,
+  0.0,
+  0.0,
+  0.0,
+  0.0873,
+  0.4579,
+  0.0049,
+  -0.453
+ ],
+ "action_scale": 1.0,
+ "input": "obs",
+ "output": "actions",
+ "obs": [
+  [
+   "base_ang_vel",
+   3
+  ],
+  [
+   "projected_gravity",
+   3
+  ],
+  [
+   "joint_pos",
+   14
+  ],
+  [
+   "joint_vel",
+   14
+  ],
+  [
+   "last_action",
+   14
+  ],
+  [
+   "command",
+   3
+  ],
+  [
+   "head_command",
+   4
+  ],
+  [
+   "body_command",
+   6
+  ]
+ ],
+ "joint_vel_lag": 1,
+ "command_range": {
+  "lin_vel_x": [
+   -0.4,
+   0.4
+  ],
+  "lin_vel_y": [
+   -0.3,
+   0.3
+  ],
+  "ang_vel_yaw": [
+   -1.0,
+   1.0
+  ]
+ },
+ "min_command": {
+  "speed": 0.2,
+  "turn": 0.6
+ },
+ "bam": {
+  "model": "xl330 m6",
+  "kt": 0.36601349688984386,
+  "R": 2.8113923539223227,
+  "armature": 0.0018077432831600838,
+  "friction_base": 0.004771183165566,
+  "friction_stribeck": 0.004676345799486616,
+  "load_friction_motor": 0.2667860954283698,
+  "load_friction_external": 8.515871897059342e-06,
+  "load_friction_motor_stribeck": 1.0722918395099123e-05,
+  "load_friction_external_stribeck": 0.08077928978935671,
+  "load_friction_motor_quad": 0.009972471242139415,
+  "load_friction_external_quad": 0.004902565732332559,
+  "dtheta_stribeck": 2.890372094130307,
+  "alpha": 8.683259907618984,
+  "friction_viscous": 0.005359668274599504,
+  "kp": 200.0,
+  "error_gain": 0.0028773775022263564,
+  "max_pwm": 1.0,
+  "max_current": 1.75,
+  "vin": 7.4,
+  "vin_drop_gain": 0.1,
+  "vin_min": 6.0,
+  "force_limit": 1.0675531184074794,
+  "delay": 0.0225,
+  "solref_friction": [
+   -50000.0,
+   -200.0
+  ],
+  "solimp_friction": [
+   0.99,
+   0.9999,
+   0.001,
+   0.5,
+   2.0
+  ]
+ }
+}
