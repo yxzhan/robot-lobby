@@ -12,5 +12,5 @@
     "objects/robocasa/banana"
   ],
   "policies": ["GR00T-WholeBodyControl_g1", "playground_go2", "playground_spot", "microduck_rl"],
-  "binder": { "hub": "https://mybinder.org", "repo": null, "path": "mujoco/" }
+  "binder": { "hub": "https://mybinder.org", "repo": null, "path": "robot-lobby/" }
 }

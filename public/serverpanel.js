@@ -6,7 +6,7 @@
 // A server is joined by its URL, or started on Binder from here when the
 // page knows a Binder repository for it (deploy.json, written by
 // scripts/build_pages.mjs):
-//   {"binder": {"hub": "https://mybinder.org", "repo": "gh/<owner>/<repo>/<ref>", "path": "mujoco/"}}
+//   {"binder": {"hub": "https://mybinder.org", "repo": "gh/<owner>/<repo>/<ref>", "path": "robot-lobby/"}}
 // BinderHub's build API reports the build and launch as server-sent events
 // and ends with the session's URL and token; the world server runs behind
 // the session's jupyter-server-proxy at `path` (binder/jupyter_server_config.py),
@@ -31,7 +31,7 @@ async function loadDeploy() {
 
 // Starts a Binder session for `binder` ({hub, repo, path}); `progress(phase,
 // message)` follows it. Resolves with the server's URL (token included).
-export function launchBinder({ hub, repo, path = 'mujoco/' }, progress) {
+export function launchBinder({ hub, repo, path = 'robot-lobby/' }, progress) {
   return new Promise((resolve, reject) => {
     const events = new EventSource(new URL(`build/${repo}`, hub.replace(/\/?$/, '/')));
     events.onmessage = (e) => {
@@ -114,7 +114,7 @@ export class ServerPanel {
     }
 
     b.append(el('div', { className: 'sub', textContent: 'Join a server' }));
-    const input = el('input', { type: 'url', placeholder: 'https://…/mujoco/?token=…', value: server?.remote ? server.url : '' });
+    const input = el('input', { type: 'url', placeholder: 'https://…/robot-lobby/?token=…', value: server?.remote ? server.url : '' });
     const go = el('button', { textContent: 'Connect' });
     const connect = () => {
       try {

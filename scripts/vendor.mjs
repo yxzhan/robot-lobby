@@ -13,6 +13,8 @@ const copies = {
   'node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.wasm': 'public/vendor/onnxruntime/ort-wasm-simd-threaded.wasm',
   // mrdoob's FPS / frame time / memory meter (ES module).
   'node_modules/stats.js/src/Stats.js': 'public/vendor/stats/Stats.js',
+  // QR codes for the Share panel (ES module).
+  'node_modules/qrcode-generator/dist/qrcode.mjs': 'public/vendor/qrcode/qrcode.mjs',
 };
 for (const [from, to] of Object.entries(copies)) {
   mkdirSync(to.slice(0, to.lastIndexOf('/')), { recursive: true });

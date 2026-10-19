@@ -66,6 +66,7 @@
     #views button::before { content: ''; width: 7px; height: 7px; border-radius: 50%;
                             background: #555; transition: background .15s, box-shadow .15s; }
     #views button:hover { color: #eee; background: rgba(255,255,255,.08); }
+    #views button[hidden] { display: none; }
     #views button[aria-pressed=true] { color: #fff; background: #3d5a73; border-color: #5a85a8; }
     #views button[aria-pressed=true]::before { background: #7fd1ff; box-shadow: 0 0 6px #7fd1ff; }
     /* Right column: Stage on top (scrolls), Teleop below it. */
@@ -111,27 +112,39 @@
     #teleop .joints label.off { color: #777; }
     #teleop .joints .why { margin-left: auto; color: #888; font-style: italic; }
     #teleop .error { color: #f88; margin: 4px 0; }
-    :is(#world, #render, #server) { overflow: hidden auto; min-height: 0; flex: 0 5 auto; font-size: 12px; }
-    :is(#world, #render, #server) h3 { margin: 0 0 6px; font-size: 13px; }
-    :is(#world, #render, #server) .field { display: grid; grid-template-columns: 64px 1fr 38px; align-items: center; gap: 6px; margin: 3px 0; }
-    :is(#world, #render, #server) .ctl { display: flex; gap: 4px; min-width: 0; }
-    :is(#world, #render, #server) .unit { color: #888; font-size: 11px; }
-    :is(#world, #render, #server) input[type=number] { width: 0; flex: 1; min-width: 0; font: inherit; color: #eee; background: #222;
+    :is(#world, #render, #server, #share) { overflow: hidden auto; min-height: 0; flex: 0 5 auto; font-size: 12px; }
+    :is(#world, #render, #server, #share) h3 { margin: 0 0 6px; font-size: 13px; }
+    :is(#world, #render, #server, #share) .field { display: grid; grid-template-columns: 64px 1fr 38px; align-items: center; gap: 6px; margin: 3px 0; }
+    :is(#world, #render, #server, #share) .ctl { display: flex; gap: 4px; min-width: 0; }
+    :is(#world, #render, #server, #share) .unit { color: #888; font-size: 11px; }
+    :is(#world, #render, #server, #share) input[type=number] { width: 0; flex: 1; min-width: 0; font: inherit; color: #eee; background: #222;
                                 border: 1px solid #555; border-radius: 4px; padding: 1px 3px; }
-    :is(#world, #render, #server) select { flex: 1; min-width: 0; font: inherit; color: #eee; background: #222; border: 1px solid #555; border-radius: 4px; }
-    :is(#world, #render, #server) .hint { color: #999; margin: 4px 0; line-height: 1.5; }
-    :is(#world, #render, #server) .sub { margin-top: 8px; padding-top: 6px; border-top: 1px solid #3a3d44; font-weight: 600; }
-    :is(#world, #render, #server) .sub.minor { border-top: 0; margin-top: 4px; padding-top: 0; color: #aaa; font-weight: 400; }
-    :is(#world, #render, #server) .bar { display: flex; align-items: center; gap: 4px; margin-top: 6px; }
-    :is(#world, #render, #server) button { cursor: pointer; font: inherit; font-size: 11px; color: #ddd; background: #333;
+    :is(#world, #render, #server, #share) select { flex: 1; min-width: 0; font: inherit; color: #eee; background: #222; border: 1px solid #555; border-radius: 4px; }
+    :is(#world, #render, #server, #share) .hint { color: #999; margin: 4px 0; line-height: 1.5; }
+    :is(#world, #render, #server, #share) .sub { margin-top: 8px; padding-top: 6px; border-top: 1px solid #3a3d44; font-weight: 600; }
+    :is(#world, #render, #server, #share) .sub.minor { border-top: 0; margin-top: 4px; padding-top: 0; color: #aaa; font-weight: 400; }
+    :is(#world, #render, #server, #share) .bar { display: flex; align-items: center; gap: 4px; margin-top: 6px; }
+    :is(#world, #render, #server, #share) button { cursor: pointer; font: inherit; font-size: 11px; color: #ddd; background: #333;
                     border: 1px solid #555; border-radius: 4px; padding: 2px 8px; }
-    :is(#world, #render, #server) button.primary { background: #2f5a3c; border-color: #4d8a5f; }
-    :is(#world, #render, #server) button:disabled { opacity: .5; cursor: default; }
-    :is(#world, #render, #server) .note { color: #c9a; font-size: 11px; }
+    :is(#world, #render, #server, #share) button.primary { background: #2f5a3c; border-color: #4d8a5f; }
+    :is(#world, #render, #server, #share) button:disabled { opacity: .5; cursor: default; }
+    :is(#world, #render, #server, #share) .note { color: #c9a; font-size: 11px; }
     #server input[type=url] { flex: 1; min-width: 0; font: inherit; color: #eee; background: #222; border: 1px solid #555;
                               border-radius: 4px; padding: 2px 4px; }
     #server .log { margin-top: 6px; font: 11px ui-monospace, monospace; color: #9cd; overflow-wrap: anywhere; }
     #server .log .error { color: #f88; }
+    #share .pair { text-align: center; margin: 6px 0; }
+    #share .pair a { color: #6bf; font-family: ui-monospace, monospace; }
+    #share .code { margin: 4px 0; font: 700 34px ui-monospace, monospace; letter-spacing: .35em; padding-left: .35em; color: #fff; }
+    #share .code.expired { color: #777; text-decoration: line-through; }
+    #share .qr { width: 152px; margin: 6px auto; padding: 6px; background: #fff; border-radius: 4px; line-height: 0; }
+    #share .qr[hidden] { display: none; }
+    #share .note { color: #888; }
+    #share .note.error { color: #f88; }
+    #share .bar { justify-content: center; }
+    #share input[type=text] { flex: 1; min-width: 0; font: inherit; color: #ccc; background: #222; border: 1px solid #555;
+                              border-radius: 4px; padding: 2px 4px; }
+    #share .warn { color: #ec6; margin-top: 6px; line-height: 1.5; }
     #teleop .chips { display: flex; gap: 4px; flex-wrap: wrap; }
     #teleop .chip { display: flex; align-items: center; gap: 3px; padding: 1px 7px 1px 3px; border: 1px solid #555;
                     border-radius: 10px; background: #2a2c31; cursor: pointer; }
@@ -240,7 +253,8 @@
     <button data-panel="world" title="World physics: gravity, medium, default geom properties">World</button>
     <button data-panel="teleop" title="Teleoperate a robot: controller and input">Teleop</button>
     <button data-panel="render" title="Rendering quality: resolution, anti-aliasing, occlusion, shadows, textures">Render</button>
-    <button data-panel="server" title="Where the world runs: in this browser, or on a server shared with others (Binder)">Server</button>
+    <button data-panel="share" title="Open this page on another device: a short code or a QR code">Share</button>
+    <button data-panel="server" hidden title="Where the world runs: in this browser, or on a server shared with others (Binder)">Server</button>
   </div>
   <div id="assets">
     <div class="tabs"></div>
@@ -273,6 +287,10 @@
   </div>
   <div id="server" hidden>
     <h3>Server</h3>
+    <div class="body"></div>
+  </div>
+  <div id="share" hidden>
+    <h3>Share</h3>
     <div class="body"></div>
   </div>
   </div>

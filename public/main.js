@@ -29,6 +29,7 @@ import { applyOptions, geomOverrides, geomSignature, injectGeomDefaults, loadPhy
 import { WorldPanel } from './worldpanel.js';
 import { RenderPanel, loadQuality } from './render.js';
 import { ServerPanel } from './serverpanel.js';
+import { SharePanel } from './share.js';
 import { MARKER } from './marker.js';
 import { CHAIN_COLORS } from './teleop.js';
 import Stats from './vendor/stats/Stats.js';
@@ -1378,6 +1379,7 @@ try {
   // mjcf_assets/).
   const [assets, recent] = await Promise.all([loadAssets(), loadRecent(), loadPolicyIndex()]);
   new ServerPanel(app, document.getElementById('server'), { models: assets.length });
+  new SharePanel(document.getElementById('share'));
 
   // Asset paths (`rel`) are under public/:
   // 'mjcf_assets/<category>/<source>/<model>/<file>.xml'.

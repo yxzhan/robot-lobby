@@ -6,7 +6,7 @@
 // The server, the first of:
 //   ?local          none: local mode on the page's own files
 //   ?server=<url>   that one; remembered in this browser. A Binder URL
-//                   carries its token (…/mujoco/?token=…), which then goes
+//                   carries its token (…/robot-lobby/?token=…), which then goes
 //                   on every request, WebSockets included: the page is on
 //                   another site, its login cookie would not be sent.
 //   remembered      the last one connected to, while it still answers
@@ -30,7 +30,7 @@ const remembered = () => {
   try { return localStorage.getItem(STORE); } catch { return null; }
 };
 
-// '…/mujoco/?token=abc' -> {base: '…/mujoco/', token: 'abc'}
+// '…/robot-lobby/?token=abc' -> {base: '…/robot-lobby/', token: 'abc'}
 function parse(url) {
   const u = new URL(url, location.href);
   const token = u.searchParams.get('token');

@@ -13,6 +13,7 @@
     "@mujoco/mujoco": "3.15.0",
     "filament": "1.53.4",
     "onnxruntime-web": "1.30.0",
+    "qrcode-generator": "2.0.4",
     "stats.js": "0.17.0"
   },
   "private": true

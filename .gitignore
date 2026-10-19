@@ -14,3 +14,4 @@ mjcf_assets/
 # IK setups saved from the Teleop panel in network mode
 server/saved/
 __pycache__/
+**.tar.gz

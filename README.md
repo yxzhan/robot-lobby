@@ -608,20 +608,36 @@ a volume mounted into the user pod, `/mnt/dev-tools/mjcf_assets`
 MuJoCo, onnxruntime and Node; `postBuild` vendors the page's runtimes
 (`npm ci`), links the volume as `public/mjcf_assets` and installs
 `jupyter_server_config.py`, which puts server.py behind the session's
-jupyter-server-proxy at `<session>/mujoco/`, started on the first request.
+jupyter-server-proxy at `<session>/robot-lobby/`, started on the first request,
+and makes it the page a session opens on (`default_url`; JupyterLab stays
+at `<session>/lab`). A launch link can also say so itself, whatever the
+hub's own default: `https://<binderhub>/v2/gh/<owner>/robot-lobby/<branch>?urlpath=robot-lobby/`.
 `start` runs as the pod starts, when the volume is there: it indexes the
 library and the policies (`scripts/vendor.mjs`, which indexes through
 `public/mjcf_assets` when there is no `mjcf_assets/` next to
 `package.json`) and makes the thumbnails, a few seconds; the log is
 `/tmp/index.log`.
 
-**Joining.** *Start a server on Binder* in the Server panel calls
+**Joining.** The Server panel is hidden for now (its button in
+`index.html` has `hidden`). *Start a server on Binder* there calls
 BinderHub's build API, shows the build and launch, and reloads the page on
-the new session's `<url>mujoco/?token=…`. *Join a server* takes such a URL
+the new session's `<url>robot-lobby/?token=…`. *Join a server* takes such a URL
 directly (or any server.py's). *Copy link* gives a link to the page on that
 server, token included, so others join the same world; *Go local* leaves
 it. A Binder session ends after a while without anyone connected (on
 mybinder.org about 10 minutes); the page then starts locally again.
+
+**Share panel.** Gets the page onto another device (a phone, a headset)
+without typing its URL (`public/share.js`, after bambot's `shareLink.ts`):
+the pairing service at join.aicor.dev (`?pair=<url>` for another) keeps a
+short code for the link for 30 minutes; the other device opens the service
+and types the code, or scans the QR code of `join.aicor.dev/<code>`. The
+link is this page with the server it is on, token included (the token the
+page was opened with is remembered for the tab, as Jupyter's proxy may drop
+it from the address bar), so the other device joins the same world; in
+local mode it gets a world of its own. A code is asked for when the panel
+is shown; *New code* asks again. It warns when the page is on localhost or
+was opened behind the proxy without a token.
 
 ## How it works
 
