@@ -853,7 +853,7 @@ class App {
     this.robots = robots;
     this.refreshControllers();
     this.nextControl = data.time;
-    this.simStart = performance.now() - data.time * 1000;
+    this.resync();
     this.syncTransforms();
     this.panel?.build();
     this.teleop?.build();
@@ -891,7 +891,7 @@ class App {
     for (const c of this.controllers) c.reset();
     this.teleop?.clearGoals(this.robots);
     this.nextControl = 0;
-    this.simStart = performance.now();
+    this.resync();
     this.syncTransforms();  // frame() only syncs while running
   }
 
@@ -1129,14 +1129,22 @@ class App {
     }
   }
 
-  // Steps the world up to wall time (capped so a hidden tab doesn't explode),
+  // Sim time follows wall time at the World panel's speed from now on:
+  // target(t) = (t - simStart) · speed.
+  resync() {
+    this.simStart = performance.now() - (this.data?.time ?? 0) * 1000 / (this.physics?.speed || 1);
+  }
+
+  // Steps the world up to wall time × speed (as far as it gets in 20 ms of
+  // each frame, so a hidden tab or the "max" speed doesn't freeze the page),
   // ticking the policies every CONTROL_DT of sim time. Inference is async
   // (onnxruntime-web), so this awaits it between steps; a world swapped in
-  // meanwhile (spawn, undo) ends the call.
+  // meanwhile (spawn, remove) ends the call.
   async advance() {
     const { mujoco, model, data } = this;
     const valid = () => this.data === data;
-    const target = (performance.now() - this.simStart) / 1000;
+    const speed = this.physics.speed;
+    const target = speed ? (performance.now() - this.simStart) / 1000 * speed : Infinity;
     const t0 = performance.now();
     while (data.time < target && performance.now() - t0 < 20) {
       if (this.controllers.length && data.time >= this.nextControl - 1e-9) {
@@ -1148,18 +1156,30 @@ class App {
       for (const c of this.controllers) c.substep?.(data);  // software servos (ik.js, base.js)
       mujoco.mj_step(model, data);
     }
-    if (data.time < target) this.simStart = performance.now() - data.time * 1000;
+    if (data.time < target) this.resync();  // slower than asked: let it slip
     this.syncTransforms();
   }
 
-  // Network mode: round trip, state rate and traffic, next to the frame meter.
-  showNetStats() {
+  // Next to the frame meter: the simulation speed (sim time per wall time,
+  // steps per second), and in network mode the round trip, state rate and
+  // traffic.
+  showStats() {
     const now = performance.now();
-    if (now - (this.netShown ?? 0) < 500) return;
-    this.netShown = now;
-    const el = document.getElementById('net');
+    if (now - (this.statsShown ?? 0) < 500) return;
+    const el = document.getElementById('net'), last = this.simSample, { model, data } = this;
+    this.statsShown = now;
+    this.simSample = data && { now, time: data.time, data };
+    el.hidden = !model && !this.net;
+    const sim = el.querySelector('.sim');
+    if (model && last?.data === data && now > last.now) {
+      const speed = (data.time - last.time) / ((now - last.now) / 1000);
+      const dt = model.opt?.timestep ?? this.physics.timestep;  // net.js's stand-in has no opt: the server's setting
+      sim.textContent = `sim ${speed.toFixed(2)}× · ${Math.round(speed / dt)} steps/s`;
+      sim.className = `sim ${this.paused || speed >= 0.95 ? 'good' : speed >= 0.7 ? 'fair' : 'poor'}`;
+    } else if (!model) sim.textContent = '';
+    for (const c of ['.rtt', '.rate']) el.querySelector(c).hidden = !this.net;
+    if (!this.net) return;
     const { rtt, hz, rate, delay } = this.net.stats();
-    el.hidden = false;
     const off = !this.net.connected;
     el.querySelector('.rtt').textContent = off ? 'offline' : rtt == null ? 'RTT …' : `RTT ${Math.round(rtt)} ms`;
     el.querySelector('.rtt').className = `rtt ${off ? 'poor' : rtt == null ? '' : rtt < 80 ? 'good' : rtt < 200 ? 'fair' : 'poor'}`;
@@ -1172,12 +1192,12 @@ class App {
     if (this.net) {
       // The server steps; show its state (interpolated) once this world matches it.
       if (this.model && this.net.apply(this.model, this.data, this.netVersion, this.robots)) this.syncTransforms();
-      this.showNetStats();
     } else if (this.model && !this.paused && !this.stepping) {
       this.stepping = this.advance()
         .catch((err) => { this.paused = true; console.error('simulation stopped', err); })
         .finally(() => { this.stepping = null; });
     }
+    this.showStats();
     this.syncMarkers();
     this.panel?.update(performance.now());
     if (xrFrame) {
@@ -1415,7 +1435,7 @@ try {
   // full-model inertia, first keyframe, names referenced in its XML.
   const visuals = new Map();
   // GPU memory back from the render parts of model files no robot uses any
-  // more (after Undo, Clear, ✕, a new scene from the server); they are built
+  // more (after Clear, ✕, a new scene from the server); they are built
   // again if spawned again.
   function dropUnused() {
     for (const cache of [visuals, netVisuals]) {
@@ -1727,7 +1747,7 @@ try {
     }
   }
 
-  // Undo / clear / remove one: recompile with the robots of `list` (a subset
+  // Clear / remove one: recompile with the robots of `list` (a subset
   // of `robots`, in order); the state of the rest is kept.
   async function respawn(list) {
     if (busy) return;
@@ -1767,7 +1787,9 @@ try {
     }
     const rebuildNeeded = needsRebuild(app.physics, next);
     if (rebuildNeeded && busy) return false;
+    const speedChanged = next.speed !== app.physics.speed;
     app.physics = next;
+    if (speedChanged) app.resync();
     app.world?.render();
     app.teleop?.render();  // a policy's physics note
     if (app.model) applyOptions(app.model, next);
@@ -2150,10 +2172,9 @@ try {
     if (app.net) { app.net.send('pause', { paused: !app.paused }); return; }
     app.paused = !app.paused;
     e.target.textContent = app.paused ? 'Resume' : 'Pause';
-    if (!app.paused && app.data) app.simStart = performance.now() - app.data.time * 1000;
+    if (!app.paused && app.data) app.resync();
   };
   document.getElementById('reset').onclick = () => app.model && app.reset();
-  document.getElementById('undo').onclick = () => robots.length && respawn(robots.slice(0, -1));
   document.getElementById('clear').onclick = () => robots.length && respawn([]);
 
   // Enter VR: shown only where an immersive-vr session is supported (WebXR

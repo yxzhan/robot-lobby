@@ -16,6 +16,13 @@
 //   into each spawned model's root default class (only the attributes it
 //   does not set) before it is compiled, and into the world's (the floor).
 //   They change masses and inertias, so they need a rebuild.
+// - Timestep and speed: the physics step (s; live, no rebuild: larger
+//   steps cost less per simulated second but are less stable, and walking
+//   policies were trained at 0.002-0.005 s) and the most simulated time per
+//   second of wall time (1: real time; 0: as fast as it goes). A world that
+//   cannot keep up runs slower whatever the speed.
+// - Sync rate (network mode only): how many states a second the server
+//   sends each page (more: smoother and fresher, more traffic).
 // - Sleep (MuJoCo's island sleeping, <flag sleep>): bodies at rest stop being
 //   simulated until something touches, pulls or moves them; robots with
 //   actuators never sleep. Most of a large scene (a kitchen's drawers, doors
@@ -32,6 +39,9 @@ export const PHYSICS_DEFAULTS = Object.freeze({
   viscosity: 0,
   impratio: 10,
   cone: 'elliptic',
+  timestep: 0.002,
+  speed: 1,
+  stateHz: 30,  // network mode: the server's state broadcasts per second
   sleep: true,
   geom: { density: 1000, mass: null, friction: [1, 0.005, 0.0001] },
 });
@@ -42,19 +52,22 @@ export function loadPhysics() {
   return structuredClone(PHYSICS_DEFAULTS);
 }
 
-const OPTION_KEYS = ['gravity', 'wind', 'magnetic', 'density', 'viscosity', 'impratio', 'cone'];
+const OPTION_KEYS = ['timestep', 'gravity', 'wind', 'magnetic', 'density', 'viscosity', 'impratio', 'cone'];
 export const CONES = ['pyramidal', 'elliptic'];  // mjtCone order
+export const SPEEDS = [0.1, 0.25, 0.5, 1, 2, 4, 10, 0];  // × real time; 0: as fast as it goes
+export const STATE_RATES = [10, 15, 20, 30, 60];  // Hz
 const fmt = (v) => (Array.isArray(v) ? v.join(' ') : String(v));
 
 // The <option> element of the world spec.
 export function optionXml(s) {
   const attrs = OPTION_KEYS.map((k) => `${k}="${fmt(s[k])}"`).join(' ');
-  return `<option timestep="0.002" integrator="implicitfast" ${attrs}>${s.sleep ? '<flag sleep="enable"/>' : ''}</option>`;
+  return `<option integrator="implicitfast" ${attrs}>${s.sleep ? '<flag sleep="enable"/>' : ''}</option>`;
 }
 
 // Sets the global options on a compiled model (takes effect at the next step).
 export function applyOptions(model, s) {
   const o = model.opt;
+  o.timestep = s.timestep;
   for (const k of ['gravity', 'wind', 'magnetic']) o[k].set(s[k]);
   o.density = s.density;
   o.viscosity = s.viscosity;

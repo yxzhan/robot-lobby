@@ -39,10 +39,10 @@ Server -> client:
   {type: 'reset', id}            after reset (id null) / reset_robot {id}
   {type: 'reply', rid, ...} / {type: 'error', op, msg, rid?}
   {type: 'pong', t}
-  binary state, STATE_HZ times a second: int32 [version, epoch, nq, nmocap,
+  binary state, physics['stateHz'] times a second (30 by default): int32 [version, epoch, nq, nmocap,
   nu], 4 bytes padding, float64 time, then float32 [qpos, mocap_pos,
-  mocap_quat, ctrl]; ctrl only in every CTRL_EVERY-th state (nu 0 in the
-  others). `epoch` changes whenever the state jumps (reset, edits), so
+  mocap_quat, ctrl]; ctrl only about CTRL_HZ times a second (nu 0 in the
+  other states). `epoch` changes whenever the state jumps (reset, edits), so
   clients do not interpolate across it.
 
 Robots are attached in order (like world.js), so bodies, joints, actuators
@@ -83,9 +83,8 @@ import policies as POL  # noqa: E402
 import render_asset  # noqa: E402
 
 PUBLIC = pathlib.Path(__file__).resolve().parent.parent / 'public'
-STATE_HZ = 30         # state broadcasts per second
 STATUS_HZ = 5         # controller status (IK targets and errors) broadcasts per second
-CTRL_EVERY = 6        # ctrl goes with every 6th state (5 Hz): only the panels show it
+CTRL_HZ = 5           # ctrl goes with a state this often: only the panels show it
 STEP_BUDGET = 0.02     # s of wall time stepping per loop iteration at most
 
 
@@ -113,10 +112,13 @@ PHYSICS_THREADS = int(os.environ.get('PHYSICS_THREADS') or min(8, cpus()))
 PHYSICS_DEFAULTS = {
     'gravity': [0, 0, -9.81], 'wind': [0, 0, 0], 'magnetic': [0, -0.5, 0],
     'density': 0, 'viscosity': 0, 'impratio': 10, 'cone': 'elliptic',
+    'timestep': 0.002,  # s, live
+    'speed': 1,         # the most sim seconds per wall second; 0: as fast as it goes
+    'stateHz': 30,      # state broadcasts per second (not physics, but the server's too)
     'sleep': True,  # island sleeping (physics.js): set at compile time
 }
 CONES = ['pyramidal', 'elliptic']
-OPTION_KEYS = [k for k in PHYSICS_DEFAULTS if k != 'sleep']
+OPTION_KEYS = [k for k in PHYSICS_DEFAULTS if k not in ('sleep', 'speed', 'stateHz')]
 
 # A model's own <option> loses against the world's (like in the browser):
 # no need to hear about it. Other MuJoCo warnings go to the console, not to
@@ -137,7 +139,7 @@ def base_xml(physics):
   opts = ' '.join(f'{k}="{fmt(physics[k])}"' for k in OPTION_KEYS)
   return f"""
 <mujoco model="world">
-  <option timestep="0.002" integrator="implicitfast" {opts}>{'<flag sleep="enable"/>' if physics.get('sleep') else ''}</option>
+  <option integrator="implicitfast" {opts}>{'<flag sleep="enable"/>' if physics.get('sleep') else ''}</option>
   <worldbody>
     <geom name="floor" type="plane" size="0 0 0.05"/>
   </worldbody>
@@ -146,6 +148,7 @@ def base_xml(physics):
 
 def apply_options(model, physics):
   o = model.opt
+  o.timestep = physics['timestep']
   for k in ('gravity', 'wind', 'magnetic'):
     o.__setattr__(k, physics[k])
   o.density, o.viscosity, o.impratio = physics['density'], physics['viscosity'], physics['impratio']
@@ -462,7 +465,7 @@ class World:
     self.perturbs.clear()
     self.version += 1
     self.epoch += 1
-    self.sim_start = time.monotonic() - data.time
+    self.resync()
     self.dirty = True
 
   def start_pose(self, model, data, r, at):
@@ -562,10 +565,16 @@ class World:
       await self.send_all(json.dumps({'type': 'reset', 'id': r.id}))
     elif op == 'pause':
       self.paused = bool(msg['paused'])
-      self.sim_start = time.monotonic() - d.time
+      self.resync()
       await self.broadcast_meta()
     elif op == 'physics':
-      old, self.physics = self.physics, {k: msg['physics'].get(k, v) for k, v in PHYSICS_DEFAULTS.items()}
+      new = {k: msg['physics'].get(k, v) for k, v in PHYSICS_DEFAULTS.items()}
+      new['timestep'] = min(0.05, max(1e-4, float(new['timestep'])))
+      new['speed'] = max(0.0, float(new['speed']))
+      new['stateHz'] = min(120, max(1, int(new['stateHz'])))
+      old, self.physics = self.physics, new
+      if old['speed'] != new['speed'] and self.data is not None:
+        self.resync()
       if bool(old.get('sleep')) != bool(self.physics['sleep']):
         await self.set_scene(list(self.robots))  # compiled in (the state carries over)
       else:
@@ -882,10 +891,11 @@ class World:
       now = time.monotonic()
       if self.model is not None and not self.paused:
         async with self.stepping:
-          target = now - self.sim_start
+          speed = self.physics['speed']
+          target = (now - self.sim_start) * speed if speed else math.inf
           reached, failed = await asyncio.to_thread(self.advance, target)
-          if self.data.time < target:  # slower than real time: let it slip
-            self.sim_start = now - self.data.time
+          if self.data.time < target:  # slower than asked: let it slip
+            self.resync()
           self.dirty = True
           for r, goal in reached:
             await self.send_all(json.dumps({'type': 'goal', 'id': r.id, 'goal': None, 'arrived': goal}))
@@ -893,16 +903,24 @@ class World:
             await self.controller_failed(c, err)
       if self.dirty and now >= next_broadcast and self.model is not None:
         self.dirty = False
-        next_broadcast = max(next_broadcast + 1 / STATE_HZ, now)
+        hz = self.physics['stateHz']
+        next_broadcast = max(next_broadcast + 1 / hz, now)
         sent += 1
-        await self.send_all(self.state_bytes(ctrl=sent % CTRL_EVERY == 0))
+        await self.send_all(self.state_bytes(ctrl=sent % max(1, round(hz / CTRL_HZ)) == 0))
       if now >= next_status and self.model is not None:
         next_status = now + 1 / STATUS_HZ
         self.expire_commands(now)
         status = {r.id: r.status() for r in self.robots if r.controllers()}
         if status:
           await self.send_all(json.dumps({'type': 'status', 'robots': status}))
-      await asyncio.sleep(0.004)
+      # Stepping runs on a thread, so the network goes on meanwhile: at the
+      # "max" speed there is no need to wait between rounds.
+      await asyncio.sleep(0 if self.physics['speed'] == 0 and not self.paused else 0.004)
+
+  def resync(self):
+    """Sim time follows wall time at the physics speed from now on:
+    target = (now - sim_start) * speed."""
+    self.sim_start = time.monotonic() - (self.data.time if self.data is not None else 0) / (self.physics['speed'] or 1)
 
   def state_bytes(self, ctrl=True):
     m, d = self.model, self.data

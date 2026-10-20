@@ -2,7 +2,7 @@
 // (physics.js). Options apply as soon as a field changes; default geom
 // properties change masses, so they wait for Apply (a rebuild).
 
-import { CONES, PHYSICS_DEFAULTS } from './physics.js';
+import { CONES, PHYSICS_DEFAULTS, SPEEDS, STATE_RATES } from './physics.js';
 
 const el = (tag, props = {}, ...children) => {
   const e = Object.assign(document.createElement(tag), props);
@@ -19,6 +19,9 @@ const OPTIONS = [
   ['viscosity', 'Viscosity', 'Pa·s', 1, 'viscosity of the medium (air ≈ 1.8e-5, water ≈ 0.0009)'],
   ['impratio', 'Impratio', '', 1, 'ratio of frictional to normal constraint impedance (> 1 makes friction harder, less slip)'],
   ['cone', 'Cone', '', CONES, 'friction cone: elliptic is more accurate (legged robots), pyramidal cheaper'],
+  ['timestep', 'Timestep', 's', 1, 'physics step: larger costs less per simulated second but is less stable and accurate (walking policies were trained at 0.002-0.005 s)'],
+  ['speed', 'Speed', '', SPEEDS, 'the most simulated time per second of wall time (1×: real time, max: as fast as the computer goes); a world that cannot keep up runs slower'],
+  ['stateHz', 'Sync rate', 'Hz', STATE_RATES, 'shared world: states the server sends each page per second (more: smoother and fresher, more traffic for everyone)'],
   ['sleep', 'Sleep', '', 'bool', 'bodies at rest stop being simulated until something touches, pulls or moves them (robots with actuators never sleep); saves most of the physics time of large scenes. Changing it rebuilds the world'],
 ];
 const GEOM = [
@@ -54,9 +57,12 @@ export class WorldPanel {
       el('span', { textContent: label }), el('div', { className: 'ctl' }, ...inputs), el('span', { className: 'unit', textContent: unit }));
 
     for (const [k, label, unit, n, title] of OPTIONS) {
+      if (k === 'stateHz' && !this.app.net) continue;  // the server's
       if (k === 'density') this.body.append(el('div', { className: 'sub minor', textContent: 'Medium (air, water…)' }));
       if (k === 'impratio') this.body.append(el('div', { className: 'sub minor', textContent: 'Contacts' }));
+      if (k === 'timestep') this.body.append(el('div', { className: 'sub minor', textContent: 'Simulation' }));
       const set = (i) => (v) => {
+        if (k === 'timestep' && !(v >= 1e-4 && v <= 0.05)) { this.render(); return; }  // MuJoCo needs > 0; 50 ms is no physics any more
         const next = structuredClone(this.app.physics);
         if (!Array.isArray(s[k])) next[k] = v; else next[k][i] = v;
         this.app.setPhysics(next).then(() => this.render());
@@ -68,8 +74,9 @@ export class WorldPanel {
         inputs = [box];
       } else if (Array.isArray(n)) {
         const sel = el('select', { title });
-        for (const v of n) sel.append(new Option(v, v, false, v === s[k]));
-        sel.onchange = () => { set(0)(sel.value); sel.blur(); };
+        const label = (v) => (typeof v !== 'number' ? v : k === 'stateHz' ? String(v) : v === 0 ? 'max' : `${v}×`);
+        for (const v of n) sel.append(new Option(label(v), v, false, v === s[k]));
+        sel.onchange = () => { set(0)(typeof n[0] === 'number' ? Number(sel.value) : sel.value); sel.blur(); };
         inputs = [sel];
       } else inputs = n === 1 ? [num(s[k], set(0), title)] : s[k].map((v, i) => num(v, set(i), `${title} (${'xyz'[i]})`));
       this.body.append(row(label, unit, title, ...inputs));

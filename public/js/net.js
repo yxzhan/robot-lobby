@@ -40,6 +40,7 @@ export class NetClient {
     this.replies = new Map();  // rid -> {resolve, reject}
     this.nextRid = 1;
     this.rtt = null;           // ms, smoothed
+    this.simRate = 1;          // sim seconds per wall second between states (the World panel's speed, or slower)
     this.interval = 1 / 30;    // s between states as they arrive, smoothed
     this.jitter = 0.01;        // s, smoothed deviation from that
     this.delay = 0.1;          // s, the view's current lag behind the newest state
@@ -172,6 +173,9 @@ export class NetClient {
     if (prev) {  // arrival statistics (gaps over 0.5 s: paused, not jitter)
       const dt = (s.recv - prev.recv) / 1000;
       if (dt < 0.5) {
+        if (s.time > prev.time && s.version === prev.version && s.epoch === prev.epoch) {
+          this.simRate += (Math.min(100, (s.time - prev.time) / Math.max(dt, 1e-3)) - this.simRate) * 0.1;
+        }
         this.interval += (dt - this.interval) * 0.05;
         this.jitter += (Math.abs(dt - this.interval) - this.jitter) * 0.05;
       }
@@ -199,10 +203,12 @@ export class NetClient {
     const want = Math.min(MAX_DELAY, Math.max(MIN_DELAY, this.interval + 3 * this.jitter));
     this.delay += (want - this.delay) * 0.02;
     const fresh = now - last.recv < 200;
-    const target = last.time - (fresh ? this.delay : 0);
-    if (this.renderTime == null || Math.abs(target - this.renderTime) > 0.5) this.renderTime = target;
+    // Sim time runs at simRate × wall time (faster or slower than real time).
+    const rate = this.simRate;
+    const target = last.time - (fresh ? this.delay * rate : 0);
+    if (this.renderTime == null || Math.abs(target - this.renderTime) > 0.5 * Math.max(1, rate)) this.renderTime = target;
     else {
-      this.renderTime += (now - (this.lastFrame ?? now)) / 1000;
+      this.renderTime += (now - (this.lastFrame ?? now)) / 1000 * rate;
       this.renderTime += (target - this.renderTime) * 0.05;  // drift back towards the target
     }
     this.lastFrame = now;

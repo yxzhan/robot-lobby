@@ -35,8 +35,8 @@ dragging, a marker on the floor shows the spawn point and heading (the model's
 15° steps, Shift+wheel or R/F raises or lowers it in 5 cm steps (a pole
 shows the height; it is kept for the next drag), and Esc cancels. The drag
 label shows the spawn position and heading. The toolbar (top left) runs the
-simulation: Undo removes the last one, Clear all of them, Reset puts every
-robot back in its spawn pose. The toggles at the top right show or hide the
+simulation: Clear removes every spawned item (the Stage panel's ✕ one of
+them), Reset puts every robot back in its spawn pose. The toggles at the top right show or hide the
 Assets, Stage and Teleop panels.
 
 On a touch screen (phone, tablet): one finger orbits the camera, two pinch
@@ -177,6 +177,18 @@ properties:
   is soft and a Panda's fingers let a 100 g box creep out within seconds; with
   these it holds the box through a lift and a swing to within 2 mm, for about
   5% more step time.
+- **Timestep and speed** (Simulation): the physics step (0.002 s by default,
+  changed live; larger steps cost less per simulated second but are less
+  stable, and walking policies were trained at 0.002–0.005 s) and the most
+  simulated time per second of wall time: 0.1× to 10× or **max**, as fast as
+  the computer goes (in the browser up to 20 ms of stepping per frame; on the
+  server without a pause between rounds). A world that cannot keep up runs
+  slower whatever the setting; the meter next to the frame meter shows the
+  speed reached (`sim 1.00× · 500 steps/s`). In network mode the page's
+  interpolation follows the server's rate.
+- **Sync rate** (network mode only): the server's state broadcasts per
+  second, 10–60 Hz (30 by default): more is smoother and fresher, and more
+  traffic for every page.
 - **Default geom density, mass and friction** apply to geoms that do not
   set them themselves or through their own default classes, as a top-level
   `<default><geom/></default>` would: density and friction are written into
@@ -554,7 +566,7 @@ which it loads no MuJoCo at all:
   ~50 KB/s. The page interpolates between states, a little behind (see
   the network meter; quaternions on the short arc), and places the bodies itself
   (`forwardKinematics`, MuJoCo's `mj_kinematics`, matching it to 1e-15).
-- **Requests.** Spawn, Undo / Clear / ✕, Reset, Pause, the Stage panel's
+- **Requests.** Spawn, Clear / ✕, Reset, Pause, the Stage panel's
   poses and sliders, Shift+drag, double-click picking (the server casts the
   ray) and the World panel's options go to the server, which applies them
   and tells every browser. Robots are attached in the same order on both

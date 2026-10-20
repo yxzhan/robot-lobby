@@ -6,7 +6,7 @@ import { geomOverrides, optionXml } from './physics.js';
 // MjSpec from the base XML, attaches each robot's own spec (mjs_attach) under a
 // frame at its spawn point with a unique name prefix, and compiles the lot.
 // Rebuilding from scratch (instead of editing one long-lived spec) also makes
-// a failed spawn or an undo trivial: just compile a different robot list.
+// a failed spawn or a removal trivial: just compile a different robot list.
 //
 // The world model is physics-only: each robot's visual geoms (contype and
 // conaffinity 0) and the meshes only they use are removed before attaching.
