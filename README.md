@@ -36,7 +36,11 @@ dragging, a marker on the floor shows the spawn point and heading (the model's
 shows the height; it is kept for the next drag), and Esc cancels. The drag
 label shows the spawn position and heading. The toolbar (top left) runs the
 simulation: Clear removes every spawned item (the Stage panel's ✕ one of
-them), Reset puts every robot back in its spawn pose. The toggles at the top right show or hide the
+them), Reset puts every robot back in its spawn pose. In a shared world, **Full restart**
+(after a confirmation, for everyone) has the server read the model files
+again and start anew: a fresh MjData at time 0, every robot at its spawn
+point with fresh controllers (the same ones switched on), so edits to the
+MJCF files take effect without restarting the server. The toggles at the top right show or hide the
 Assets, Stage and Teleop panels.
 
 On a touch screen (phone, tablet): one finger orbits the camera, two pinch

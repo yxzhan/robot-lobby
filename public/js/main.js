@@ -2176,6 +2176,9 @@ try {
   };
   document.getElementById('reset').onclick = () => app.model && app.reset();
   document.getElementById('clear').onclick = () => robots.length && respawn([]);
+  document.getElementById('restart').onclick = () => {
+    if (app.net && confirm('Restart the shared world for everyone? The server reads the model files again and starts the simulation anew.')) app.net.send('restart');
+  };
 
   // Enter VR: shown only where an immersive-vr session is supported (WebXR
   // needs a secure context: https or localhost).
@@ -2225,6 +2228,7 @@ try {
         setBusy(null);
       }
     };
+    document.getElementById('restart').hidden = false;
     app.net = new NetClient({
       scene: (msg) => { scenes.push(msg); buildScenes(); },
       meta: (msg) => applyMeta(msg),

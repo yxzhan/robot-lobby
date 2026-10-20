@@ -433,6 +433,36 @@ class World:
           after()
         await self.broadcast_scene()
 
+  async def restart(self):
+    """Full restart (the toolbar's button): the model files read again
+    (their cached sizes and keyframes dropped), every robot made anew at its
+    spawn point (numbered from 1 again; fresh controllers, the policy loaded
+    again, the same ones switched on), in a new MjData from time 0."""
+    async with self.lock:
+      old, first = list(self.robots), 1
+
+      def make():
+        _infos.clear()
+        robots = []
+        for k, r in enumerate(old):
+          n = Robot(first + k, r.rel, r.label, r.pos, r.yaw)
+          if n.key and r.use:
+            n.use.update(r.use)
+            n.make_policy()
+          robots.append(n)
+        return robots, compile_world(robots, self.physics)
+
+      robots, model = await asyncio.to_thread(make)
+      async with self.stepping:
+        for r in old:
+          if r.policy is not None:
+            r.policy.unbind()
+        self.next_id = first + len(robots)
+        self.data, self.robots = None, []  # nothing carries over
+        self.swap(model, robots, robots)
+        await self.broadcast_scene()
+        await self.send_all(json.dumps({'type': 'reset', 'id': None}))  # pages drop goals and the like
+
   def swap(self, model, robots, fresh):
     data = mujoco.MjData(model)
     if PHYSICS_THREADS > 1:
@@ -515,7 +545,7 @@ class World:
   async def handle(self, ws, msg):
     # These may rebuild the world: they take the stepping lock themselves,
     # around everything but compiling, so stepping goes on meanwhile.
-    if msg['op'] in ('spawn', 'remove', 'physics', 'move'):
+    if msg['op'] in ('spawn', 'remove', 'physics', 'move', 'restart'):
       return await self.handle_op(ws, msg)
     async with self.stepping:
       return await self.handle_op(ws, msg)
@@ -528,6 +558,8 @@ class World:
       r = Robot(self.next_id, msg['rel'], msg.get('label') or msg['rel'], msg['pos'], msg.get('yaw', 0))
       self.next_id += 1
       await self.set_scene([*self.robots, r], [r])
+    elif op == 'restart':
+      await self.restart()
     elif op == 'remove':
       ids = set(msg['ids'])
       await self.set_scene([r for r in self.robots if r.id not in ids])
@@ -579,7 +611,8 @@ class World:
         await self.set_scene(list(self.robots))  # compiled in (the state carries over)
       else:
         async with self.stepping:
-          apply_options(self.model, self.physics)
+          if self.model is not None:
+            apply_options(self.model, self.physics)
           await self.broadcast_meta()
     elif op == 'qpos':
       d.qpos[int(msg['adr'])] = float(msg['v'])
