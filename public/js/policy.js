@@ -60,16 +60,16 @@ export const POLICIES = [
   },
   {
     id: 'playground-spot',
-    name: 'Playground joystick · Boston Dynamics Spot',
+    name: 'Walking · Boston Dynamics Spot',
     about: 'Walking on flat ground (12 leg joints, 50 Hz), trained in MuJoCo Playground (training/).',
     dir: 'playground_spot',  // training/export_onnx.py
-    defaultFor: /(^|\/)mujoco_menagerie\/boston_dynamics_spot\/spot\.xml$/,
+    defaultFor: /(^|\/)mujoco_menagerie\/boston_dynamics_spot\/[^/]+\.xml$/,
     load: async (file) => loadPlaygroundPolicy(await onnxRuntime(), file),
     create: (weights, prefix) => new PlaygroundController(weights, prefix, 'Spot joystick policy'),
   },
   {
     id: 'playground-go2',
-    name: 'Playground joystick · Unitree Go2',
+    name: 'Walking · Unitree Go2',
     about: "Walking on flat ground (12 leg joints, 50 Hz): Playground's Go1 task on a Go2 (training/envs/go2.py); drives go2.xml's torque motors as PD servos.",
     dir: 'playground_go2',  // training/export_onnx.py
     defaultFor: /(^|\/)mujoco_menagerie\/unitree_go2\/go2\.xml$/,
@@ -78,7 +78,7 @@ export const POLICIES = [
   },
   {
     id: 'microduck-walk',
-    name: 'microduck_rl walking · Microduck',
+    name: 'Walking · Microduck',
     about: 'Walking on flat ground (14 servos, 50 Hz), trained in microduck_rl (mjlab) on the BAM model of its XL330 servos, which drives the joints here too.',
     dir: 'microduck_rl',  // scripts/export_microduck.py
     defaultFor: /(^|\/)digital_twin\/microduck\/microduck\.xml$/,
