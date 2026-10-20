@@ -3,6 +3,7 @@
   uv run train.py                                   # SpotFlatTerrainJoystick, its tuned config
   uv run train.py --steps 20_000_000 --name quick   # a short run (pipeline test)
   uv run train.py --env Go2JoystickFlatTerrain      # envs/go2.py, Go1's task and config
+  uv run train.py --env SpotArmJoystickFlatTerrain  # envs/spot_arm.py, Go1's task on spot_arm.xml
 
 Writes runs/<name>/params.pkl (normalizer statistics, policy and value
 parameters) and runs/<name>/run.json (environment, its config, the PPO
@@ -10,6 +11,7 @@ config): what export_onnx.py turns into a policy for the viewer.
 """
 
 import argparse
+import ast
 import functools
 import json
 import os
@@ -50,10 +52,19 @@ def main():
                   help='constraint rows per environment (MuJoCo Warp drops the ones beyond it, silently; '
                        "Spot's task config has 28, which its friction loss and contacts already fill)")
   ap.add_argument('--seed', type=int, default=0)
+  ap.add_argument('--set', action='append', default=[], metavar='KEY=VALUE',
+                  help='override the task config, e.g. --set Kp=500 --set reward_config.scales.pose=0.1 (repeatable)')
   ap.add_argument('--name', help='run directory under runs/ (default: <env>-<time>)')
   args = ap.parse_args()
 
   env_cfg = registry.get_default_config(args.env)
+  for item in args.set:
+    key, value = item.split('=', 1)
+    *path, last = key.split('.')
+    node = env_cfg
+    for p in path:
+      node = node[p]
+    node[last] = ast.literal_eval(value)
   ppo_cfg = locomotion_params.brax_ppo_config(envs.PPO_LIKE.get(args.env, args.env))
   if args.steps:
     ppo_cfg.num_timesteps = args.steps
@@ -68,7 +79,7 @@ def main():
   out.mkdir(parents=True, exist_ok=True)
 
   env, eval_env = (quiet(registry.load(args.env, config=env_cfg)) for _ in range(2))
-  randomizer = envs.RANDOMIZERS.get(args.env) or registry.get_domain_randomizer(args.env)
+  randomizer = envs.randomizer(args.env, env_cfg) or registry.get_domain_randomizer(args.env)
   net_cfg = dict(ppo_cfg.network_factory)
   train_cfg = {k: v for k, v in ppo_cfg.to_dict().items() if k != 'network_factory'}
   print(f'{args.env}: {ppo_cfg.num_timesteps:,} steps, {ppo_cfg.num_envs} envs, devices {jax.devices()}')

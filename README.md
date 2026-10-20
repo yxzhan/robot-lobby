@@ -379,13 +379,18 @@ Inference is async, so `App.advance()` awaits it every 0.02 s of sim time.
 (MJX / MuJoCo Warp + Brax PPO) and exports them for the viewer; see
 `training/README.md`. `uv run train.py` then `uv run export_onnx.py
 runs/<name>` put `policy.onnx` and `policy.json` into
-`pretrained_policies/playground_spot/` (or `playground_go2/`), and the
-menagerie Spot (`boston_dynamics_spot/spot.xml`) and Go2
+`pretrained_policies/playground_spot/` (or `playground_go2/`), and every
+menagerie Spot (`boston_dynamics_spot/*.xml`) and the Go2
 (`unitree_go2/go2.xml`) start with the `playground-spot` /
-`playground-go2` policy on. Playground has no Go2 task: `training/envs/go2.py`
-runs its Go1 task on a Go2 built from `go2.xml`; the Go2 policy walks
-without falling, the Spot one (Playground's own config) still tips over
-under quickly changing commands. `public/js/playground.js` (and `PlaygroundController` in
+`playground-go2` policy on. The Spot policy is trained on the whole
+`spot_arm.xml` (`training/envs/spot_arm.py`: Playground's Spot task, the
+arm's joints fixed in a different pose in every training environment, with
+domain randomization, pushes and commands every 1-4 s), so it walks with
+the arm stowed, reaching out or moved by IK, and on `spot.xml` too.
+Playground has no Go2 task: `training/envs/go2.py` runs its Go1 task on a
+Go2 built from `go2.xml`. Both walk without falling under the keys or the
+goal marker; `training/check_model.py` measures that on the viewer's own
+model files. `public/js/playground.js` (and `PlaygroundController` in
 `server/policies.py`) runs any such policy from its `policy.json`: it writes
 the trained PD gains and joint damping / armature / friction loss into the
 robot, builds the observation (body gyro and up vector, joint positions,

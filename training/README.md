@@ -8,21 +8,25 @@ Lab: training and the viewer both run MuJoCo.
 ```sh
 cd training
 uv sync                                   # .venv: playground, jax[cuda12], onnx, onnxruntime
-uv run train.py --name spot               # SpotFlatTerrainJoystick, 100M steps (~5 min on an RTX 3080)
-uv run export_onnx.py runs/spot           # -> ../pretrained_policies/playground_spot/
+uv run train.py --env SpotArmJoystickFlatTerrain --steps 300_000_000 \
+    --set "command_config.lin_vel_y=[-0.5, 0.5]" --name spot-arm   # envs/spot_arm.py (~14 min on an RTX 3080)
+uv run export_onnx.py runs/spot-arm --out ../pretrained_policies/playground_spot
+uv run check_model.py ../pretrained_policies/playground_spot \
+    ../mjcf_assets/robots/mujoco_menagerie/boston_dynamics_spot/spot_arm.xml --arm   # on the viewer's model
 uv run train.py --env Go2JoystickFlatTerrain --name go2   # 200M steps (~9 min)
 uv run export_onnx.py runs/go2            # -> ../pretrained_policies/playground_go2/
 cd .. && node scripts/vendor.mjs          # re-index public/policies.json
 ```
 
-Then spawn **boston_dynamics_spot** or **unitree_go2** (Robots ›
+Then spawn a **boston_dynamics_spot** model or **unitree_go2** (Robots ›
 Quadrupeds): it starts with its policy on (`playground-spot` /
 `playground-go2`, Teleop panel › Policy) and walks with the keys or the goal
 marker.
 
 | Task | Policy in its training env | In the viewer |
 |---|---|---|
-| `SpotFlatTerrainJoystick` (Playground's) | 89% fall within 20 s (eval reward peaks at 34 near 23M steps, then drops) | walks straight; can tip over when commands change quickly |
+| `SpotFlatTerrainJoystick` (Playground's, the earlier Spot policy) | 89% fall within 20 s (eval reward peaks at 34 near 23M steps, then drops) | walks straight; on `spot_arm.xml` 36 of 40 `check_model.py` runs fell, on `spot.xml` 7 of 10 |
+| `SpotArmJoystickFlatTerrain` (`envs/spot_arm.py`, 300M steps, sideways ±0.5 m/s) | eval reward 38 | `check_model.py --arm` on `spot_arm.xml`: 5 of 80 runs fell, all but one with random commands every 0.2 s; never walking straight or with the arm in any of its poses under commands every 1 s but twice; `spot.xml`: about as well |
 | `Go2JoystickFlatTerrain` (`envs/go2.py`) | 0 of 256 fall in 20 s | no falls with commands changing every 0.2 s; stands for commands below ~0.3 m/s / 0.3 rad/s |
 
 ## Files
@@ -30,6 +34,15 @@ marker.
 - `pyproject.toml`, `uv.lock`: the environment. `jax` is held below 0.10
   because Brax 0.14 still calls `jax.device_put_replicated`.
 - `envs/`: tasks of our own, registered with Playground on import.
+  `spot_arm.py`: Playground's Spot joystick task (rewards, observation,
+  gains, PPO config) on a model built from the viewer's `spot_arm.xml`:
+  feet-only collision, Euler at 4 ms, the arm's seven joints fixed (bodies,
+  masses and inertias kept, so the policy drives the 12 leg joints and the
+  task is unchanged). Every training environment turns the fixed arm into a
+  pose of its own (30% stowed, the rest anywhere in `ARM_RANGE`), on top of
+  Go1's domain randomization (Playground's Spot task has none); pushes on;
+  a new command every 1-4 s instead of every 4 s. Go1's task, tried first
+  on this robot, only learnt to stand.
   `go2.py`: Playground has no Go2 task, so this is its Go1 joystick task
   (rewards, observation, PPO config, domain randomization) on a Go2 model
   built with MjSpec from the viewer's `go2.xml` (same bodies, inertias,
@@ -38,7 +51,9 @@ marker.
   4 ms with one solver iteration (`envs/build/`, generated).
 - `train.py`: Playground's tuned PPO config for the task (`--steps`,
   `--envs`, `--evals` override it; `--njmax` raises the constraint rows per
-  environment, which MuJoCo Warp drops silently beyond the limit). Writes
+  environment, which MuJoCo Warp drops silently beyond the limit; `--set
+  key=value` changes the task config, e.g. `--set Kp=500` or `--set
+  "command_config.lin_vel_y=[-0.5, 0.5]"`, and export_onnx.py follows it). Writes
   `runs/<name>/params.pkl` and `run.json` (configs, reward per evaluation,
   wall time).
 - `export_onnx.py`: writes `policy.onnx` (observation normalization, the
@@ -48,6 +63,12 @@ marker.
   trained with, observation layout, command ranges). Then checks it: ONNX
   against Brax's own inference on random inputs, and a closed loop in plain
   MuJoCo on the CPU (walking forward for 10 s).
+- `check_model.py`: the exported policy on a robot file as the viewer runs
+  it (the file's own collision and actuators, the viewer's physics
+  defaults, the trained gains set as its controllers do): walking forward,
+  then random commands every 1 s and every 0.2 s over several seeds, and
+  with `--arm` again with the arm held in other poses. Prints the falls and
+  the tracking error.
 
 ## In the viewer
 
@@ -65,9 +86,10 @@ close the trained servo loop themselves every physics step (`substep`),
 within the trained torque limits. `min_command` in `policy.json` is the
 policy's dead band; the goal marker never commands less.
 
-The viewer runs the menagerie model (`boston_dynamics_spot/spot.xml`), not
-Playground's training copy: the same bodies, inertias and joints, but mesh
-collision for the body and legs and softer foot contacts. A policy trained
-only on Playground's model may track less well or fall in the viewer under
-quickly changing commands; train longer or with domain randomization if it
-does.
+The viewer runs the menagerie model files, not the training copies: the
+same bodies, inertias and joints, but mesh collision for the body and legs,
+softer foot contacts and the viewer's physics (2 ms, elliptic cone).
+`check_model.py` measures the difference: for the Spot policy it is small
+(about as many falls in its training model as on `spot_arm.xml`), what made
+it fall was quickly changing commands, which the 1-4 s commands and the
+randomization address.

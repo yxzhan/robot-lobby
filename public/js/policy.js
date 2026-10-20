@@ -61,7 +61,7 @@ export const POLICIES = [
   {
     id: 'playground-spot',
     name: 'Walking · Boston Dynamics Spot',
-    about: 'Walking on flat ground (12 leg joints, 50 Hz), trained in MuJoCo Playground (training/).',
+    about: "Walking on flat ground (12 leg joints, 50 Hz): Playground's Spot task on spot_arm.xml, the arm in any pose (training/envs/spot_arm.py); for every Spot model.",
     dir: 'playground_spot',  // training/export_onnx.py
     defaultFor: /(^|\/)mujoco_menagerie\/boston_dynamics_spot\/[^/]+\.xml$/,
     load: async (file) => loadPlaygroundPolicy(await onnxRuntime(), file),

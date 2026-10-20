@@ -81,6 +81,23 @@ TASKS = {
         # task's tracking reward is lenient and its stand_still cost is not).
         'min_command': {'speed': 0.3, 'turn': 0.3},
     },
+    # Playground's Spot joystick task on the menagerie's spot_arm.xml, its arm fixed (envs/spot_arm.py).
+    'SpotArmJoystickFlatTerrain': {
+        'dir': 'playground_spot_arm',
+        'obs': [
+            ['gyro', 3],
+            ['upvector', 3],
+            ['joint_pos', 12],
+            ['qpos_error', 36],
+            ['feet_pos', 12],
+            ['last_action', 12],
+            ['command', 3],
+        ],
+        'feet': ['FL', 'FR', 'HL', 'HR'],
+        'root': 'body',
+        'imu': None,  # at the body origin (the training model's imu site)
+        'command_range': {'lin_vel_x': [-1.0, 1.0], 'lin_vel_y': [-0.8, 0.8], 'ang_vel_yaw': [-1.0, 1.0]},
+    },
 }
 
 
@@ -239,6 +256,7 @@ def main():
   out = args.out or ROOT / 'pretrained_policies' / task['dir']
   out.mkdir(parents=True, exist_ok=True)
   env_cfg = registry.get_default_config(meta['env'])
+  env_cfg.update(meta['env_config'])  # as trained (train.py --set)
   env_cfg.impl = 'jax'  # only its MuJoCo model and config are used, on the CPU
   env = registry.load(meta['env'], config=env_cfg)
   act_size = env.action_size
@@ -249,6 +267,9 @@ def main():
   model = build_onnx(mean, std, layers, act_size)
   onnx.save(model, out / 'policy.onnx')
   spec = describe(env, env_cfg, task)
+  cc = env_cfg.command_config
+  if all(k in cc for k in spec['command_range']):  # as trained (train.py --set command_config....)
+    spec['command_range'] = {k: [float(v) for v in cc[k]] for k in spec['command_range']}
   assert sum(n for _, n in spec['obs']) == len(mean), 'observation layout does not match the policy input'
   spec.update({
       'onnx': 'policy.onnx', 'input': 'obs', 'output': 'action',
