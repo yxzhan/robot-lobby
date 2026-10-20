@@ -60,7 +60,10 @@ export class RemoteIk {
     this.bodies = desc.bodies;
     this.sites = desc.tipSites;
     const old = new Map((this.chains ?? []).map((c) => [c.cfg.name, c]));
-    this.chains = desc.chains.map((c) => ({ ...c, err: old.get(c.cfg.name)?.err ?? null }));
+    // Each chain's cfg is the entry of this.config it was resolved from (one
+    // object, as in ik.js): the panel edits it, resolve() sends this.config.
+    // (The server resolves config.chains in order, one chain each.)
+    this.chains = desc.chains.map((c, i) => ({ ...c, cfg: this.config.chains[i] ?? c.cfg, err: old.get(c.cfg.name)?.err ?? null }));
     // A chain whose reference body changed (a joint locked or unlocked): its
     // target keeps its place in the world, like on the server.
     for (const c of this.chains) {
