@@ -105,6 +105,15 @@
     #teleop details.chain .err { color: #9cd; font: 11px ui-monospace, monospace; white-space: nowrap; }
     #teleop .field .ctl { display: flex; gap: 4px; min-width: 0; }
     #teleop .field .ctl select { flex: 1; min-width: 0; }
+    #teleop .ros input[type=text] { flex: 1; min-width: 0; font: inherit; color: #eee; background: #222; border: 1px solid #555;
+                                    border-radius: 4px; padding: 1px 4px; }
+    #teleop .ros input:disabled { opacity: .45; }
+    #teleop .ros input[type=range] { flex: 1; min-width: 0; }
+    #teleop .ros .sub { margin-top: 6px; color: #aaa; font-size: 11px; }
+    #teleop .ros .unit { color: #888; font-size: 11px; min-width: 38px; text-align: right; }
+    #teleop .ros-state { font-size: 11px; color: #888; overflow-wrap: anywhere; }
+    #teleop .ros-state::before { content: '●'; margin-right: 5px; }
+    #teleop .ros-state.connected { color: #6d8; } #teleop .ros-state.connecting { color: #db6; } #teleop .ros-state.error { color: #f88; }
     #teleop input[type=number] { width: 0; flex: 1; min-width: 0; font: inherit; color: #eee; background: #222;
                                  border: 1px solid #555; border-radius: 4px; padding: 1px 3px; }
     #teleop .joints { display: grid; gap: 1px; margin: 4px 0; font-size: 11px; }
@@ -230,7 +239,7 @@
       #views button { padding: 5px 8px; }
       #assets, #side { top: 112px; left: 8px; right: 8px; width: auto; max-height: calc(100% - 112px - 12px); }
       #assets { right: auto; width: min(300px, calc(100% - 16px)); }  /* as on desktop: two columns */
-      #assets input[type=search], #teleop select, #world select, #world input, #render select, #teleop input[type=number] { font-size: 16px; }  /* no zoom on focus (iOS) */
+      #assets input[type=search], #teleop select, #world select, #world input, #render select, #teleop input[type=number], #teleop .ros input[type=text] { font-size: 16px; }  /* no zoom on focus (iOS) */
       #gizmo { width: 64px; height: 64px; left: 8px; bottom: 8px; }
       #sticks { left: 12px; right: 12px; bottom: 84px; }
       #offline { top: 8px; left: 8px; right: 8px; transform: none; max-width: none; justify-content: space-between; font-size: 12px; }

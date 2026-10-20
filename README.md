@@ -265,6 +265,28 @@ Goals can also come from a script, for several robots at once:
 A robot that is being driven with the keys in the Teleop panel ignores its
 goal, as with the marker.
 
+**ROS bridge.** Every robot can have a rosbridge connection of its own
+(`public/js/ros.js`, rosbridge_suite's WebSocket protocol, no roslibjs),
+switched on with the **ROS** chip next to its controllers and made from
+this browser, in local and network mode alike. Its section in the panel:
+the bridge's address (`localhost:9090` by default, or a `ws://` / `wss://`
+URL) with the connection's state (retried every 2 s while it is down);
+what it publishes, each with its topic: the joint states
+(`sensor_msgs/JointState` on `joint_state`: the robot's hinge and slide
+joints, names without the `r1/` prefix; velocities only in local mode, the
+server sends positions) and TF (`tf2_msgs/TFMessage` on `/tf`: every body
+in its parent's frame, the root bodies in `world`); what it takes: joint
+commands (`sensor_msgs/JointState` on `joint_command`: position targets
+for the actuators on those joints; a running policy or IK keeps writing
+the joints it drives, the panel says so) and `cmd_vel`
+(`geometry_msgs/Twist` on `/cmd_vel`: linear x / y and angular z drive the
+walking policy or the base like the keys do, before a goal; one older than
+0.5 s counts as zero); the publishing rate (1–60 Hz, 30 by default); and a
+camera topic (`sensor_msgs/Image`), a placeholder until there are cameras.
+Stamps are wall time in ROS 2's form (`sec`, `nanosec`). Settings are kept
+per robot file in this browser. A page on HTTPS (GitHub Pages, Binder) may
+still connect to `ws://localhost`; browsers treat localhost as secure.
+
 Pretrained policies live in `pretrained_policies/<dir>/`, one checkout per
 model (not tracked by git). `npm install` (or `node scripts/vendor.mjs`)
 links the folder as `public/pretrained_policies` and lists what is there in

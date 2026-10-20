@@ -17,11 +17,16 @@
 // go on arriving (arrive). In network mode a robot's goal is the server's
 // (server/goal.py), one for every browser: changes go there and come back
 // to everyone (fromServer). Setups are saved per robot file.
+// ROS (ros.js): any robot can also have a rosbridge connection of its own,
+// switched on with its ROS chip: it publishes the robot's joint states and
+// TF and takes joint commands and cmd_vel; a fresh cmd_vel drives the robot
+// before the goal or the keys do.
 
 import { dragPose, markerScale, pickMarker, startDrag } from './marker.js';
 import { BaseController, KINDS } from './base.js';
 import { POLICIES, POLICY_ROOT, defaultPolicy, isInstalled, policyById } from './policy.js';
 import { bodyPose, goalCommand } from './goal.js';
+import { RosLink, bridgeUrl } from './ros.js';
 
 // Per held key: [command index (vx, vy, yaw rate), direction, drive speed].
 const DRIVE = {
@@ -160,6 +165,8 @@ export class TeleopPanel {
     this.active = null;      // the driven robot
     this.known = new Set();  // controllable robots seen so far; a new one gets selected
     this.input = new KeyboardInput();
+    this.ros = new Map();    // robot prefix -> RosLink (ros.js)
+    this.rosView = null;     // the ROS section's live parts, while shown
     this.readout = null;
     this.errs = [];          // per chain: the span showing its tracking error
     this.closedChains = new Set();  // "<prefix><chain name>" folded in the panel
@@ -212,6 +219,13 @@ export class TeleopPanel {
     const robots = this.controllable();
     const added = robots.filter((r) => !this.known.has(r));
     this.known = new Set(robots);
+    // ROS links follow their robot into the new world (by prefix: in
+    // network mode every scene brings new robot objects); a removed robot's closes.
+    for (const [prefix, link] of this.ros) {
+      const r = robots.find((x) => x.prefix === prefix);
+      if (r) link.robot = r;
+      else { link.setOn(false); this.ros.delete(prefix); }
+    }
     if (added.length) this.active = added.at(-1);
     else if (!robots.includes(this.active)) this.active = robots.at(-1) ?? null;
     this.dragging = this.hover = null;
@@ -445,6 +459,16 @@ export class TeleopPanel {
       };
       chips.append(el('label', { className: 'chip' + (r.errors?.[kind] ? ' bad' : ''), title: r.errors?.[kind] ?? title }, box, el('span', { textContent: label })));
     }
+    const link = this.ros.get(r.prefix);
+    const rosBox = el('input', { type: 'checkbox', checked: !!link?.on });
+    rosBox.onchange = () => {
+      const l = this.ros.get(r.prefix) ?? new RosLink(this.app, r);
+      this.ros.set(r.prefix, l);
+      l.setOn(rosBox.checked);
+      this.render();
+    };
+    chips.append(el('label', { className: 'chip' + (link?.status === 'error' ? ' bad' : ''), title: 'A rosbridge connection of this robot\'s own: joint states, TF, joint commands, cmd_vel' },
+      rosBox, el('span', { textContent: 'ROS' })));
     this.body.append(el('div', { className: 'field' }, el('span', { textContent: 'Controllers' }), chips));
     const locos = locomotion(r);
     if (locos.length) {
@@ -476,6 +500,76 @@ export class TeleopPanel {
     if (r.use.policy || r.errors?.policy) this.renderPolicy(r);
     if (r.use.base && r.base) this.renderBase(r.base);
     if (r.use.ik && r.ik) this.renderIk(r.ik);
+    this.rosView = null;
+    if (link?.on) this.renderRos(link);
+  }
+
+  // The robot's rosbridge connection (ros.js): address and state, the
+  // topics, the publishing rate.
+  renderRos(link) {
+    const s = link.settings;
+    const box = this.section('ros', 'ROS bridge', '');
+    box.classList.add('ros');
+    const changed = () => { link.save(); link.sync(); };
+    const row = (label, title, ...controls) => box.append(el('div', { className: 'field', title }, el('span', { textContent: label }), el('div', { className: 'ctl' }, ...controls)));
+    const url = el('input', { type: 'text', value: s.url, placeholder: 'localhost:9090', spellcheck: false });
+    const apply = () => {
+      if (url.value.trim() === s.url) return;
+      s.url = url.value.trim() || 'localhost:9090';
+      link.save();
+      link.connect();
+    };
+    url.onchange = apply;
+    url.onkeydown = (e) => { if (e.key === 'Enter') { apply(); url.blur(); } };
+    row('Bridge', 'rosbridge_server\'s WebSocket (host:port, or a ws:// / wss:// URL)', url,
+      this.button('↻', 'Connect again', () => link.connect()));
+    const state = el('span', { className: 'ros-state' });
+    box.append(el('div', { className: 'bar' }, state));
+    const topic = (k, label, title, enabled = true) => {
+      const on = el('input', { type: 'checkbox', checked: s[k].on, disabled: !enabled });
+      const name = el('input', { type: 'text', value: s[k].topic, disabled: !enabled, spellcheck: false });
+      on.onchange = () => { s[k].on = on.checked; changed(); };
+      name.onchange = () => { s[k].topic = name.value.trim(); changed(); };
+      name.onkeydown = (e) => { if (e.key === 'Enter') name.blur(); };
+      row(label, title, on, name);
+    };
+    box.append(el('div', { className: 'sub', textContent: 'Publish' }));
+    topic('jointStates', 'Joints', 'sensor_msgs/JointState: the robot\'s joint positions (and velocities in local mode)');
+    topic('tf', 'TF', 'tf2_msgs/TFMessage: every body in its parent\'s frame, the root in "world"');
+    topic('camera', 'Camera', 'sensor_msgs/Image: not yet, it comes with cameras', false);
+    box.append(el('div', { className: 'sub', textContent: 'Subscribe' }));
+    topic('jointCommand', 'Joint cmd', 'sensor_msgs/JointState: position targets for the actuators on those joints');
+    topic('cmdVel', 'cmd_vel', 'geometry_msgs/Twist: linear x, y and angular z drive the walking policy or the base');
+    const hz = el('span', { className: 'unit', textContent: `${s.rate} Hz` });
+    const rate = el('input', { type: 'range', min: 1, max: 60, step: 1, value: s.rate });
+    rate.oninput = () => { s.rate = +rate.value; hz.textContent = `${s.rate} Hz`; };
+    rate.onchange = () => { link.save(); link.restartTimer(); rate.blur(); };
+    row('Rate', 'how often joint states and TF are published', rate, hz);
+    const r = link.robot, busy = [r.use?.policy && 'the policy', r.use?.ik && 'IK'].filter(Boolean);
+    if (s.jointCommand.on && busy.length) {
+      box.append(el('div', { className: 'note warn', textContent: `${busy.join(' and ')} on: joint commands only move the joints ${busy.length > 1 ? 'they leave' : 'it leaves'} alone (untick ${busy.length > 1 ? 'them' : 'it'} above)` }));
+    }
+    const counts = el('div', { className: 'readout' });
+    box.append(counts, el('div', { className: 'hint', textContent:
+      'Joint commands set the actuators\' targets; a running policy or IK writes over the joints it drives. ' +
+      'Topics are per robot connection, so robots on one bridge need topics of their own.' }));
+    this.rosView = { link, state, counts };
+    link.onChange = () => this.showRos();
+    this.showRos();
+  }
+
+  // The ROS section's state line and counters (each frame, and on changes).
+  showRos() {
+    const v = this.rosView;
+    if (!v) return;
+    const { link } = v;
+    const text = { off: 'off', connecting: `connecting to ${bridgeUrl(link.settings.url)}…`, connected: `connected to ${bridgeUrl(link.settings.url)}`,
+      error: `${link.error} · retrying` }[link.status];
+    if (v.state.textContent !== text) v.state.textContent = text;
+    v.state.className = `ros-state ${link.status}`;
+    const tw = link.freshTwist();
+    const counts = `sent ${link.sent} · received ${link.received}` + (tw ? `\ncmd_vel vx ${tw[0].toFixed(2)} vy ${tw[1].toFixed(2)} ωz ${tw[2].toFixed(2)}` : '');
+    if (v.counts.textContent !== counts) v.counts.textContent = counts;
   }
 
   // Which trained policy runs (POLICIES in policy.js), and its state.
@@ -781,8 +875,10 @@ export class TeleopPanel {
       const goal = r.goal && !(r === this.active && keyboard) && this.app.data ? r.goal : null;
       const pose = goal && !net && bodyPose(this.app.data, r.bodyOffset);
       if (!net) r.goalResult = null;
+      const twist = this.ros.get(r.prefix)?.freshTwist();
       for (const c of [r.policy, r.base]) {
         if (!c) continue;
+        if (twist && locomotion(r).includes(c)) { c.cmd = [...twist]; continue; }  // ROS cmd_vel first
         if (goal && net && locomotion(r).includes(c)) continue;
         if (goal && locomotion(r).includes(c)) {
           r.goalResult = goalCommand(pose, goal, c.drive, r.goalState ??= {});
@@ -810,6 +906,7 @@ export class TeleopPanel {
       if (c.measured) text += `\nmeas vx ${f(c.measured[0])}  vy ${f(c.measured[1])}  ωz ${f(c.measured[2])}`;
       if (this.readout.textContent !== text) this.readout.textContent = text;
     }
+    this.showRos();
     const ik = this.active?.ik;
     this.errs.forEach((span, i) => {
       const e = ik?.enabled && ik.chains[i]?.err;
