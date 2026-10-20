@@ -305,12 +305,21 @@ export class StagePanel {
     return div;
   }
 
+  // The selected body's mass, and with what hangs from it if that is more.
+  massText() {
+    const { model } = this.app, b = this.app.perturb.body;
+    const kg = (v) => `${v < 10 ? v.toPrecision(3) : v.toFixed(1)} kg`;
+    const own = model.body_mass?.[b], all = model.body_subtreemass?.[b];
+    if (own == null) return '';
+    return all != null && all > own * 1.001 + 1e-6 ? `${kg(own)} (${kg(all)} with its children)` : kg(own);
+  }
+
   // Called every frame; refreshes the expanded robots' rows at ~10 Hz.
   update(now) {
     if (this.el.hidden || now - this.lastUpdate < 100 || !this.app.data) return;
     this.lastUpdate = now;
     const sel = this.el.querySelector('#selected');
-    if (sel) sel.textContent = this.app.perturb.name || 'none (double-click a body)';
+    if (sel) sel.textContent = this.app.perturb.name ? `${this.app.perturb.name} · ${this.massText()}` : 'none (double-click a body)';
     const paused = this.app.paused;
     for (const row of this.rows) {
       const sub = row.input.closest('details');

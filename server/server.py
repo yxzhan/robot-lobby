@@ -967,7 +967,7 @@ class World:
     names = lambda obj, n: [mujoco.mj_id2name(m, obj, i) or '' for i in range(n)]
     out = {k: getattr(m, k).reshape(-1).tolist() for k in (
         'jnt_type', 'jnt_bodyid', 'jnt_qposadr', 'jnt_dofadr', 'jnt_limited', 'jnt_range',
-        'body_jntnum', 'body_jntadr', 'body_mocapid', 'body_parentid',
+        'body_jntnum', 'body_jntadr', 'body_mocapid', 'body_parentid', 'body_mass', 'body_subtreemass',
         'actuator_trntype', 'actuator_trnid', 'actuator_ctrllimited', 'actuator_ctrlrange', 'actuator_biasprm')}
     out.update({k: int(getattr(m, k)) for k in ('nbody', 'njnt', 'nu', 'nq', 'nv', 'na', 'nmocap')})
     out['names'] = {'body': names(mujoco.mjtObj.mjOBJ_BODY, m.nbody), 'joint': names(mujoco.mjtObj.mjOBJ_JOINT, m.njnt),
