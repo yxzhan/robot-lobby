@@ -252,29 +252,91 @@ class IkController:
       sites = self.tip_sites(tip)
       tcp = next((s for s in (next((x for x in sites if re.search(r, x[1])), None) for r in TCP_SITES) if s), None)
       chains.append({'name': name, 'tip': self.name_of('mjOBJ_BODY', tip), 'root': self.name_of('mjOBJ_BODY', run(leaf)[0]),
-                     'site': tcp[1] if tcp else '', 'offset': [0, 0, 0], 'locked': [], 'gripper': self.gripper_for(tip, servo)})
+                     'site': tcp[1] if tcp else '', 'offset': [0, 0, 0], 'locked': [], 'gripper': self.gripper_for(tip, run(leaf)[0])})
     return {'chains': chains, 'auto': True}
 
-  def gripper_for(self, tip, servo):
+  def gripper_for(self, tip, root):
+    """The hand or gripper below the chain from root to tip (ik.js gripperFor)."""
     m = self.model
-
-    def below(j):
-      return tip in self.ancestors(m.jnt_bodyid[j])
-
-    found = []
+    path = self.ancestors(tip)
+    chain_bodies = set(path[:path.index(root) + 1]) if root in path else {tip}
+    follows = {}  # leader joint -> [(follower, c0, c1)]
+    for e in range(m.neq):
+      if m.eq_type[e] == EQ_JOINT and m.eq_obj2id[e] >= 0:
+        follows.setdefault(int(m.eq_obj2id[e]), []).append((int(m.eq_obj1id[e]), float(m.eq_data[e, 0]), float(m.eq_data[e, 1])))
+    out = []
     for a in range(m.nu):
+      name = self.name_of('mjOBJ_ACTUATOR', a)
       full = mujoco.mj_id2name(m, OBJ.mjOBJ_ACTUATOR, a) or ''
-      if not full or not full.startswith(self.prefix):
+      if not name or not full.startswith(self.prefix):
         continue
-      i, joints = int(m.actuator_trnid[a, 0]), []
-      if m.actuator_trntype[a] == TRN_JOINT:
-        joints = [i]
-      elif m.actuator_trntype[a] == TRN_TENDON and m.ntendon:
-        joints = [int(m.wrap_objid[w]) for w in range(m.tendon_adr[i], m.tendon_adr[i] + m.tendon_num[i]) if m.wrap_type[w] == WRAP_JOINT]
-      if joints and all(below(j) for j in joints) and not (
-          len(joints) == 1 and not GRIPPER_JOINT.search(self.name_of('mjOBJ_JOINT', joints[0])) and joints[0] in servo):
-        found.append(self.name_of('mjOBJ_ACTUATOR', a))
-    return found[0] if len(found) == 1 else ''
+      joints = self.actuator_joints(a)
+      if not joints or not all(tip in self.ancestors(m.jnt_bodyid[j]) and m.jnt_bodyid[j] not in chain_bodies and not self.owner(j)
+                               for j, _ in joints):
+        continue
+      j0 = joints[0][0]
+      if (len(joints) == 1 and m.actuator_trntype[a] == TRN_JOINT and m.jnt_type[j0] == 3 and j0 not in follows
+          and not GRIPPER_JOINT.search(name) and not GRIPPER_JOINT.search(self.name_of('mjOBJ_JOINT', j0))):
+        continue
+      lo, hi = self.ctrl_ends(a, joints)
+      closed_high = self.spread(tip, a, joints, follows, 1) < self.spread(tip, a, joints, follows, -1)
+      out.append({'actuator': name, 'open': round(float(lo if closed_high else hi), 4), 'closed': round(float(hi if closed_high else lo), 4)})
+    return out or ''
+
+  def actuator_joints(self, a):
+    m, i = self.model, int(self.model.actuator_trnid[a, 0])
+    if m.actuator_trntype[a] == TRN_JOINT:
+      return [(i, 1.0)]
+    if m.actuator_trntype[a] != TRN_TENDON:
+      return []
+    out = []
+    for w in range(m.tendon_adr[i], m.tendon_adr[i] + m.tendon_num[i]):
+      if m.wrap_type[w] != WRAP_JOINT:
+        return []
+      out.append((int(m.wrap_objid[w]), float(m.wrap_prm[w])))
+    return out
+
+  def ctrl_ends(self, a, joints):
+    m = self.model
+    if m.actuator_ctrllimited[a]:
+      return float(m.actuator_ctrlrange[a, 0]), float(m.actuator_ctrlrange[a, 1])
+    j, gear = joints[0][0], m.actuator_gear[a, 0]
+    if len(joints) == 1 and m.actuator_biasprm[a, 1] < 0 and m.jnt_limited[j]:
+      return tuple(sorted((m.jnt_range[j, 0] * gear, m.jnt_range[j, 1] * gear)))
+    return -1.0, 1.0
+
+  def spread(self, tip, a, joints, follows, end):
+    m, s = self.model, self.scratch
+    s.qpos[:] = m.qpos0
+    gear = m.actuator_gear[a, 0]
+    for j, c in joints:
+      up = end * (math.copysign(1, gear * c) if gear * c else 1) > 0
+      adr = m.jnt_qposadr[j]
+      q = m.jnt_range[j, 1 if up else 0] if m.jnt_limited[j] else m.qpos0[adr] + (0.3 if up else -0.3)
+      s.qpos[adr] = q
+      for f, c0, c1 in follows.get(j, ()):
+        s.qpos[m.jnt_qposadr[f]] = c0 + c1 * q
+    mujoco.mj_kinematics(m, s)
+    pts = np.array([s.geom_xpos[g] for g in range(m.ngeom) if tip in self.ancestors(m.geom_bodyid[g])])
+    if not len(pts):
+      return 0.0
+    return float(np.linalg.norm(pts - pts.mean(0), axis=1).mean())
+
+  def gripper_of(self, g):
+    """A config's gripper as [{a, open, closed}] (ik.js gripperOf)."""
+    m = self.model
+    if isinstance(g, str):
+      a = self.id('mjOBJ_ACTUATOR', g) if g else -1
+      return [{'a': a, 'open': float(m.actuator_ctrlrange[a, 1]), 'closed': float(m.actuator_ctrlrange[a, 0])}] if a >= 0 else []
+    out = []
+    for x in g or []:
+      try:
+        a, o, c = self.id('mjOBJ_ACTUATOR', x['actuator']), float(x['open']), float(x['closed'])
+      except (KeyError, TypeError, ValueError):
+        continue
+      if a >= 0 and math.isfinite(o) and math.isfinite(c):
+        out.append({'a': a, 'open': o, 'closed': c})
+    return out
 
   # -- chains from the config -----------------------------------------------
 
@@ -303,7 +365,7 @@ class IkController:
 
     self.chains = []
     for cfg in self.config['chains']:
-      chain = {'cfg': cfg, 'joints': [], 'active': [], 'followers': [], 'error': None, 'gripper': -1, 'ref': -1, 'err': None}
+      chain = {'cfg': cfg, 'joints': [], 'active': [], 'followers': [], 'error': None, 'gripper': [], 'ref': -1, 'err': None}
       self.chains.append(chain)
       chain['tip'] = self.id('mjOBJ_BODY', cfg['tip'])
       chain['root'] = self.id('mjOBJ_BODY', cfg['root'])
@@ -324,7 +386,9 @@ class IkController:
         chain['error'] = f"{cfg['root']} is not {cfg['tip']} or above it"
         continue
       at = path.index(chain['root'])
-      chain['gripper'] = self.id('mjOBJ_ACTUATOR', cfg['gripper']) if cfg.get('gripper') else -1
+      if cfg.get('gripper') == 'auto':  # the panel's Auto
+        cfg['gripper'] = self.gripper_for(chain['tip'], chain['root'])
+      chain['gripper'] = self.gripper_of(cfg.get('gripper'))
       by_tendon = {}
       for b in reversed(path[:at + 1]):
         j0 = m.body_jntadr[b]
@@ -482,11 +546,14 @@ class IkController:
     t['pos'], t['rot'] = np.asarray(pos, float), np.asarray(rot, float)
 
   def toggle_gripper(self, chain, data):
-    a, m = chain['gripper'], self.model
-    if a < 0:
+    if not chain['gripper']:
       return
-    lo, hi = m.actuator_ctrlrange[a]
-    data.ctrl[a] = lo if data.ctrl[a] > (lo + hi) / 2 else hi
+    g = chain['gripper'][0]
+    self.set_gripper(chain, data, 0.0 if abs(data.ctrl[g['a']] - g['closed']) < abs(data.ctrl[g['a']] - g['open']) else 1.0)
+
+  def set_gripper(self, chain, data, t):
+    for g in chain['gripper']:
+      data.ctrl[g['a']] = g['open'] + t * (g['closed'] - g['open'])
 
   # -- solving --------------------------------------------------------------
 

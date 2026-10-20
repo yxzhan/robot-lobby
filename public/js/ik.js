@@ -29,8 +29,13 @@
 // made from the model (autoConfig): every serial run of at least MIN_CHAIN
 // free movable joints that ends a branch of the tree (an arm, a leg,
 // a neck with enough joints), gripper/finger joints left out and their
-// actuator taken as the chain's gripper, and the tip put on the model's
-// TCP site when it has one (TCP_SITES).
+// actuators taken as the chain's gripper (gripperFor), and the tip put on
+// the model's TCP site when it has one (TCP_SITES).
+//
+// A chain's gripper is a list of actuators, each with the ctrl that opens
+// and the ctrl that closes it ({actuator, open, closed}); toggled together
+// (G, right-click), or set part way (setGripper). An older config's single
+// actuator name opens at the top of its ctrlrange (as the Franka hand).
 
 import { CONTROL_DT } from './groot.js';
 
@@ -225,30 +230,104 @@ export class IkController {
       const tcp = TCP_SITES.map((re) => sites.find(([, n]) => re.test(n))).find(Boolean);
       return {
         name, tip: this.nameOf('mjOBJ_BODY', tip), root: this.nameOf('mjOBJ_BODY', run(leaf).top),
-        site: tcp?.[1] ?? '', offset: [0, 0, 0], locked: [], gripper: this.gripperFor(tip, servo),
+        site: tcp?.[1] ?? '', offset: [0, 0, 0], locked: [], gripper: this.gripperFor(tip, run(leaf).top),
       };
     });
     return { chains, auto: true };
   }
 
-  // The one actuator driving joints below `tip` that no chain uses (a
-  // gripper, a hand's grasp), by name; '' if none or several.
-  gripperFor(tip, servo) {
-    const { model } = this, below = (j) => this.ancestors(model.jnt_bodyid[j]).includes(tip);
-    const found = [];
-    for (let a = 0; a < model.nu; a++) {
-      if (!this.nameOf('mjOBJ_ACTUATOR', a) || !this.mujoco.mj_id2name(model, this.mujoco.mjtObj.mjOBJ_ACTUATOR.value, a)?.startsWith(this.prefix)) continue;
-      const id = model.actuator_trnid[2 * a];
-      let joints = [];
-      if (model.actuator_trntype[a] === 0) joints = [id];
-      else if (model.actuator_trntype[a] === 3 && model.tendon_adr) {  // tendon: its joint wraps
-        for (let w = model.tendon_adr[id], e = w + model.tendon_num[id]; w < e; w++) if (model.wrap_type[w] === 1) joints.push(model.wrap_objid[w]);
-      }
-      if (joints.length && joints.every(below) && !(joints.length === 1 && !GRIPPER_JOINT.test(this.nameOf('mjOBJ_JOINT', joints[0])) && servo.has(joints[0]))) {
-        found.push(this.nameOf('mjOBJ_ACTUATOR', a));
-      }
+  // The hand or gripper below the chain from `root` to `tip`: the named
+  // actuators on joints below the tip that the chain does not have and no
+  // other controller drives, with what opens and closes each; '' if none.
+  // A lone actuator on one hinge joint counts only by its name (GRIPPER_JOINT,
+  // or a joint another follows): else it is more likely a wrist. Which end
+  // of its range closes is found from the model: with its joints at that
+  // end, the geoms below the tip lie closer together (fingers meet, or curl
+  // into the palm).
+  gripperFor(tip, root) {
+    const { model, mujoco } = this, below = (j) => this.ancestors(model.jnt_bodyid[j]).includes(tip);
+    const path = this.ancestors(tip), chainBodies = new Set(path.slice(0, path.indexOf(root) + 1));
+    const follows = new Map();  // leader joint -> [[follower, c0, c1]]
+    for (let e = 0; e < model.neq; e++) {
+      if (model.eq_type[e] !== mujoco.mjtEq.mjEQ_JOINT.value || model.eq_obj2id[e] < 0) continue;
+      const l = model.eq_obj2id[e];
+      if (!follows.has(l)) follows.set(l, []);
+      follows.get(l).push([model.eq_obj1id[e], model.eq_data[11 * e], model.eq_data[11 * e + 1]]);
     }
-    return found.length === 1 ? found[0] : '';
+    const out = [];
+    for (let a = 0; a < model.nu; a++) {
+      const name = this.nameOf('mjOBJ_ACTUATOR', a);
+      if (!name || !mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_ACTUATOR.value, a)?.startsWith(this.prefix)) continue;
+      const joints = this.actuatorJoints(a);
+      if (!joints.length || !joints.every(([j]) => below(j) && !chainBodies.has(model.jnt_bodyid[j]) && !this.owner(j))) continue;
+      if (joints.length === 1 && model.actuator_trntype[a] === 0 && model.jnt_type[joints[0][0]] === 3
+        && !follows.has(joints[0][0]) && !GRIPPER_JOINT.test(name) && !GRIPPER_JOINT.test(this.nameOf('mjOBJ_JOINT', joints[0][0]))) continue;
+      const [lo, hi] = this.ctrlEnds(a, joints);
+      const closedHigh = this.spread(tip, a, joints, follows, 1) < this.spread(tip, a, joints, follows, -1);
+      const r = (v) => Math.round(v * 1e4) / 1e4;
+      out.push({ actuator: name, open: r(closedHigh ? lo : hi), closed: r(closedHigh ? hi : lo) });
+    }
+    return out.length ? out : '';
+  }
+
+  // The joints actuator a moves, [[joint, coefficient]]: its joint, or a
+  // fixed tendon's; [] for other transmissions.
+  actuatorJoints(a) {
+    const { model } = this, id = model.actuator_trnid[2 * a];
+    if (model.actuator_trntype[a] === 0) return [[id, 1]];
+    if (model.actuator_trntype[a] !== 3) return [];
+    const out = [];
+    for (let w = model.tendon_adr[id], e = w + model.tendon_num[id]; w < e; w++) {
+      if (model.wrap_type[w] !== 1) return [];
+      out.push([model.wrap_objid[w], model.wrap_prm[w]]);
+    }
+    return out;
+  }
+
+  // Actuator a's ctrl range [lo, hi]: its ctrlrange; else, for a position
+  // servo on one joint, the joint's range (times the gear); else [-1, 1].
+  ctrlEnds(a, joints) {
+    const { model } = this;
+    if (model.actuator_ctrllimited[a]) return [model.actuator_ctrlrange[2 * a], model.actuator_ctrlrange[2 * a + 1]];
+    const [j] = joints[0], gear = model.actuator_gear[6 * a];
+    if (joints.length === 1 && model.actuator_biasprm[10 * a + 1] < 0 && model.jnt_limited[j]) {
+      return [model.jnt_range[2 * j] * gear, model.jnt_range[2 * j + 1] * gear].sort((x, y) => x - y);
+    }
+    return [-1, 1];
+  }
+
+  // How spread out the geoms below `tip` are (mean distance from their
+  // middle) with actuator a's joints at the end its ctrl `end` (1: high,
+  // -1: low) drives them to, the rest at qpos0.
+  spread(tip, a, joints, follows, end) {
+    const { model, mujoco } = this, s = this.scratch;
+    s.qpos.set(model.qpos0);
+    const gear = model.actuator_gear[6 * a];
+    for (const [j, c] of joints) {
+      const up = end * Math.sign(gear * c || 1) > 0, adr = model.jnt_qposadr[j];
+      const q = model.jnt_limited[j] ? model.jnt_range[2 * j + (up ? 1 : 0)] : model.qpos0[adr] + (up ? 0.3 : -0.3);
+      s.qpos[adr] = q;
+      for (const [f, c0, c1] of follows.get(j) ?? []) s.qpos[model.jnt_qposadr[f]] = c0 + c1 * q;
+    }
+    mujoco.mj_kinematics(model, s);
+    const pts = [];
+    for (let g = 0; g < model.ngeom; g++) {
+      if (this.ancestors(model.geom_bodyid[g]).includes(tip)) pts.push([0, 1, 2].map((k) => s.geom_xpos[3 * g + k]));
+    }
+    if (!pts.length) return 0;
+    const mid = [0, 1, 2].map((k) => pts.reduce((sum, p) => sum + p[k], 0) / pts.length);
+    return pts.reduce((sum, p) => sum + Math.hypot(p[0] - mid[0], p[1] - mid[1], p[2] - mid[2]), 0) / pts.length;
+  }
+
+  // A config's gripper (see the top of the file) as [{a, open, closed}].
+  gripperOf(g) {
+    const { model } = this;
+    if (typeof g === 'string') {
+      const a = g ? this.id('mjOBJ_ACTUATOR', g) : -1;
+      return a < 0 ? [] : [{ a, open: model.actuator_ctrlrange[2 * a + 1], closed: model.actuator_ctrlrange[2 * a] }];
+    }
+    return (g ?? []).map(({ actuator, open, closed }) => ({ a: this.id('mjOBJ_ACTUATOR', actuator), open: +open, closed: +closed }))
+      .filter((x) => x.a >= 0 && Number.isFinite(x.open) && Number.isFinite(x.closed));
   }
 
   id(type, name) {
@@ -326,7 +405,8 @@ export class IkController {
       const path = this.ancestors(chain.tip);
       const at = path.indexOf(chain.root);
       if (at < 0) { chain.error = `${cfg.root} is not ${cfg.tip} or above it`; return chain; }
-      chain.gripper = cfg.gripper ? this.id('mjOBJ_ACTUATOR', cfg.gripper) : -1;
+      if (cfg.gripper === 'auto') cfg.gripper = this.gripperFor(chain.tip, chain.root);  // the panel's Auto
+      chain.gripper = this.gripperOf(cfg.gripper);
       const byTendon = new Map();  // actuator -> its dof, shared by the tendon's joints in the chain
       for (const b of path.slice(0, at + 1).reverse()) {
         for (let j = model.body_jntadr[b], n = j + model.body_jntnum[b]; j >= 0 && j < n; j++) {
@@ -520,13 +600,17 @@ export class IkController {
     t.rot = mulTM(ref.rot, rot);
   }
 
-  // Opens a closed gripper or closes an open one (the high end of its
-  // ctrlrange taken as open, as for the Franka hand).
+  // Opens a closed gripper or closes an open one (closed: its first
+  // actuator nearer its closed ctrl than its open one).
   toggleGripper(chain, data) {
-    const a = chain.gripper, m = this.model;
-    if (a < 0) return;
-    const [lo, hi] = [m.actuator_ctrlrange[2 * a], m.actuator_ctrlrange[2 * a + 1]];
-    data.ctrl[a] = data.ctrl[a] > (lo + hi) / 2 ? lo : hi;
+    const g = chain.gripper?.[0];
+    if (!g) return;
+    this.setGripper(chain, data, Math.abs(data.ctrl[g.a] - g.closed) < Math.abs(data.ctrl[g.a] - g.open) ? 0 : 1);
+  }
+
+  // Sets the gripper part way: 0 open, 1 closed.
+  setGripper(chain, data, t) {
+    for (const { a, open, closed } of chain.gripper ?? []) data.ctrl[a] = open + t * (closed - open);
   }
 
   // One control tick: every chain one DLS step towards its target.

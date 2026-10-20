@@ -246,11 +246,15 @@ ends on the IK marker or the floor it meets:
   to go on, like a clutch; each hand can hold its own chain (two arms at
   once). On any other body: pulls it with the selection spring, like
   Shift+drag, held at the end of the ray as on a stick.
-- **Trigger** on a held marker, or one under the ray: opens or closes that
-  arm's gripper. On a robot: selects it and drives it (like a
+- **Trigger** while the same hand holds a marker: closes that arm's gripper
+  as far as it is pressed (released: open), once pressed at all during the
+  hold. On a marker under the ray: opens or closes its gripper. Held on the goal marker: drags it over the floor like the
+  mouse, the same controller's stick sideways turning it; the goal is set
+  on letting go. On a robot: selects it and drives it (like a
   double-click); on anything else, releases it.
-- **Left stick** walks the driven robot (forward/back, turn), whatever the
-  Teleop panel's input.
+- **Left stick** walks the driven robot (forward/back, turn) while pushed,
+  whatever the Teleop panel's input; it takes over from the robot's goal,
+  which is dropped.
 - **Right stick** sideways turns you by 30° about where you stand; pushed
   forward it aims at the floor (the spawn marker shows where), and letting
   go puts you there. In AR this moves the scene in your room.
@@ -504,8 +508,23 @@ flange (i2rt YAM `tcp_site`, Kinova `pinch_site`, ViperX `pinch`, ALOHA
 `*/gripper`, SO-101 `gripperframe`, TidyBot `pinch_site`, UR5e / iiwa /
 Lite6 `attachment_site`). MJCF has no TCP element, so a model without such
 a site (menagerie's `panda.xml`, G1) keeps the body origin;
-`IK_DEFAULTS` gives Panda and Garmi the Franka TCP offset instead. The one actuator driving joints below the tip that no chain
-uses becomes the gripper. Examples: Panda `link1 → hand` (gripper
+`IK_DEFAULTS` gives Panda and Garmi the Franka TCP offset instead.
+
+A chain's **gripper** is a list of actuators, each with the ctrl that opens
+it and the one that closes it (`{actuator, open, closed}`; an older
+config's single actuator name opens at the top of its ctrlrange, as the
+Franka hand). Found automatically: every named actuator on joints below the
+tip that the chain does not have and no other controller drives (a lone
+one on a single hinge only when named like a gripper joint or followed by
+another joint: else it is likely a wrist). Which end of its range closes is
+worked out from the model: with its joints at that end, the geoms below the
+tip lie closer together (fingers meet, or curl into the palm). So TIAGo's
+two finger servos, Talos's gripper and G1's seven hand actuators per hand
+are found as well as single-actuator grippers. G and a right-click toggle
+all of a gripper's actuators together (closed:
+its first one nearer its closed ctrl); the panel's **Closed** slider and a
+VR trigger set it part way.
+Examples: Panda `link1 → hand` (gripper
 `actuator8`), UR5e `shoulder_link → wrist_3_link`, ALOHA and TIAGo dual
 both arms, Apollo arms, legs and neck, Spot four legs, G1 both arms (legs
 and waist are GR00T's), TIAGo `torso_lift_link → arm_7_link` (lift
@@ -525,7 +544,9 @@ the base (and the lift, when the chain starts above it), and a chain rooted
 at G1's pelvis keeps its target on the torso while it walks.
 
 The Teleop panel edits the driven robot's chains: tip and root (select, or
-double-click a body and press ◎), TCP site or offset, joints, gripper actuator;
+double-click a body and press ◎), TCP site or offset, joints, and the
+gripper (**+ actuator…** adds one, each with its open and closed ctrl, ⇄
+swaps them, ✕ drops it, **Auto** finds them in the model again);
 **+ Chain** starts one at the selected body. **Save** keeps the setup per
 robot file in localStorage (`mujoco-filament/ik/<path>`), **Auto** /
 **Defaults** goes back to the found / built-in one, **Export** copies it as

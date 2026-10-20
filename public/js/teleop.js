@@ -169,6 +169,7 @@ export class TeleopPanel {
     this.rosView = null;     // the ROS section's live parts, while shown
     this.readout = null;
     this.errs = [];          // per chain: the span showing its tracking error
+    this.grips = [];         // per chain with a gripper: {chain, slider, label} (its closure, kept up to date)
     this.closedChains = new Set();  // "<prefix><chain name>" folded in the panel
     // Folded sections ('base', 'ik'), kept across robots and page loads.
     try { this.folded = new Set(JSON.parse(localStorage.getItem(FOLDED) ?? '[]')); } catch { this.folded = new Set(); }
@@ -385,7 +386,7 @@ export class TeleopPanel {
   // position and heading, like the one of a dragged asset (assets.js).
   showGoal(at) {
     const d = this.dragging;
-    if (!d?.goal) return;
+    if (!d?.goal || this.app.xr) return;  // (not on the page in VR)
     if (!d.ghost) {
       d.ghost = el('div', { className: 'drag-ghost placing' },
         el('div', { textContent: `goal · ${d.robot.prefix.slice(0, -1)} · ${d.robot.label}` }), el('div', { className: 'readout' }));
@@ -446,6 +447,7 @@ export class TeleopPanel {
     this.body.replaceChildren();
     this.readout = null;
     this.errs = [];
+    this.grips = [];
     if (!robots.length) {
       this.body.innerHTML = '<div class="hint">Nothing to drive: spawn a robot, e.g. a Unitree G1 (Robots › Humanoids), which walks under the GR00T policy, or Garmi (mecanum base, two arms).</div>';
       return;
@@ -836,14 +838,47 @@ export class TeleopPanel {
       });
       row('Offset', ...offset);
     }
-    const acts = [['', 'none']];
-    const chainActs = new Set(chain.active?.map((d) => d.act));
-    for (let a = 0; a < ik.model.nu; a++) {
-      const n = this.app.mujoco.mj_id2name(ik.model, this.app.mujoco.mjtObj.mjOBJ_ACTUATOR.value, a) ?? '';
-      if (n.startsWith(ik.prefix) && !chainActs.has(a)) acts.push([n.slice(ik.prefix.length), n.slice(ik.prefix.length)]);
+    // Gripper: actuators, each with the ctrl that opens and that closes it
+    // (ik.js). Edited as a list; Auto finds them in the model again.
+    const m = ik.model, mj = this.app.mujoco;
+    const actName = (a) => (mj.mj_id2name(m, mj.mjtObj.mjOBJ_ACTUATOR.value, a) ?? '').slice(ik.prefix.length);
+    const grip = () => (chain.gripper ?? []).map(({ a, open, closed }) => ({ actuator: actName(a), open, closed }));
+    const setGrip = (list) => { cfg.gripper = list.length ? list : ''; changed(cfg, true); };
+    const chainActs = new Set(chain.active?.map((d) => d.act)), have = new Set((chain.gripper ?? []).map((g) => g.a));
+    const free = [['', '+ actuator…']];
+    for (let a = 0; a < m.nu; a++) {
+      const n = mj.mj_id2name(m, mj.mjtObj.mjOBJ_ACTUATOR.value, a) ?? '';
+      if (n.startsWith(ik.prefix) && !chainActs.has(a) && !have.has(a)) free.push([String(a), n.slice(ik.prefix.length)]);
     }
-    row('Gripper', this.select(acts, cfg.gripper ?? '', (v) => { cfg.gripper = v; changed(cfg, true); }),
-      ...(chain.gripper >= 0 ? [this.button('open/close', 'Toggle the gripper (G, or right-click the marker)', () => ik.toggleGripper(chain, this.app.data))] : []));
+    const add = this.select(free, '', (v) => {
+      const a = Number(v), limited = m.actuator_ctrllimited[a];
+      const [lo, hi] = limited ? [m.actuator_ctrlrange[2 * a], m.actuator_ctrlrange[2 * a + 1]] : [-1, 1];
+      setGrip([...grip(), { actuator: actName(a), open: hi, closed: lo }]);
+    });
+    row('Gripper', add,
+      this.button('Auto', 'Find the gripper actuators below the tip, and which way each closes', () => { cfg.gripper = 'auto'; changed(cfg, true); }));
+    if (chain.gripper?.length) {
+      // How far closed: 0 open … 1 closed (G or a right-click on the marker toggles it).
+      const slider = el('input', { type: 'range', min: 0, max: 1, step: 0.01, title: 'How far the gripper is closed (G, or a right-click on the marker, toggles it)' });
+      const label = el('span', { className: 'closure' }), grip = { chain, slider, label, until: 0 };
+      slider.oninput = () => {
+        grip.until = performance.now() + 600;  // (network mode: until the server's ctrl has caught up)
+        ik.setGripper(chain, this.app.data, Number(slider.value));
+        label.textContent = `${Math.round(slider.value * 100)}%`;
+      };
+      row('Closed', slider, label);
+      this.grips.push(grip);
+    }
+    grip().forEach((g, k) => {
+      const a = chain.gripper[k].a, span = m.actuator_ctrllimited[a] ? m.actuator_ctrlrange[2 * a + 1] - m.actuator_ctrlrange[2 * a] : 2;
+      const step = +(span / 50).toPrecision(2);
+      const edit = (field) => this.num(g[field], step, (v) => { const list = grip(); list[k][field] = v; setGrip(list); }, `ctrl that ${field === 'open' ? 'opens' : 'closes'} it`);
+      det.append(el('div', { className: 'field grip' },
+        el('span', { textContent: g.actuator, title: g.actuator }),
+        el('div', { className: 'ctl' }, el('small', { textContent: 'open' }), edit('open'), el('small', { textContent: 'closed' }), edit('closed'),
+          this.button('⇄', 'Swap open and closed', () => { const list = grip(); [list[k].open, list[k].closed] = [g.closed, g.open]; setGrip(list); }),
+          this.button('✕', 'Not part of the gripper', () => setGrip(grip().filter((_, i) => i !== k))))));
+    });
 
     if (chain.error) det.append(el('div', { className: 'error', textContent: chain.error }));
     const joints = el('div', { className: 'joints' });
@@ -880,7 +915,11 @@ export class TeleopPanel {
   tick(dt) {
     const robots = this.controllable();
     const locos = locomotion(this.active);
-    const keyboard = this.mode === 'keyboard' || this.input.xr;  // in WebXR the left stick drives (xr.js)
+    // In WebXR the left stick drives while pushed (xr.js), and takes over
+    // from the driven robot's goal, which is dropped.
+    const xrStick = this.input.xr && this.input.stick.some((v) => v);
+    if (xrStick && this.active?.goal && !this.dragging?.goal) this.setGoal(this.active, null);
+    const keyboard = this.mode === 'keyboard' || xrStick;
     this.input.enabled = locos.length > 0 && keyboard;
     this.input.sticks?.show(this.input.enabled);
     for (const r of robots) {
@@ -929,5 +968,15 @@ export class TeleopPanel {
       const text = e ? `${(e[0] * 1000).toFixed(0)} mm · ${(e[1] * 57.3).toFixed(0)}°` : '';
       if (span.textContent !== text) span.textContent = text;
     });
+    // Gripper sliders follow the gripper (G, VR, ROS), except one just moved.
+    const data = this.app.data, now = performance.now();
+    for (const { chain, slider, label, until } of this.grips) {
+      const g = chain.gripper?.[0];
+      if (!g || !data || now < until || g.closed === g.open) continue;
+      const t = Math.min(1, Math.max(0, (data.ctrl[g.a] - g.open) / (g.closed - g.open)));
+      if (Math.abs(Number(slider.value) - t) > 0.005) slider.value = t;
+      const text = `${Math.round(t * 100)}%`;
+      if (label.textContent !== text) label.textContent = text;
+    }
   }
 }

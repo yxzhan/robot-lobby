@@ -105,10 +105,17 @@
     #teleop details.chain .err { color: #9cd; font: 11px ui-monospace, monospace; white-space: nowrap; }
     #teleop .field .ctl { display: flex; gap: 4px; min-width: 0; }
     #teleop .field .ctl select { flex: 1; min-width: 0; }
+    #teleop .field.grip { grid-template-columns: 1fr; gap: 2px; margin-left: 12px; }
+    #teleop .field.grip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; opacity: .85; }
+    #teleop .field.grip .ctl { align-items: center; }
+    #teleop .field.grip input { width: 0; flex: 1; min-width: 40px; }
+    #teleop .field.grip small { opacity: .6; }
     #teleop .ros input[type=text] { flex: 1; min-width: 0; font: inherit; color: #eee; background: #222; border: 1px solid #555;
                                     border-radius: 4px; padding: 1px 4px; }
     #teleop .ros input:disabled { opacity: .45; }
     #teleop .ros input[type=range] { flex: 1; min-width: 0; }
+    #teleop .field input[type=range] { flex: 1; min-width: 0; }
+    #teleop .field .closure { width: 36px; text-align: right; font-variant-numeric: tabular-nums; opacity: .8; }
     #teleop .ros .sub { margin-top: 6px; color: #aaa; font-size: 11px; }
     #teleop .ros .unit { color: #888; font-size: 11px; min-width: 38px; text-align: right; }
     #teleop .ros-state { font-size: 11px; color: #888; overflow-wrap: anywhere; }

@@ -23,8 +23,9 @@ Protocol (client -> server, JSON {op, ...}; `rid` asks for a reply):
   not zero; stops after CMD_TIMEOUT without one; a moving one drops the goal)
   goal {goal: {x, y, yaw} or null} (the robot drives there: goal.py)
   ik_config {config}   ik_target {chain, pos, rot} (in the chain's ref body
-  frame)   ik_reset_target {chain or null}   ik_gripper {chain}   ik_save
-  ik_defaults   base_config {config}   base_save   base_defaults
+  frame)   ik_reset_target {chain or null}   ik_gripper {chain, amount?}
+  (amount: 0 open … 1 closed; none: toggle)   ik_save   ik_defaults
+  base_config {config}   base_save   base_defaults
 Server -> client:
   {type: 'scene', version, items, physics, paused, world}   the world (`world`:
                               names, joint and actuator tables for the panels)
@@ -677,7 +678,10 @@ class World:
     elif op == 'ik_gripper':
       c = chain()
       if c:
-        ik.toggle_gripper(c, d)
+        if msg.get('amount') is None:
+          ik.toggle_gripper(c, d)
+        else:
+          ik.set_gripper(c, d, min(1.0, max(0.0, float(msg['amount']))))
         self.dirty = True
       return
     elif op in ('ik_save', 'base_save'):

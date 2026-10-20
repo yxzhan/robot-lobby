@@ -108,6 +108,7 @@ export class RemoteIk {
   }
 
   toggleGripper(chain) { this.send('ik_gripper', { chain: chain.cfg.name }); }
+  setGripper(chain, data, t) { this.send('ik_gripper', { chain: chain.cfg.name, amount: t }); }
 
   // After the panel edited this.config: the server resolves it and sends
   // the new chains (main.js then renders the panel again).

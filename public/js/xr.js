@@ -9,11 +9,16 @@
 //                   On any other body: pulls it with the selection spring
 //                   (Perturb, like Shift+drag), held at the end of the ray as
 //                   on a stick.
-//   trigger         on a held marker, or one under the ray: opens or closes
-//                   that chain's gripper (like a right-click); on a robot:
+//   trigger         while the same hand holds a marker: closes that chain's
+//                   gripper as far as it is pressed (let go: open), once
+//                   pressed at all during the hold; on a marker under the
+//                   ray: opens or closes its gripper (like a right-click); held on the
+//                   goal marker: drags it over the floor like the mouse, the
+//                   same hand's stick sideways turning it; on a robot:
 //                   selects it and drives it (like a double-click), on
 //                   anything else: releases it.
-//   left stick      walks the driven robot: forward/back, turn.
+//   left stick      walks the driven robot: forward/back, turn (taking over
+//                   from its goal, which it drops).
 //   right stick     sideways: turns you by SNAP about where you stand;
 //                   forward: aims at the floor (the spawn marker shows
 //                   where), let go: you are there.
@@ -23,6 +28,7 @@ import { BALL } from './marker.js';
 
 const NEAR = 0.08;             // m: hand-to-marker distance that grabs it without the ray
 const SNAP = Math.PI / 6;      // rad per snap turn
+const GOAL_TURN_RATE = Math.PI / 2;  // rad/s: a dragged goal turned with the stick pushed all the way
 const DEAD = 0.15;             // stick dead zone
 const RAY_MAX = 4;             // m: a ray that meets nothing
 const RAY_RADIUS = 0.002;      // m
@@ -88,6 +94,7 @@ export class XrControls {
   end() {
     for (const h of this.hands.values()) {
       this.release(h);
+      if (h.goal) this.dropGoal(h);
       this.put(h.ball, null);
       this.put(h.ray, null);
     }
@@ -133,16 +140,19 @@ export class XrControls {
       const pad = src.gamepad, pressed = pad.buttons.map((b) => b.pressed), was = h.buttons;
       const down = (i) => pressed[i] && !was[i], up = (i) => !pressed[i] && was[i];
       h.buttons = pressed;
+      h.trigger = pad.buttons[TRIGGER]?.value ?? (pressed[TRIGGER] ? 1 : 0);
       if (down(SQUEEZE)) this.grab(h);
       if (up(SQUEEZE)) this.release(h);
       if (down(TRIGGER)) this.trigger(h);
+      if (up(TRIGGER) && h.goal) this.dropGoal(h);
       this.follow(h);
-      this.sticks(h, pad.axes, viewer);
+      this.sticks(h, pad.axes, viewer, frame);
       this.draw(h);
     }
     for (const h of this.hands.values()) {  // a controller put down or lost
       if (seen.has(h)) continue;
       this.release(h);
+      if (h.goal) this.dropGoal(h);
       this.put(h.ball, null);
       this.put(h.ray, null);
     }
@@ -192,14 +202,30 @@ export class XrControls {
     });
   }
 
+  // Lets go of the goal marker: the goal is set where it is.
+  dropGoal(h) {
+    h.goal = false;
+    if (this.app.teleop.dragging?.goal) this.app.teleop.release();
+  }
+
   // Moves what the hand holds after it.
   follow(h) {
     const g = h.grab, { app } = this;
+    if (h.goal) {
+      if (app.teleop.dragging?.goal) app.teleop.dragTo(h.pick, null);
+      else h.goal = false;  // dropped meanwhile (Reset)
+    }
     if (g?.kind === 'ik') {
       if (g.ik !== this.ik() || !app.data) { this.release(h); return; }
       const turn = mulMBt(h.grip.rot, g.R0);  // grip rotation since the grab
       app.teleop.held.set(g.index, BALL);
       g.ik.setTargetPose(g.chain, app.data, { pos: add(g.p0, sub(h.grip.pos, g.c0)), rot: mulMM(turn, g.T0) });
+      // The trigger closes the gripper part way, once it has been touched.
+      if (h.trigger > 0.05) g.squeezed = true;
+      if (g.squeezed && g.chain.gripper?.length && Math.abs(h.trigger - (g.amount ?? -1)) > 0.02) {
+        g.amount = h.trigger;
+        g.ik.setGripper(g.chain, app.data, h.trigger);
+      }
     } else if (g?.kind === 'body') {
       if (!app.perturb.target) { h.grab = null; return; }
       const r = h.rayPose, turn = mulMBt(r.rot, g.R0);
@@ -217,10 +243,16 @@ export class XrControls {
 
   trigger(h) {
     const { app } = this, ik = this.ik();
-    const index = h.grab?.kind === 'ik' ? h.grab.index : ik && app.teleop.pick(h.pick)?.index;
+    if (h.grab?.kind === 'ik') return;  // the gripper follows the trigger (follow)
+    const index = ik && app.teleop.pick(h.pick)?.index;
     if (index != null && ik?.chains[index]) {
       ik.focus = index;
       ik.toggleGripper(ik.chains[index], app.data);
+      return;
+    }
+    const t = app.teleop;
+    if (!t.dragging && t.pickGoal(h.pick) && t.grab(h.pick, null)) {
+      h.goal = true;
       return;
     }
     Promise.resolve(app.castRay(h.pick)).then((hit) => {
@@ -230,9 +262,16 @@ export class XrControls {
     });
   }
 
-  sticks(h, axes, viewer) {
-    const x = Math.abs(axes[STICK_X] ?? 0) > DEAD ? axes[STICK_X] : 0;
+  sticks(h, axes, viewer, frame) {
+    let x = Math.abs(axes[STICK_X] ?? 0) > DEAD ? axes[STICK_X] : 0;
     const y = Math.abs(axes[STICK_Y] ?? 0) > DEAD ? axes[STICK_Y] : 0;
+    // Sideways on the hand dragging the goal: turns it.
+    const now = frame.predictedDisplayTime ?? performance.now(), dt = Math.min(0.1, (now - (h.t ?? now)) / 1000);
+    h.t = now;
+    if (h.goal) {
+      if (x) this.app.teleop.turnGoal(-x * GOAL_TURN_RATE * dt);
+      x = 0;
+    }
     if (h.name === 'left') {
       const stick = this.app.teleop.input.stick;
       stick[0] = -y;
@@ -267,14 +306,14 @@ export class XrControls {
     }
   }
 
-  // The marker under any ray is highlighted (TeleopPanel.hover).
+  // The IK or goal marker under any ray is highlighted (TeleopPanel.hover).
   hover() {
     const t = this.app.teleop;
-    if (t.dragging || !this.ik()) return;
+    if (t.dragging) return;
     t.hover = null;
     for (const h of this.hands.values()) {
       if (h.grab || !h.pick) continue;
-      const hit = t.pick(h.pick);
+      const hit = (this.ik() && t.pick(h.pick)) || (t.pickGoal(h.pick) && { goal: true });
       if (hit) { t.hover = hit; break; }
     }
   }
@@ -286,11 +325,11 @@ export class XrControls {
     // The ray ends where it meets a marker or the floor.
     const { eye, dir } = h.pick, t = this.app.teleop;
     const hit = !h.grab && this.ik() && t.pick(h.pick);
-    const floor = floorHit(h.pick);
+    const floor = floorHit(h.pick), onGoal = h.goal || (!h.grab && !hit && !!t.pickGoal(h.pick));
     let len = hit ? hit.depth : floor ? Math.min(RAY_MAX, Math.hypot(...sub(floor, eye))) : RAY_MAX;
     if (h.grab?.kind === 'body') len = Math.hypot(...sub(this.app.perturb.target ?? eye, eye)) || len;
     this.put(h.ray, rodMatrix(eye, eye.map((v, i) => v + dir[i] * len), RAY_RADIUS));
-    const color = hit || h.grab ? HOT : [0.92, 0.92, 0.92];
+    const color = hit || h.grab || onGoal ? HOT : [0.92, 0.92, 0.92];
     if (h.rayColor !== color) {
       h.ray.mi.setColor4Parameter('baseColor', Filament.RgbaType.sRGB, [...color, 1]);
       h.rayColor = color;
