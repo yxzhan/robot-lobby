@@ -1013,7 +1013,7 @@ class App {
       inst.delete();
     };
     const p = this.model ? this.perturb.point() : null, q = this.perturb.target;
-    const r = 0.006 * this.orbit.dist;  // constant on-screen size
+    const r = 0.05;  // m: a 10 cm ball, whatever the zoom
     const ball = (c, k) => [k, 0, 0, 0, 0, k, 0, 0, 0, 0, k, 0, c[0], c[1], c[2], 1];
     put(this.markers.sel, p && ball(p, r));
     put(this.markers.target, p && q && ball(q, 0.7 * r));
