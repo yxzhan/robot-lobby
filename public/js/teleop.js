@@ -174,6 +174,7 @@ export class TeleopPanel {
     try { this.folded = new Set(JSON.parse(localStorage.getItem(FOLDED) ?? '[]')); } catch { this.folded = new Set(); }
     this.dragging = null;    // marker.js drag state + {index, chain} while a marker is dragged, or {goal} for the goal marker
     this.hover = null;       // {index, part} of the marker under the pointer, or {goal: true}
+    this.held = new Map();   // chain index -> marker part, held by a WebXR controller (xr.js)
     try { this.mode = localStorage.getItem(INPUT) === 'keyboard' ? 'keyboard' : 'goal'; } catch { this.mode = 'goal'; }
     this.goalReadout = null;
     // While the goal marker is dragged, the wheel and Q/E turn it and Esc puts
@@ -252,7 +253,8 @@ export class TeleopPanel {
     return ik.chains.slice(0, CHAIN_COLORS.length).map((c, i) => {
       const pose = ik.targetPose(c, this.app.data);
       if (!pose) return null;
-      const hot = g ? (g.index === i ? g.part : -1) : (this.hover?.index === i ? this.hover.part : -1);
+      const hot = this.held.has(i) ? this.held.get(i)
+        : g ? (g.index === i ? g.part : -1) : (this.hover?.index === i ? this.hover.part : -1);
       return { ...pose, scale: markerScale(), hot };
     });
   }
@@ -878,7 +880,7 @@ export class TeleopPanel {
   tick(dt) {
     const robots = this.controllable();
     const locos = locomotion(this.active);
-    const keyboard = this.mode === 'keyboard';
+    const keyboard = this.mode === 'keyboard' || this.input.xr;  // in WebXR the left stick drives (xr.js)
     this.input.enabled = locos.length > 0 && keyboard;
     this.input.sticks?.show(this.input.enabled);
     for (const r of robots) {

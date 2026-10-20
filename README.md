@@ -229,8 +229,31 @@ build binds no shadow-map options, so their size is fixed) and **Textures**
 (64, 512, 1024 or 2048 px on the longer side; a change decodes the scene's
 images again, so it can be compared on the spot: a kitchen's 18 textures
 are 63 MB at 1024 and 0.3 MB at 64). Ultra low is Low with 64 px textures,
-to see what textures cost. The WebXR eyes take the anti-aliasing and
-occlusion settings too.
+to see what textures cost. The WebXR eyes leave these out: no FXAA, SSAO
+or shadows (they come out different in each eye and shimmer as the head
+moves), 4× MSAA instead; Filament renders them straight into the
+session's layer, and renders every session frame. **Enter AR** (where
+`immersive-ar` is supported, e.g. Quest 3) is the same with passthrough:
+no sky and no world floor, so the robots stand in your room, on its floor.
+
+**VR/AR controllers** (`public/js/xr.js`; Quest Touch, or any xr-standard
+gamepad), in local and network mode. Each controller points a ray, which
+ends on the IK marker or the floor it meets:
+
+- **Grip** on an IK marker of the driven robot, reached by hand or with the
+  ray: the target follows the controller while held, moved as the hand moves
+  and turned as it turns (about the marker's center). Let go and grab again
+  to go on, like a clutch; each hand can hold its own chain (two arms at
+  once). On any other body: pulls it with the selection spring, like
+  Shift+drag, held at the end of the ray as on a stick.
+- **Trigger** on a held marker, or one under the ray: opens or closes that
+  arm's gripper. On a robot: selects it and drives it (like a
+  double-click); on anything else, releases it.
+- **Left stick** walks the driven robot (forward/back, turn), whatever the
+  Teleop panel's input.
+- **Right stick** sideways turns you by 30° about where you stand; pushed
+  forward it aims at the floor (the spawn marker shows where), and letting
+  go puts you there. In AR this moves the scene in your room.
 
 ## Teleop panel and controllers
 

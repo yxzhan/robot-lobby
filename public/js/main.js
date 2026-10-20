@@ -31,6 +31,7 @@ import { RenderPanel, loadQuality } from './render.js';
 import { ServerPanel } from './serverpanel.js';
 import { SharePanel } from './share.js';
 import { MARKER } from './marker.js';
+import { XrControls } from './xr.js';
 import { CHAIN_COLORS } from './teleop.js';
 import Stats from '../vendor/stats/Stats.js';
 import { NET_MUJOCO, NetClient, loadRender, worldData, worldModel } from './net.js';
@@ -584,7 +585,8 @@ class App {
     this.scene.addEntity(this.sun);
     const sh = new Float32Array(27);
     sh.set([0.65, 0.7, 0.8], 0);
-    this.scene.setSkybox(Filament.Skybox.Builder().environment(skyTexture(engine)).build(engine));
+    this.skybox = Filament.Skybox.Builder().environment(skyTexture(engine)).build(engine);
+    this.scene.setSkybox(this.skybox);
     this.scene.setIndirectLight(
       Filament.IndirectLight.Builder().irradianceSh(3, sh).intensity(25000).build(engine));
 
@@ -598,7 +600,8 @@ class App {
     // at z = 0 too, and two coplanar surfaces z-fight (flicker between each
     // other with the view). Offset, the world floor always loses such ties.
     floor.setPolygonOffset(1, 1);
-    this.scene.addEntity(makeEntity(engine, makeGeometry(engine, plane(20, 20)), floor));
+    this.floor = makeEntity(engine, makeGeometry(engine, plane(20, 20)), floor);
+    this.scene.addEntity(this.floor);
 
     // Perturbation markers: the selection point, the drag target and a rope
     // between them. Hidden (scaled to zero) when unused.
@@ -680,21 +683,28 @@ class App {
     maxTexture = q.textures;
     if (textures) for (const e of this.images.values()) e.reload?.();  // the scene's image textures at the new size
     this.viewQuality(this.view);
-    for (const { view } of this.xr?.eyes ?? []) this.viewQuality(view);
-    const lm = this.engine.getLightManager(), sun = lm.getInstance(this.sun);
-    lm.setShadowCaster(sun, q.shadows !== 'off');
-    sun.delete();
+    this.shadows();
     this.resize();
   }
 
-  // Anti-aliasing and ambient occlusion of `view` (the window's, or a WebXR eye's).
-  viewQuality(view) {
-    const q = this.quality, F = Filament, msaa = q.antialiasing === 'msaa';
-    view.setAntiAliasing(q.antialiasing === 'fxaa' ? F.View$AntiAliasing.FXAA : F.View$AntiAliasing.NONE);
+  // The sun's shadows as the Render panel says, but none in VR.
+  shadows() {
+    const lm = this.engine.getLightManager(), sun = lm.getInstance(this.sun);
+    lm.setShadowCaster(sun, this.quality.shadows !== 'off' && !this.xr);
+    sun.delete();
+  }
+
+  // Anti-aliasing and ambient occlusion of the window's view. A WebXR eye's
+  // (`xr`) has neither the panel's screen-space effects, FXAA and SSAO, which
+  // come out different in each eye and shimmer as the head moves, nor
+  // shadows (shadows()): 4x MSAA instead.
+  viewQuality(view, xr = false) {
+    const q = this.quality, F = Filament, msaa = xr || q.antialiasing === 'msaa';
+    view.setAntiAliasing(q.antialiasing === 'fxaa' && !xr ? F.View$AntiAliasing.FXAA : F.View$AntiAliasing.NONE);
     view.setMultiSampleAntiAliasingOptions({ enabled: msaa, sampleCount: msaa ? 4 : 1 });
     const high = q.ao === 'high', Q = F.View$QualityLevel;
     view.setAmbientOcclusionOptions({
-      enabled: q.ao !== 'off', radius: 0.2,
+      enabled: q.ao !== 'off' && !xr, radius: 0.2,
       resolution: high ? 1 : 0.5, quality: high ? Q.HIGH : Q.LOW, upsampling: high ? Q.HIGH : Q.LOW,
     });
   }
@@ -973,9 +983,13 @@ class App {
   // is the world (the floor, static geoms). Visual-only geoms are not in the
   // physics world, so this hits collision geoms.
   pickBody(clientX, clientY) {
+    return this.castRay(this.pointerRay(clientX, clientY));
+  }
+
+  // The same along the ray {eye, dir}.
+  castRay({ eye, dir }) {
     const { mujoco, model, data } = this;
     if (!model) return null;
-    const { eye, dir } = this.pointerRay(clientX, clientY);
     if (this.net) {  // a promise: the server casts the ray
       return this.net.request('ray', { eye, dir }).then((hit) => (hit.body >= 0 ? hit : null), () => null);
     }
@@ -989,6 +1003,27 @@ class App {
       geom.delete();
       normal.delete();
     }
+  }
+
+  // The robot that body b (of the world) belongs to, or undefined.
+  robotOfBody(b) {
+    return this.robots.find((r) => b >= r.bodyOffset && b < r.bodyOffset + r.visual.inertia.nbody - 1);
+  }
+
+  // A hidden marker entity for the WebXR controllers (xr.js): a unit ball, or
+  // a unit rod (radius 1, z from -0.5 to 0.5).
+  xrPart(rod) {
+    this.xrShapes ??= { ball: makeGeometry(this.engine, roundShape(1, 1, 1)), rod: makeGeometry(this.engine, cylinder(1, 0.5)) };
+    const mi = this.matLit.createInstance();
+    mi.setColor4Parameter('baseColor', Filament.RgbaType.sRGB, [1, 1, 1, 1]);
+    mi.setFloatParameter('roughness', 0.5);
+    mi.setFloatParameter('metallic', 0.0);
+    const e = makeEntity(this.engine, rod ? this.xrShapes.rod : this.xrShapes.ball, mi, false);
+    const tcm = this.engine.getTransformManager(), inst = tcm.getInstance(e);
+    tcm.setTransform(inst, [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]);
+    inst.delete();
+    this.scene.addEntity(e);
+    return { e, mi };
   }
 
   // Shows or hides the world-origin axes (ORIGIN_AXIS_LENGTH long).
@@ -1218,23 +1253,27 @@ class App {
     else requestAnimationFrame(() => this.frame());
   }
 
-  // ---- WebXR (view only, no interaction) ----------------------------------
+  // ---- WebXR (the controllers: xr.js) ---------------------------------------
   //
-  // Filament.js cannot render into the session's framebuffer, so each eye is
-  // rendered by its own View into its viewport of the (canvas) default
-  // framebuffer, sized like the XR layer, and the whole image is then blitted
-  // onto the layer. The scene is Z-up, WebXR is Y-up: the 'local-floor' space
-  // is mapped onto the scene with the viewer starting 2.5 m back on -Y,
-  // looking along +Y at the origin.
+  // `ar`: an immersive-ar session (Quest 3's passthrough) instead: no sky and
+  // no world floor, cleared to transparent, so the room shows around the
+  // robots, which stand on its floor.
+  //
+  // Each eye is rendered by its own View into its viewport of the session's
+  // layer. Filament.js only renders into the default framebuffer, so while it
+  // renders a session frame, binding the default framebuffer binds the
+  // layer's instead (xrGl). Where the 'local-floor' space lies in the scene
+  // is XrControls.sceneFromXr.
 
-  async enterVR() {
-    const session = await navigator.xr.requestSession('immersive-vr', { requiredFeatures: ['local-floor'] });
+  async enterVR(ar = false) {
+    const session = await navigator.xr.requestSession(ar ? 'immersive-ar' : 'immersive-vr', { requiredFeatures: ['local-floor'] });
     const gl = this.canvas.getContext('webgl2');  // Filament's own context
     await gl.makeXRCompatible();
     const near = 0.05, far = 200;
     session.updateRenderState({ depthNear: near, depthFar: far });
-    // No antialias: a multisampled layer cannot be blitted into.
-    const layer = new XRWebGLLayer(session, gl, { antialias: false, depth: false });
+    xrGl(gl, () => this.xr?.drawing ? this.xr.layer.framebuffer : null);
+    // Filament multisamples (viewQuality) and resolves into the layer itself.
+    const layer = new XRWebGLLayer(session, gl, { antialias: false, depth: false, alpha: ar });
     session.updateRenderState({ baseLayer: layer });
     const space = await session.requestReferenceSpace('local-floor');
     const eyes = [0, 1].map(() => {
@@ -1243,14 +1282,20 @@ class App {
       const view = this.engine.createView();
       view.setCamera(camera);
       view.setScene(this.scene);
-      this.viewQuality(view);
+      this.viewQuality(view, true);
+      if (ar) view.setBlendMode(Filament.View$BlendMode.TRANSLUCENT);  // keeps the alpha
       return { entity, camera, view };
     });
-    this.canvas.width = layer.framebufferWidth;
-    this.canvas.height = layer.framebufferHeight;
-    this.xr = { session, gl, layer, space, eyes, near, far, frames: 0, t0: performance.now() };
+    this.xrControls ??= new XrControls(this, (rod) => this.xrPart(rod));
+    this.xrControls.start();
+    this.xr = { session, gl, layer, space, eyes, near, far, ar, frames: 0, t0: performance.now() };
+    this.shadows();
+    if (ar) this.passthrough(true);
     session.addEventListener('end', () => {
+      this.xrControls.end();
       this.xr = null;
+      this.shadows();
+      if (ar) this.passthrough(false);
       for (const { entity, view } of eyes) {
         this.engine.destroyView(view);
         this.engine.destroyCameraComponent(entity);
@@ -1262,12 +1307,20 @@ class App {
     return session;
   }
 
+  // Sky, world floor and an opaque clear off (AR) or back on.
+  passthrough(on) {
+    this.scene.setSkybox(on ? null : this.skybox);
+    if (on) this.scene.remove(this.floor);
+    else this.scene.addEntity(this.floor);
+    this.renderer.setClearOptions({ clearColor: on ? [0, 0, 0, 0] : [0.1, 0.11, 0.13, 1], clear: true });
+  }
+
   renderXR(frame) {
     const { gl, layer, space, eyes, near, far } = this.xr;
     const pose = frame.getViewerPose(space);
     if (!pose) return;
-    // scene_from_xr (column-major): x -> x, y -> z, z -> -y, origin at (0, -2.5, 0).
-    const M = [1, 0, 0, 0, 0, 0, 1, 0, 0, -1, 0, 0, 0, -2.5, 0, 1];
+    this.xrControls.update(frame, space, pose);
+    const M = this.xrControls.sceneFromXr();
     const mul = (a, b) => {  // column-major 4x4 a * b
       const r = new Array(16);
       for (let c = 0; c < 4; c++) {
@@ -1285,6 +1338,12 @@ class App {
       camera.setCustomProjection(Array.from(v.projectionMatrix), near, far);
       camera.setModelMatrix(mul(M, v.transform.matrix));
     }
+    // Filament keeps the default framebuffer bound between frames (as far as
+    // its state cache knows), so the binding is switched by hand: to the layer
+    // for this frame, and back once the frame is out (the layer's framebuffer
+    // is only usable inside the session's frame callback).
+    this.xr.drawing = true;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     if (this.renderer.beginFrame(this.swapChain)) {
       for (let i = 0; i < views.length; i++) this.renderer.renderView(eyes[i].view);
       this.renderer.endFrame();
@@ -1292,17 +1351,8 @@ class App {
       this.xr.skipped = (this.xr.skipped ?? 0) + 1;
     }
     this.engine.execute();
-
-    // Default framebuffer -> layer. Filament caches GL state, so the scissor
-    // test and the framebuffer binding are put back as it left them.
-    const w = layer.framebufferWidth, h = layer.framebufferHeight;
-    const scissor = gl.isEnabled(gl.SCISSOR_TEST);
-    if (scissor) gl.disable(gl.SCISSOR_TEST);
-    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
-    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, layer.framebuffer);
-    gl.blitFramebuffer(0, 0, w, h, 0, 0, w, h, gl.COLOR_BUFFER_BIT, gl.NEAREST);
+    this.xr.drawing = false;
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    if (scissor) gl.enable(gl.SCISSOR_TEST);
 
     // Frame rate, for checking performance on the headset (remote devtools).
     const x = this.xr;
@@ -1313,6 +1363,29 @@ class App {
       x.frames = 0; x.skipped = 0; x.t0 = performance.now();
     }
   }
+}
+
+// Makes `gl` (Filament's context) bind target() whenever the default
+// framebuffer is bound while target() is not null, and translates what only
+// the default framebuffer takes (BACK, COLOR/DEPTH/STENCIL) into the
+// attachments of an ordinary one. Also, in those frames every fence counts as
+// passed: Filament skips a frame while its last one's fence is pending, and
+// WebGL only updates a fence's status between tasks, so most session frames
+// were skipped, showing a stale image in the headset; the session's own frame
+// loop paces the frames instead. Once per context; Emscripten's GL calls look
+// the methods up on the context each time.
+function xrGl(gl, target) {
+  if (gl.xrTarget) { gl.xrTarget = target; return; }
+  gl.xrTarget = target;
+  const ATTACHMENT = { 0x0405: 0x8CE0, 0x1800: 0x8CE0, 0x1801: 0x8D00, 0x1802: 0x8D20 };
+  const map = (list) => (gl.xrTarget() ? Array.from(list, (a) => ATTACHMENT[a] ?? a) : list);
+  const { bindFramebuffer, invalidateFramebuffer, invalidateSubFramebuffer, drawBuffers, readBuffer, clientWaitSync } = gl;
+  gl.bindFramebuffer = (t, fb) => bindFramebuffer.call(gl, t, fb ?? gl.xrTarget());
+  gl.invalidateFramebuffer = (t, list) => invalidateFramebuffer.call(gl, t, map(list));
+  gl.invalidateSubFramebuffer = (t, list, ...rect) => invalidateSubFramebuffer.call(gl, t, map(list), ...rect);
+  gl.drawBuffers = (list) => drawBuffers.call(gl, map(list));
+  gl.readBuffer = (b) => readBuffer.call(gl, map([b])[0]);
+  gl.clientWaitSync = (...a) => (gl.xrTarget() ? gl.ALREADY_SIGNALED : clientWaitSync.apply(gl, a));
 }
 
 // Robots are attached in order and each one's joints, actuators and mocap
@@ -2143,7 +2216,7 @@ try {
     const hit = await app.pickBody(x, y);  // a promise in network mode
     app.perturb.select(hit);
     if (hit?.body > 0) app.orbit.focus(hit.point);  // the camera turns about the selection
-    const robot = hit && app.robots.find((r) => hit.body >= r.bodyOffset && hit.body < r.bodyOffset + r.visual.inertia.nbody - 1);
+    const robot = hit && app.robotOfBody(hit.body);
     app.teleop.drive(robot ?? null);
   };
   let lastTouchEnd = -Infinity;
@@ -2187,19 +2260,20 @@ try {
     if (app.net && confirm('Restart the shared world for everyone? The server reads the model files again and starts the simulation anew.')) app.net.send('restart');
   };
 
-  // Enter VR: shown only where an immersive-vr session is supported (WebXR
-  // needs a secure context: https or localhost).
-  const vr = document.getElementById('vr');
-  if (await navigator.xr?.isSessionSupported('immersive-vr').catch(() => false)) {
-    vr.hidden = false;
-    vr.onclick = async () => {
+  // Enter VR / Enter AR: each shown only where that kind of session is
+  // supported (WebXR needs a secure context: https or localhost).
+  for (const [id, mode, name] of [['vr', 'immersive-vr', 'VR'], ['ar', 'immersive-ar', 'AR']]) {
+    const button = document.getElementById(id);
+    if (!(await navigator.xr?.isSessionSupported(mode).catch(() => false))) continue;
+    button.hidden = false;
+    button.onclick = async () => {
       if (app.xr) { app.xr.session.end(); return; }
       try {
-        const session = await app.enterVR();
-        vr.textContent = 'Exit VR';
-        session.addEventListener('end', () => { vr.textContent = 'Enter VR'; });
+        const session = await app.enterVR(id === 'ar');
+        button.textContent = `Exit ${name}`;
+        session.addEventListener('end', () => { button.textContent = `Enter ${name}`; });
       } catch (err) {
-        status.textContent = `VR failed: ${err.message ?? err}`;
+        status.textContent = `${name} failed: ${err.message ?? err}`;
         console.error(err);
       }
     };
