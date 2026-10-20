@@ -7,5 +7,251 @@
   },
   "mujoco_menagerie/franka_emika_panda/panda.xml": {
     "chains": [{ "name": "hand", "root": "link1", "tip": "hand", "offset": [0, 0, 0.1034], "locked": [], "gripper": "actuator8" }]
+  },
+  "mujoco_menagerie/boston_dynamics_spot/spot_arm.xml": {
+    "chains": [
+      {
+        "name": "arm_link_fngr",
+        "tip": "arm_link_wr1",
+        "root": "arm_link_sh0",
+        "site": "",
+        "offset": [
+          0.22,
+          0,
+          -0.05
+        ],
+        "locked": [],
+        "gripper": "arm_f1x"
+      }
+    ],
+    "auto": true
+  },
+  "mujoco_menagerie/unitree_g1/g1_with_hands.xml": {
+    "chains": [
+      {
+        "name": "left_wrist_yaw",
+        "tip": "left_wrist_yaw_link",
+        "root": "left_shoulder_pitch_link",
+        "site": "",
+        "offset": [
+          0.09,
+          -0.03,
+          -0.03
+        ],
+        "locked": [],
+        "gripper": [
+          {
+            "actuator": "left_hand_thumb_0_joint",
+            "open": -0.001,
+            "closed": 0
+          },
+          {
+            "actuator": "left_hand_thumb_1_joint",
+            "open": -0.7243,
+            "closed": 1.0472
+          },
+          {
+            "actuator": "left_hand_thumb_2_joint",
+            "open": 0,
+            "closed": 1.7453
+          },
+          {
+            "actuator": "left_hand_middle_0_joint",
+            "open": 0,
+            "closed": -1.5708
+          },
+          {
+            "actuator": "left_hand_middle_1_joint",
+            "open": 0,
+            "closed": -1.7453
+          },
+          {
+            "actuator": "left_hand_index_0_joint",
+            "open": 0,
+            "closed": -1.5708
+          },
+          {
+            "actuator": "left_hand_index_1_joint",
+            "open": 0,
+            "closed": -1.7453
+          }
+        ]
+      },
+      {
+        "name": "right_wrist_yaw",
+        "tip": "right_wrist_yaw_link",
+        "root": "right_shoulder_pitch_link",
+        "site": "",
+        "offset": [
+          0.09,
+          0.03,
+          -0.03
+        ],
+        "locked": [],
+        "gripper": [
+          {
+            "actuator": "right_hand_thumb_0_joint",
+            "open": -0.001,
+            "closed": 0
+          },
+          {
+            "actuator": "right_hand_thumb_1_joint",
+            "open": 0.7243,
+            "closed": -1.0472
+          },
+          {
+            "actuator": "right_hand_thumb_2_joint",
+            "open": 0,
+            "closed": -1.7453
+          },
+          {
+            "actuator": "right_hand_index_0_joint",
+            "open": 0,
+            "closed": 1.5708
+          },
+          {
+            "actuator": "right_hand_index_1_joint",
+            "open": 0,
+            "closed": 1.7453
+          },
+          {
+            "actuator": "right_hand_middle_0_joint",
+            "open": 0,
+            "closed": 1.5708
+          },
+          {
+            "actuator": "right_hand_middle_1_joint",
+            "open": 0,
+            "closed": 1.7453
+          }
+        ]
+      }
+    ],
+    "auto": true
+  },
+  "mujoco_menagerie/pal_tiago/tiago_position.xml": {
+    "chains": [
+      {
+        "name": "arm_7",
+        "tip": "arm_7_link",
+        "root": "torso_lift_link",
+        "site": "",
+        "offset": [
+          0,
+          0,
+          0.27
+        ],
+        "locked": [],
+        "gripper": [
+          {
+            "actuator": "gripper_left_finger_position",
+            "open": 0.045,
+            "closed": 0
+          },
+          {
+            "actuator": "gripper_right_finger_position",
+            "open": 0.045,
+            "closed": 0
+          }
+        ]
+      }
+    ],
+    "auto": true
+  },
+  "mujoco_menagerie/agilex_piper/piper.xml": {
+    "chains": [
+      {
+        "name": "link7",
+        "tip": "link6",
+        "root": "link1",
+        "site": "",
+        "offset": [
+          0,
+          0,
+          0.1
+        ],
+        "locked": [],
+        "gripper": [
+          {
+            "actuator": "gripper",
+            "open": 0.035,
+            "closed": 0
+          }
+        ]
+      }
+    ],
+    "auto": true
+  },
+  "mujoco_menagerie/arx_l5/arx_l5.xml": {
+    "chains": [
+      {
+        "name": "link7",
+        "tip": "link6",
+        "root": "link1",
+        "site": "",
+        "offset": [
+          0.14,
+          0,
+          -0.03
+        ],
+        "locked": [],
+        "gripper": [
+          {
+            "actuator": "gripper",
+            "open": 0.044,
+            "closed": 0
+          }
+        ]
+      }
+    ],
+    "auto": true
+  },
+  "mujoco_menagerie/hello_robot_stretch/stretch.xml": {
+    "chains": [
+      {
+        "name": "link_wrist_yaw",
+        "tip": "link_wrist_yaw",
+        "root": "link_lift",
+        "site": "",
+        "offset": [
+          0,
+          0.19,
+          0.13
+        ],
+        "locked": [],
+        "gripper": [
+          {
+            "actuator": "grip",
+            "open": 0.04,
+            "closed": -0.005
+          }
+        ]
+      }
+    ],
+    "auto": true
+  },
+  "mujoco_menagerie/hello_robot_stretch_3/stretch.xml": {
+    "chains": [
+      {
+        "name": "link_SG3_gripper",
+        "tip": "link_SG3_gripper_body",
+        "root": "link_lift",
+        "site": "",
+        "offset": [
+          0,
+          0,
+          0.21
+        ],
+        "locked": [],
+        "gripper": [
+          {
+            "actuator": "gripper",
+            "open": 0.04,
+            "closed": -0.02
+          }
+        ]
+      }
+    ],
+    "auto": true
   }
 }

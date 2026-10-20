@@ -5,6 +5,7 @@
  "mjcf_assets/robots/mujoco_menagerie/hello_robot_stretch_3/stretch.xml",
  "mjcf_assets/robots/digital_twin/microduck/microduck.xml",
  "mjcf_assets/robots/mujoco_menagerie/unitree_go2/go2.xml",
+ "mjcf_assets/robots/mujoco_menagerie/stanford_tidybot/tidybot.xml",
  "mjcf_assets/robots/mujoco_menagerie/pal_tiago/tiago.xml",
  "mjcf_assets/objects/robocasa/banana/banana.xml",
  "mjcf_assets/robots/mujoco_menagerie/robotstudio_so101/so101.xml",
