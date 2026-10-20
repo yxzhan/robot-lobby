@@ -277,7 +277,7 @@ this browser, in local and network mode alike. Its section in the panel:
 the bridge's address (`localhost:9090` by default, or a `ws://` / `wss://`
 URL) with the connection's state (retried every 2 s while it is down);
 what it publishes, each with its topic: the joint states
-(`sensor_msgs/JointState` on `joint_state`: the robot's hinge and slide
+(`sensor_msgs/JointState` on `joint_states`: the robot's hinge and slide
 joints, names without the `r1/` prefix; velocities only in local mode, the
 server sends positions) and TF (`tf2_msgs/TFMessage` on `/tf`: every body
 in its parent's frame, the root bodies in `world`); what it takes: joint

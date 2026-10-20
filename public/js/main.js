@@ -482,8 +482,23 @@ class OrbitCamera {
     }, { passive: false });
   }
 
+  // Glides the target to point p (over ~0.3 s), keeping the distance and
+  // the angles; a pan or another focus on the way takes over.
+  focus(p) {
+    const from = [...this.center], t0 = performance.now(), id = this.focusing = {};
+    const step = () => {
+      if (this.focusing !== id) return;
+      const k = Math.min(1, (performance.now() - t0) / 300), e = 1 - (1 - k) ** 3;
+      for (let i = 0; i < 3; i++) this.center[i] = from[i] + (p[i] - from[i]) * e;
+      if (k < 1) requestAnimationFrame(step);
+      else this.focusing = null;
+    };
+    step();
+  }
+
   // Moves the target in the view plane by a pointer motion of (dx, dy) pixels.
   pan(dx, dy) {
+    this.focusing = null;
     const k = this.dist * 0.0015;
     const [ca, sa] = [Math.cos(this.azim), Math.sin(this.azim)];
     this.center[0] += (sa * dx - ca * Math.sin(this.elev) * dy) * k;
@@ -1013,7 +1028,7 @@ class App {
       inst.delete();
     };
     const p = this.model ? this.perturb.point() : null, q = this.perturb.target;
-    const r = 0.05;  // m: a 10 cm ball, whatever the zoom
+    const r = 0.025;  // m: a 5 cm ball, whatever the zoom
     const ball = (c, k) => [k, 0, 0, 0, 0, k, 0, 0, 0, 0, k, 0, c[0], c[1], c[2], 1];
     put(this.markers.sel, p && ball(p, r));
     put(this.markers.target, p && q && ball(q, 0.7 * r));
@@ -2098,6 +2113,7 @@ try {
   const selectAt = async (x, y) => {
     const hit = await app.pickBody(x, y);  // a promise in network mode
     app.perturb.select(hit);
+    if (hit?.body > 0) app.orbit.focus(hit.point);  // the camera turns about the selection
     const robot = hit && app.robots.find((r) => hit.body >= r.bodyOffset && hit.body < r.bodyOffset + r.visual.inertia.nbody - 1);
     app.teleop.drive(robot ?? null);
   };

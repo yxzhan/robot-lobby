@@ -24,7 +24,7 @@ const RETRY_MS = 2000;
 export const ROS_DEFAULTS = {
   url: 'localhost:9090',
   rate: 30,
-  jointStates: { on: true, topic: 'joint_state' },
+  jointStates: { on: true, topic: 'joint_states' },  // what robot_state_publisher and RViz listen to
   tf: { on: true, topic: '/tf' },
   jointCommand: { on: true, topic: 'joint_command' },
   cmdVel: { on: true, topic: '/cmd_vel' },
@@ -41,6 +41,7 @@ const SUBSCRIBED = ['jointCommand', 'cmdVel'];
 function loadSettings(key) {
   try {
     const saved = JSON.parse(localStorage.getItem(STORE) ?? '{}')[key];
+    if (saved?.jointStates?.topic === 'joint_state') saved.jointStates.topic = 'joint_states';  // the old default
     if (saved) return { ...structuredClone(ROS_DEFAULTS), ...saved };
   } catch { /* no storage */ }
   return structuredClone(ROS_DEFAULTS);
