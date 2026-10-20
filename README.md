@@ -445,7 +445,8 @@ that axis, the center ball (colored by chain) to move it in the plane
 facing the camera. Axes are the target's own (red x, green y, blue z); the
 part under the pointer turns yellow, and the camera does not move while a
 marker is held. **G** opens or closes the gripper of the chain dragged
-last. Until a marker moves, a chain just holds its joints where they are.
+last; so does a **right-click** on a marker, or the right button pressed
+while the left one drags it (a right-click there does not pan the camera). Until a marker moves, a chain just holds its joints where they are.
 
 A chain is only `{root, tip}`, plus the tip frame: a site rigidly attached
 to the tip body (a TCP) or the body moved by an offset (Franka's 0.1034 m):

@@ -267,6 +267,20 @@ export class TeleopPanel {
     return best;
   }
 
+  // Right button on an arm's marker, or pressed while dragging one (the left
+  // button held): opens or closes that chain's gripper, like G. False if no
+  // marker is concerned.
+  gripperClick(ray) {
+    const ik = this.active?.use?.ik && this.active.ik;
+    if (!ik?.enabled) return false;
+    const index = this.dragging?.chain ? this.dragging.index : this.pick(ray)?.index;
+    const chain = index != null && ik.chains[index];
+    if (!chain) return false;
+    ik.focus = index;
+    ik.toggleGripper(chain, this.app.data);
+    return true;
+  }
+
   // Pointer moved with no button down: highlights the part under it.
   hoverAt(ray) {
     const hit = this.dragging ? null : this.pick(ray) ?? (this.pickGoal(ray) && { goal: true });
@@ -734,7 +748,7 @@ export class TeleopPanel {
     const hint = el('div', { className: 'hint' });
     hint.innerHTML = ik.chains.length
       ? 'Drag a marker: arrows move along an axis, rings turn about it, the ball moves in the view plane · '
-        + '<kbd>G</kbd> gripper of the last one dragged. Pick bodies for tip/root by double-clicking them, then ◎.'
+        + '<kbd>G</kbd> or a right-click (on a marker, or while dragging it) opens/closes its gripper. Pick bodies for tip/root by double-clicking them, then ◎.'
       : 'No IK chains found in this robot: double-click the body to move (e.g. a hand), then + Chain.';
     box.append(hint);
 
@@ -827,7 +841,7 @@ export class TeleopPanel {
       if (n.startsWith(ik.prefix) && !chainActs.has(a)) acts.push([n.slice(ik.prefix.length), n.slice(ik.prefix.length)]);
     }
     row('Gripper', this.select(acts, cfg.gripper ?? '', (v) => { cfg.gripper = v; changed(cfg, true); }),
-      ...(chain.gripper >= 0 ? [this.button('open/close', 'Toggle the gripper (G)', () => ik.toggleGripper(chain, this.app.data))] : []));
+      ...(chain.gripper >= 0 ? [this.button('open/close', 'Toggle the gripper (G, or right-click the marker)', () => ik.toggleGripper(chain, this.app.data))] : []));
 
     if (chain.error) det.append(el('div', { className: 'error', textContent: chain.error }));
     const joints = el('div', { className: 'joints' });
