@@ -201,14 +201,14 @@ export class TeleopPanel {
       const chain = ik?.enabled && ik.chains[ik.focus];
       if (chain) ik.toggleGripper(chain, this.app.data);
     });
-    let last = performance.now();
-    const loop = () => {
-      const now = performance.now();
-      this.tick((now - last) / 1000);
-      last = now;
-      requestAnimationFrame(loop);
-    };
-    requestAnimationFrame(loop);
+    this.last = performance.now();
+  }
+
+  // Every frame, from App.frame (the window's animation loop, or the WebXR
+  // session's: the window's stops in VR).
+  update(now) {
+    this.tick((now - this.last) / 1000);
+    this.last = now;
   }
 
   controllable() {

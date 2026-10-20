@@ -1221,8 +1221,12 @@ class App {
     el.querySelector('.rate').textContent = `${Math.round(hz)} Hz · ${(rate / 1024).toFixed(rate < 10240 ? 1 : 0)} KB/s · +${Math.round(delay * 1000)} ms`;
   }
 
-  // `xrFrame` is set when called from the WebXR session's animation loop.
+  // One frame of the window's animation loop, or (`xrFrame`) of the WebXR
+  // session's. While a session runs, the window's loop stops (the browser
+  // pauses it in immersive mode anyway): enterVR starts the session's loop,
+  // and its 'end' starts the window's again.
   frame(xrFrame = null) {
+    if (this.xr && !xrFrame) return;
     this.stats?.begin();
     if (this.net) {
       // The server steps; show its state (interpolated) once this world matches it.
@@ -1235,6 +1239,7 @@ class App {
     this.showStats();
     this.syncMarkers();
     this.panel?.update(performance.now());
+    this.teleop?.update(performance.now());
     if (xrFrame) {
       this.renderXR(xrFrame);
     } else {
@@ -1246,11 +1251,14 @@ class App {
       this.engine.execute();
     }
     this.stats?.end();
-    const xr = this.xr;
-    // A session frame that arrives after the session ended is dropped: 'end'
-    // has restarted the window loop.
-    if (xr) xr.session.requestAnimationFrame((_t, f) => this.xr === xr && this.frame(f));
+    if (xrFrame) this.xrLoop(this.xr);
     else requestAnimationFrame(() => this.frame());
+  }
+
+  // The next frame of session `xr`'s loop (none once it has ended; a frame
+  // that arrives after that is dropped).
+  xrLoop(xr) {
+    xr?.session.requestAnimationFrame((_t, f) => this.xr === xr && this.frame(f));
   }
 
   // ---- WebXR (the controllers: xr.js) ---------------------------------------
@@ -1303,6 +1311,7 @@ class App {
       this.resize();
       requestAnimationFrame(() => this.frame());  // the session's loop has stopped
     });
+    this.xrLoop(this.xr);
     console.log(`WebXR: ${layer.framebufferWidth}x${layer.framebufferHeight} framebuffer`);
     return session;
   }
@@ -1431,8 +1440,12 @@ window.addEventListener('keydown', (e) => {
   e.stopImmediatePropagation();
 }, { capture: true });
 
-// Lets the browser paint the status text before a blocking compile.
-const nextFrame = () => new Promise((r) => requestAnimationFrame(() => setTimeout(r)));
+// Lets the browser paint the status text before a blocking compile. In VR
+// the page's animation frames stop: then after a moment anyway.
+const nextFrame = () => new Promise((r) => {
+  const t = setTimeout(r, 100);
+  requestAnimationFrame(() => { clearTimeout(t); setTimeout(r); });
+});
 
 // Copies the state of the old world into `data` for every robot of `robots`
 // (the new world's) that was in the old one too, wherever its entries moved
