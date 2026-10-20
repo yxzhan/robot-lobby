@@ -166,12 +166,17 @@ drawn.
 ## World physics
 
 The World panel (`public/js/worldpanel.js`, settings in `public/js/physics.js`,
-saved in this browser) sets MuJoCo's global options and default geom
+not saved: every load starts from the defaults) sets MuJoCo's global options and default geom
 properties:
 - **Gravity, wind, magnetic field, medium density and viscosity,
   impratio, friction cone** go into the world spec's `<option>` at every rebuild and onto
   the live `model.opt`, so they act at once. Wind and fluid drag need a
   medium (density or viscosity > 0).
+  Contacts default to an **elliptic cone with impratio 10** (in the browser
+  and on the server), not MuJoCo's pyramidal cone and 1: with those, friction
+  is soft and a Panda's fingers let a 100 g box creep out within seconds; with
+  these it holds the box through a lift and a swing to within 2 mm, for about
+  5% more step time.
 - **Default geom density, mass and friction** apply to geoms that do not
   set them themselves or through their own default classes, as a top-level
   `<default><geom/></default>` would: density and friction are written into

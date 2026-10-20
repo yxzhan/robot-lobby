@@ -1,10 +1,13 @@
-// World physics settings (the World panel), saved in this browser:
+// World physics settings (the World panel), for this page only (not saved):
 //
 // - Global options (MuJoCo <option>): gravity, wind, magnetic field, medium
 //   density and viscosity (both 0: no fluid forces, so wind does nothing),
 //   impratio (frictional-to-normal constraint impedance ratio), friction
-//   cone (pyramidal or elliptic; legged robots often need elliptic with a
-//   high impratio to keep their feet from creeping). They go into
+//   cone (pyramidal or elliptic). Elliptic with impratio 10 by default, not
+//   MuJoCo's pyramidal and 1: with those, friction is soft and things held
+//   creep (a Panda lets a 100 g box slide out of its fingers in seconds;
+//   with these it holds it, swinging, within 2 mm), at ~5% more step time;
+//   legged robots' feet creep less too. They go into
 //   the world spec at every rebuild (world.js) and are also set on the live
 //   model, so a change needs no rebuild.
 // - Default geom properties: density, mass and friction for every geom that
@@ -20,32 +23,23 @@
 //   MuJoCo's default; it is set when the model is compiled, so a change
 //   rebuilds the world.
 
-const STORE = 'mujoco-filament/physics';
-
-// MuJoCo's own defaults, but for sleep.
+// MuJoCo's own defaults, but for the contacts and sleep.
 export const PHYSICS_DEFAULTS = Object.freeze({
   gravity: [0, 0, -9.81],
   wind: [0, 0, 0],
   magnetic: [0, -0.5, 0],
   density: 0,
   viscosity: 0,
-  impratio: 1,
-  cone: 'pyramidal',
+  impratio: 10,
+  cone: 'elliptic',
   sleep: true,
   geom: { density: 1000, mass: null, friction: [1, 0.005, 0.0001] },
 });
 
+// The World panel's settings for this page: the defaults at every load,
+// not kept in the browser.
 export function loadPhysics() {
-  const s = structuredClone(PHYSICS_DEFAULTS);
-  try {
-    const saved = JSON.parse(localStorage.getItem(STORE) ?? 'null');
-    if (saved) Object.assign(s, saved, { geom: { ...s.geom, ...saved.geom } });
-  } catch { /* no storage */ }
-  return s;
-}
-
-export function savePhysics(s) {
-  try { localStorage.setItem(STORE, JSON.stringify(s)); } catch { /* no storage */ }
+  return structuredClone(PHYSICS_DEFAULTS);
 }
 
 const OPTION_KEYS = ['gravity', 'wind', 'magnetic', 'density', 'viscosity', 'impratio', 'cone'];

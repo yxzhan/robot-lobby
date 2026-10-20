@@ -25,7 +25,7 @@ import { TeleopPanel, TOUCH, locomotion } from './teleop.js';
 import { bodyPose } from './goal.js';
 import { BaseController } from './base.js';
 import { IkController } from './ik.js';
-import { applyOptions, geomOverrides, geomSignature, injectGeomDefaults, loadPhysics, needsRebuild, savePhysics } from './physics.js';
+import { applyOptions, geomOverrides, geomSignature, injectGeomDefaults, loadPhysics, needsRebuild } from './physics.js';
 import { WorldPanel } from './worldpanel.js';
 import { RenderPanel, loadQuality } from './render.js';
 import { ServerPanel } from './serverpanel.js';
@@ -1753,7 +1753,6 @@ try {
     const rebuildNeeded = needsRebuild(app.physics, next);
     if (rebuildNeeded && busy) return false;
     app.physics = next;
-    savePhysics(next);
     app.world?.render();
     app.teleop?.render();  // a policy's physics note
     if (app.model) applyOptions(app.model, next);

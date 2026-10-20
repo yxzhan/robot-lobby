@@ -78,7 +78,7 @@ export class WorldPanel {
 
     if (this.app.net) {  // network mode: the server's options (server/server.py)
       this.body.append(el('div', { className: 'hint', textContent: 'Shared world: these are the server\'s settings, for everyone. Default geom properties are not available in server mode yet.' }));
-      const reset = el('button', { type: 'button', textContent: 'MuJoCo defaults', title: 'Every option back to MuJoCo\'s defaults' });
+      const reset = el('button', { type: 'button', textContent: 'Defaults', title: 'Every option back to its default' });
       reset.onclick = () => this.app.setPhysics({ ...structuredClone(PHYSICS_DEFAULTS), geom: this.app.physics.geom });
       this.body.append(el('div', { className: 'bar' }, reset));
       return;

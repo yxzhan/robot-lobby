@@ -108,9 +108,11 @@ def cpus():
 # environment overrides it (1: none).
 PHYSICS_THREADS = int(os.environ.get('PHYSICS_THREADS') or min(8, cpus()))
 
+# As in the browser (physics.js): elliptic cones and impratio 10, not
+# MuJoCo's pyramidal and 1, so that held things do not creep out of grippers.
 PHYSICS_DEFAULTS = {
     'gravity': [0, 0, -9.81], 'wind': [0, 0, 0], 'magnetic': [0, -0.5, 0],
-    'density': 0, 'viscosity': 0, 'impratio': 1, 'cone': 'pyramidal',
+    'density': 0, 'viscosity': 0, 'impratio': 10, 'cone': 'elliptic',
     'sleep': True,  # island sleeping (physics.js): set at compile time
 }
 CONES = ['pyramidal', 'elliptic']
