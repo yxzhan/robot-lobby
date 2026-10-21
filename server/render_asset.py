@@ -110,7 +110,17 @@ def build(spec, model, rel, public):
             'jnt_type', 'jnt_pos', 'jnt_axis', 'jnt_qposadr', 'qpos0'):
     arrays[f] = getattr(m, f)
 
+  # Cameras (public/js/cameras.js, modelCameras).
+  cameras = [{
+      'name': mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_CAMERA, c) or f'camera{c}',
+      'body': int(m.cam_bodyid[c]), 'mode': int(m.cam_mode[c]), 'fovy': float(m.cam_fovy[c]),
+      'pos': m.cam_pos[c].tolist(), 'quat': m.cam_quat[c].tolist(),
+      'pos0': m.cam_pos0[c].tolist(), 'mat0': m.cam_mat0[c].tolist(),
+      'resolution': [int(v) for v in m.cam_resolution[c]],
+  } for c in range(m.ncam)]
+
   header = {
+      'cameras': cameras,
       'ngeom': len(geoms), 'nmesh': len(meshes), 'nmat': m.nmat, 'ntex': m.ntex,
       'nbody': m.nbody, 'njnt': m.njnt,
       'dims': {'nq': m.nq, 'nv': m.nv, 'na': m.na, 'nu': m.nu, 'nmocap': m.nmocap},

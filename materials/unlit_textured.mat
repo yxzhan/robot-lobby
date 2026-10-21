@@ -1,0 +1,20 @@
+// Unlit, alpha-blended texture: the WebXR menu panel (xr.js), drawn on a 2D
+// canvas, readable whatever the lighting.
+material {
+    name : unlit_textured,
+    shadingModel : unlit,
+    blending : transparent,
+    doubleSided : true,
+    requires : [ uv0 ],
+    parameters : [
+        { type : sampler2d, name : baseColorMap }
+    ]
+}
+
+fragment {
+    void material(inout MaterialInputs material) {
+        prepareMaterial(material);
+        material.baseColor = texture(materialParams_baseColorMap, getUV0());
+        material.baseColor.rgb *= material.baseColor.a;
+    }
+}

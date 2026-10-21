@@ -128,23 +128,34 @@
     #teleop .joints label.off { color: #777; }
     #teleop .joints .why { margin-left: auto; color: #888; font-style: italic; }
     #teleop .error { color: #f88; margin: 4px 0; }
-    :is(#world, #render, #server, #share) { overflow: hidden auto; min-height: 0; flex: 0 5 auto; font-size: 12px; }
-    :is(#world, #render, #server, #share) h3 { margin: 0 0 6px; font-size: 13px; }
-    :is(#world, #render, #server, #share) .field { display: grid; grid-template-columns: 64px 1fr 38px; align-items: center; gap: 6px; margin: 3px 0; }
-    :is(#world, #render, #server, #share) .ctl { display: flex; gap: 4px; min-width: 0; }
-    :is(#world, #render, #server, #share) .unit { color: #888; font-size: 11px; }
-    :is(#world, #render, #server, #share) input[type=number] { width: 0; flex: 1; min-width: 0; font: inherit; color: #eee; background: #222;
+    :is(#world, #cameras, #render, #server, #share) { overflow: hidden auto; min-height: 0; flex: 0 5 auto; font-size: 12px; }
+    :is(#world, #cameras, #render, #server, #share) h3 { margin: 0 0 6px; font-size: 13px; }
+    :is(#world, #cameras, #render, #server, #share) .field { display: grid; grid-template-columns: 64px 1fr 38px; align-items: center; gap: 6px; margin: 3px 0; }
+    :is(#world, #cameras, #render, #server, #share) .ctl { display: flex; gap: 4px; min-width: 0; }
+    :is(#world, #cameras, #render, #server, #share) .unit { color: #888; font-size: 11px; }
+    :is(#world, #cameras, #render, #server, #share) input[type=number] { width: 0; flex: 1; min-width: 0; font: inherit; color: #eee; background: #222;
                                 border: 1px solid #555; border-radius: 4px; padding: 1px 3px; }
-    :is(#world, #render, #server, #share) select { flex: 1; min-width: 0; font: inherit; color: #eee; background: #222; border: 1px solid #555; border-radius: 4px; }
-    :is(#world, #render, #server, #share) .hint { color: #999; margin: 4px 0; line-height: 1.5; }
-    :is(#world, #render, #server, #share) .sub { margin-top: 8px; padding-top: 6px; border-top: 1px solid #3a3d44; font-weight: 600; }
-    :is(#world, #render, #server, #share) .sub.minor { border-top: 0; margin-top: 4px; padding-top: 0; color: #aaa; font-weight: 400; }
-    :is(#world, #render, #server, #share) .bar { display: flex; align-items: center; gap: 4px; margin-top: 6px; }
-    :is(#world, #render, #server, #share) button { cursor: pointer; font: inherit; font-size: 11px; color: #ddd; background: #333;
+    :is(#world, #cameras, #render, #server, #share) select { flex: 1; min-width: 0; font: inherit; color: #eee; background: #222; border: 1px solid #555; border-radius: 4px; }
+    :is(#world, #cameras, #render, #server, #share) .hint { color: #999; margin: 4px 0; line-height: 1.5; }
+    :is(#world, #cameras, #render, #server, #share) .sub { margin-top: 8px; padding-top: 6px; border-top: 1px solid #3a3d44; font-weight: 600; }
+    #cameras .camrow { display: grid; grid-template-columns: 1fr 86px 62px 28px; gap: 4px; align-items: center; margin: 3px 0; }
+    #cameras .cam { display: flex; align-items: center; gap: 4px; min-width: 0; }
+    #cameras .cam span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #cameras button.on { background: #2b5fa8; }
+    #pips { position: fixed; left: 110px; bottom: 12px; display: flex; gap: 8px; align-items: flex-end; pointer-events: none; z-index: 5; }
+    .pip { pointer-events: auto; background: #1b1d22; border: 1px solid #444; border-radius: 6px; overflow: hidden; box-shadow: 0 2px 10px #0008; z-index: 5; }
+    .pip.looking { border-color: #4a8ef0; }
+    .pip .bar { display: flex; align-items: center; gap: 4px; padding: 2px 4px 2px 8px; font-size: 11px; color: #ccc; cursor: move; user-select: none; touch-action: none; }
+    .pip .bar span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .pip .bar button { padding: 0 5px; font-size: 11px; line-height: 16px; }
+    .pip canvas { display: block; width: 240px; height: auto; }
+    :is(#world, #cameras, #render, #server, #share) .sub.minor { border-top: 0; margin-top: 4px; padding-top: 0; color: #aaa; font-weight: 400; }
+    :is(#world, #cameras, #render, #server, #share) .bar { display: flex; align-items: center; gap: 4px; margin-top: 6px; }
+    :is(#world, #cameras, #render, #server, #share) button { cursor: pointer; font: inherit; font-size: 11px; color: #ddd; background: #333;
                     border: 1px solid #555; border-radius: 4px; padding: 2px 8px; }
-    :is(#world, #render, #server, #share) button.primary { background: #2f5a3c; border-color: #4d8a5f; }
-    :is(#world, #render, #server, #share) button:disabled { opacity: .5; cursor: default; }
-    :is(#world, #render, #server, #share) .note { color: #c9a; font-size: 11px; }
+    :is(#world, #cameras, #render, #server, #share) button.primary { background: #2f5a3c; border-color: #4d8a5f; }
+    :is(#world, #cameras, #render, #server, #share) button:disabled { opacity: .5; cursor: default; }
+    :is(#world, #cameras, #render, #server, #share) .note { color: #c9a; font-size: 11px; }
     #server input[type=url] { flex: 1; min-width: 0; font: inherit; color: #eee; background: #222; border: 1px solid #555;
                               border-radius: 4px; padding: 2px 4px; }
     #server .log { margin-top: 6px; font: 11px ui-monospace, monospace; color: #9cd; overflow-wrap: anywhere; }
@@ -269,6 +280,7 @@
     <button data-panel="stage" title="Spawned robots: joints, controls, reset, remove">Stage</button>
     <button data-panel="world" title="World physics: gravity, medium, default geom properties">World</button>
     <button data-panel="teleop" title="Teleoperate a robot: controller and input">Teleop</button>
+    <button data-panel="cameras" title="The robots' cameras: picture-in-picture windows, looking through one">Cameras</button>
     <button data-panel="render" title="Rendering quality: resolution, anti-aliasing, occlusion, shadows, textures">Render</button>
     <button data-panel="share" title="Open this page on another device: a short code or a QR code">Share</button>
     <button data-panel="server" hidden title="Where the world runs: in this browser, or on a server shared with others (Binder)">Server</button>
@@ -296,6 +308,10 @@
   </div>
   <div id="teleop">
     <h3>Teleop</h3>
+    <div class="body"></div>
+  </div>
+  <div id="cameras" hidden>
+    <h3>Cameras</h3>
     <div class="body"></div>
   </div>
   <div id="render" hidden>

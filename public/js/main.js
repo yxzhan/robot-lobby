@@ -32,6 +32,7 @@ import { ServerPanel } from './serverpanel.js';
 import { SharePanel } from './share.js';
 import { MARKER } from './marker.js';
 import { XrControls } from './xr.js';
+import { Cameras, CamerasPanel, modelCameras } from './cameras.js';
 import { CHAIN_COLORS } from './teleop.js';
 import Stats from '../vendor/stats/Stats.js';
 import { NET_MUJOCO, NetClient, loadRender, worldData, worldModel } from './net.js';
@@ -46,6 +47,15 @@ const MAT_TEXTURED = 'materials/lit_textured.filamat';
 // Alpha-blended variants, for geoms whose rgba alpha is below 1.
 const MAT_TRANSPARENT = 'materials/lit_transparent.filamat';
 const MAT_TEXTURED_TRANSPARENT = 'materials/lit_textured_transparent.filamat';
+const MAT_UNLIT_TEXTURED = 'materials/unlit_textured.filamat';  // the WebXR menu panel
+// WebXR settings (the VR menu, xr.js), kept in this browser: MSAA samples of
+// the eyes, the layer's framebuffer scale (1: the headset's default) and the
+// sun's shadows (off by default: they cost a second pass of the scene).
+const XR_STORE = 'robot-lobby/xr';
+const XR_DEFAULTS = { msaa: 4, scale: 1, shadows: false };
+function loadXrSettings() {
+  try { return { ...XR_DEFAULTS, ...JSON.parse(localStorage.getItem(XR_STORE) ?? '{}') }; } catch { return { ...XR_DEFAULTS }; }
+}
 
 
 // ---------------------------------------------------------------------------
@@ -395,10 +405,16 @@ function makeGeometry(engine, shape, uv = null) {
 
 // A renderable entity drawing `geo` (makeGeometry) with `matInstance`.
 // Several entities may share the same buffers and material instance.
-function makeEntity(engine, geo, matInstance, castShadows = true) {
+// Layers: the world on SCENE, the viewer's own markers (selection, IK and
+// goal markers, origin axes, WebXR controllers and menu) on OVERLAY, which
+// the window and WebXR views show and the robots' cameras do not (cameras.js).
+export const SCENE = 0x1, OVERLAY = 0x2;
+
+function makeEntity(engine, geo, matInstance, castShadows = true, layer = SCENE) {
   const entity = Filament.EntityManager.get().create();
   Filament.RenderableManager.Builder(1)
     .boundingBox(geo.box)
+    .layerMask(0xff, layer)
     .material(0, matInstance)
     .geometry(0, Filament.RenderableManager$PrimitiveType.TRIANGLES, geo.vb, geo.ib)
     .castShadows(castShadows)
@@ -551,6 +567,10 @@ class App {
     });
     // xrCompatible: the same context renders the WebXR session (enterVR).
     const engine = this.engine = Filament.Engine.create(canvas, { xrCompatible: true });
+    // Where Filament's default framebuffer really is: a camera's own while it
+    // renders (cameras.js), the WebXR layer's in a session frame, else the canvas.
+    this.offscreen = null;
+    xrGl(canvas.getContext('webgl2'), () => this.offscreen ?? (this.xr?.drawing ? this.xr.layer.framebuffer : null));
     this.scene = engine.createScene();
     this.swapChain = engine.createSwapChain();
     this.renderer = engine.createRenderer();
@@ -558,6 +578,7 @@ class App {
     this.view = engine.createView();
     this.view.setCamera(this.camera);
     this.view.setScene(this.scene);
+    this.view.setVisibleLayers(SCENE | OVERLAY, SCENE | OVERLAY);
     this.quality = loadQuality();      // the Render panel's settings (render.js), applied below
     this.renderer.setClearOptions({ clearColor: [0.1, 0.11, 0.13, 1], clear: true });
 
@@ -566,6 +587,8 @@ class App {
     this.matTextured = engine.createMaterial(MAT_TEXTURED);
     this.matTransparent = engine.createMaterial(MAT_TRANSPARENT);
     this.matTexturedTransparent = engine.createMaterial(MAT_TEXTURED_TRANSPARENT);
+    this.matUnlitTextured = engine.createMaterial(MAT_UNLIT_TEXTURED);
+    this.xrSettings = loadXrSettings();
     const F = Filament;
     this.sampler = new F.TextureSampler(F.MinFilter.LINEAR_MIPMAP_LINEAR, F.MagFilter.LINEAR, F.WrapMode.REPEAT);
     this.sampler.setAnisotropy(8);
@@ -610,7 +633,7 @@ class App {
       mi.setColor4Parameter('baseColor', Filament.RgbaType.sRGB, [...rgb, 1]);
       mi.setFloatParameter('roughness', 0.4);
       mi.setFloatParameter('metallic', 0.0);
-      const e = makeEntity(engine, geo, mi);
+      const e = makeEntity(engine, geo, mi, true, OVERLAY);
       this.scene.addEntity(e);
       return e;
     };
@@ -629,7 +652,7 @@ class App {
       const mi = this.matLit.createInstance();
       mi.setFloatParameter('roughness', 0.5);
       mi.setFloatParameter('metallic', 0.0);
-      const e = makeEntity(engine, geo, mi, false);
+      const e = makeEntity(engine, geo, mi, false, OVERLAY);
       this.scene.addEntity(e);
       const color = part === 6 ? center : AXIS_COLORS[part % 3];
       return { e, mi, color, shown: null };
@@ -638,10 +661,10 @@ class App {
     spawnMi.setColor4Parameter('baseColor', Filament.RgbaType.sRGB, [0.2, 0.8, 1, 1]);
     spawnMi.setFloatParameter('roughness', 0.6);
     spawnMi.setFloatParameter('metallic', 0.0);
-    this.spawnMarker = makeEntity(engine, makeGeometry(engine, spawnMarkerShape()), spawnMi, false);
+    this.spawnMarker = makeEntity(engine, makeGeometry(engine, spawnMarkerShape()), spawnMi, false, OVERLAY);
     this.scene.addEntity(this.spawnMarker);
     // From the floor up to a raised spawn marker.
-    this.spawnPole = makeEntity(engine, makeGeometry(engine, cylinder(1, 0.5)), spawnMi, false);
+    this.spawnPole = makeEntity(engine, makeGeometry(engine, cylinder(1, 0.5)), spawnMi, false, OVERLAY);
     this.scene.addEntity(this.spawnPole);
     // The Teleop panel's goal marker (goal.js): the spawn marker's shape in
     // orange, brighter while hovered or dragged. Drawn last and over
@@ -650,7 +673,7 @@ class App {
     this.goalMi.setFloatParameter('roughness', 0.6);
     this.goalMi.setFloatParameter('metallic', 0.0);
     this.goalMi.setDepthCulling(false);
-    this.goalMarker = makeEntity(engine, makeGeometry(engine, spawnMarkerShape()), this.goalMi, false);
+    this.goalMarker = makeEntity(engine, makeGeometry(engine, spawnMarkerShape()), this.goalMi, false, OVERLAY);
     {
       const rcm = engine.getRenderableManager(), inst = rcm.getInstance(this.goalMarker);
       rcm.setPriority(inst, 7);
@@ -687,21 +710,22 @@ class App {
     this.resize();
   }
 
-  // The sun's shadows as the Render panel says, but none in VR.
+  // The sun's shadows as the Render panel says, in VR as the VR menu does.
   shadows() {
     const lm = this.engine.getLightManager(), sun = lm.getInstance(this.sun);
-    lm.setShadowCaster(sun, this.quality.shadows !== 'off' && !this.xr);
+    lm.setShadowCaster(sun, this.xr ? this.xrSettings.shadows : this.quality.shadows !== 'off');
     sun.delete();
   }
 
   // Anti-aliasing and ambient occlusion of the window's view. A WebXR eye's
-  // (`xr`) has neither the panel's screen-space effects, FXAA and SSAO, which
-  // come out different in each eye and shimmer as the head moves, nor
-  // shadows (shadows()): 4x MSAA instead.
+  // (`xr`) has none of the panel's screen-space effects, FXAA and SSAO, which
+  // come out different in each eye and shimmer as the head moves (shadows:
+  // xrSettings too, shadows()): MSAA instead (xrSettings.msaa samples, 1: none).
   viewQuality(view, xr = false) {
-    const q = this.quality, F = Filament, msaa = xr || q.antialiasing === 'msaa';
+    const q = this.quality, F = Filament;
+    const samples = xr ? this.xrSettings.msaa : q.antialiasing === 'msaa' ? 4 : 1;
     view.setAntiAliasing(q.antialiasing === 'fxaa' && !xr ? F.View$AntiAliasing.FXAA : F.View$AntiAliasing.NONE);
-    view.setMultiSampleAntiAliasingOptions({ enabled: msaa, sampleCount: msaa ? 4 : 1 });
+    view.setMultiSampleAntiAliasingOptions({ enabled: samples > 1, sampleCount: samples });
     const high = q.ao === 'high', Q = F.View$QualityLevel;
     view.setAmbientOcclusionOptions({
       enabled: q.ao !== 'off' && !xr, radius: 0.2,
@@ -867,6 +891,7 @@ class App {
     this.syncTransforms();
     this.panel?.build();
     this.teleop?.build();
+    this.cameras?.build();
   }
 
   // Network mode: swaps in the server's world. `model` and `data` are
@@ -881,6 +906,7 @@ class App {
     this.controllers = [];
     this.panel?.build();
     this.teleop?.build();
+    this.cameras?.build();
   }
 
   // The controllers to tick: each robot's switched-on ones (robot.use).
@@ -1018,12 +1044,45 @@ class App {
     mi.setColor4Parameter('baseColor', Filament.RgbaType.sRGB, [1, 1, 1, 1]);
     mi.setFloatParameter('roughness', 0.5);
     mi.setFloatParameter('metallic', 0.0);
-    const e = makeEntity(this.engine, rod ? this.xrShapes.rod : this.xrShapes.ball, mi, false);
+    const e = makeEntity(this.engine, rod ? this.xrShapes.rod : this.xrShapes.ball, mi, false, OVERLAY);
     const tcm = this.engine.getTransformManager(), inst = tcm.getInstance(e);
     tcm.setTransform(inst, [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]);
     inst.delete();
     this.scene.addEntity(e);
     return { e, mi };
+  }
+
+  // A hidden panel for the WebXR menu (xrmenu.js): a width x height (m)
+  // quad, upright in its xy plane facing +z, showing a px x py canvas.
+  // {put(matrix or null), upload(canvas)}.
+  xrPanel(px, py, width, height) {
+    const w = width / 2, h = height / 2;
+    const shape = { pos: [-w, -h, 0, w, -h, 0, w, h, 0, -w, h, 0], nrm: [0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1], idx: [0, 1, 2, 0, 2, 3] };
+    const uv = new Float32Array([0, 0, 1, 0, 1, 1, 0, 1]);  // the canvas's first row (texture row 0, v 0) at the top: uploads are flipped
+    const tex = Filament.Texture.Builder().width(px).height(py).levels(1)
+      .sampler(Filament.Texture$Sampler.SAMPLER_2D).format(Filament.Texture$InternalFormat.SRGB8_A8).build(this.engine);
+    const mi = this.matUnlitTextured.createInstance();
+    const F = Filament;
+    mi.setTextureParameter('baseColorMap', tex, new F.TextureSampler(F.MinFilter.LINEAR, F.MagFilter.LINEAR, F.WrapMode.CLAMP_TO_EDGE));
+    const e = makeEntity(this.engine, makeGeometry(this.engine, shape, uv), mi, false, OVERLAY);
+    const rcm = this.engine.getRenderableManager(), inst = rcm.getInstance(e);
+    rcm.setPriority(inst, 7);  // after the scene: it is blended
+    inst.delete();
+    this.scene.addEntity(e);
+    const tcm = this.engine.getTransformManager();
+    const put = (m) => {
+      const i = tcm.getInstance(e);
+      tcm.setTransform(i, m ?? [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]);
+      i.delete();
+    };
+    put(null);
+    return {
+      put,
+      upload: (canvas) => {
+        const rgba = canvas.getContext('2d').getImageData(0, 0, px, py).data;
+        tex.setImage(this.engine, 0, Filament.PixelBuffer(new Uint8Array(rgba.buffer), Filament.PixelDataFormat.RGBA, Filament.PixelDataType.UBYTE));
+      },
+    };
   }
 
   // Shows or hides the world-origin axes (ORIGIN_AXIS_LENGTH long).
@@ -1243,13 +1302,20 @@ class App {
     if (xrFrame) {
       this.renderXR(xrFrame);
     } else {
-      this.camera.lookAt(this.orbit.eye(), this.orbit.center, [0, 0, 1]);
+      const look = this.cameras?.lookPose();  // looking through a camera (cameras.js)
+      if (look) {
+        this.camera.setModelMatrix(look.matrix);
+        this.camera.setProjectionFov(look.fovy, this.canvas.width / this.canvas.height, 0.01, 200, Filament.Camera$Fov.VERTICAL);
+      } else {
+        this.camera.lookAt(this.orbit.eye(), this.orbit.center, [0, 0, 1]);
+      }
       if (this.renderer.beginFrame(this.swapChain)) {
         this.renderer.renderView(this.view);
         this.renderer.endFrame();
       }
       this.engine.execute();
     }
+    this.cameras?.render();
     this.stats?.end();
     if (xrFrame) this.xrLoop(this.xr);
     else requestAnimationFrame(() => this.frame());
@@ -1262,6 +1328,30 @@ class App {
   }
 
   // ---- WebXR (the controllers: xr.js) ---------------------------------------
+
+  // The session's layer, at xrSettings.scale of the headset's default size
+  // (at most its native one). Filament multisamples (viewQuality) and
+  // resolves into it itself, so the layer has none.
+  xrLayer(session, gl, ar) {
+    const native = XRWebGLLayer.getNativeFramebufferScaleFactor?.(session) || 1;
+    const layer = new XRWebGLLayer(session, gl, {
+      antialias: false, depth: false, alpha: ar, framebufferScaleFactor: Math.min(this.xrSettings.scale, native),
+    });
+    session.updateRenderState({ baseLayer: layer });
+    return layer;
+  }
+
+  // Changes xrSettings (the VR menu), at once if a session runs.
+  setXrSettings(next) {
+    const scale = next.scale !== this.xrSettings.scale;
+    this.xrSettings = { ...this.xrSettings, ...next };
+    try { localStorage.setItem(XR_STORE, JSON.stringify(this.xrSettings)); } catch { /* no storage */ }
+    const xr = this.xr;
+    if (!xr) return;
+    this.shadows();
+    for (const { view } of xr.eyes) this.viewQuality(view, true);
+    if (scale) xr.layer = this.xrLayer(xr.session, xr.gl, xr.ar);
+  }
   //
   // `ar`: an immersive-ar session (Quest 3's passthrough) instead: no sky and
   // no world floor, cleared to transparent, so the room shows around the
@@ -1279,10 +1369,7 @@ class App {
     await gl.makeXRCompatible();
     const near = 0.05, far = 200;
     session.updateRenderState({ depthNear: near, depthFar: far });
-    xrGl(gl, () => this.xr?.drawing ? this.xr.layer.framebuffer : null);
-    // Filament multisamples (viewQuality) and resolves into the layer itself.
-    const layer = new XRWebGLLayer(session, gl, { antialias: false, depth: false, alpha: ar });
-    session.updateRenderState({ baseLayer: layer });
+    const layer = this.xrLayer(session, gl, ar);
     const space = await session.requestReferenceSpace('local-floor');
     const eyes = [0, 1].map(() => {
       const entity = Filament.EntityManager.get().create();
@@ -1290,11 +1377,12 @@ class App {
       const view = this.engine.createView();
       view.setCamera(camera);
       view.setScene(this.scene);
+      view.setVisibleLayers(SCENE | OVERLAY, SCENE | OVERLAY);
       this.viewQuality(view, true);
       if (ar) view.setBlendMode(Filament.View$BlendMode.TRANSLUCENT);  // keeps the alpha
       return { entity, camera, view };
     });
-    this.xrControls ??= new XrControls(this, (rod) => this.xrPart(rod));
+    this.xrControls ??= new XrControls(this, (rod) => this.xrPart(rod), (...size) => this.xrPanel(...size));
     this.xrControls.start();
     this.xr = { session, gl, layer, space, eyes, near, far, ar, frames: 0, t0: performance.now() };
     this.shadows();
@@ -1368,7 +1456,8 @@ class App {
     x.frames++;
     const dt = performance.now() - x.t0;
     if (dt > 2000) {
-      console.log(`WebXR: ${(1000 * x.frames / dt).toFixed(1)} fps, ${x.skipped ?? 0} frames skipped by Filament`);
+      x.fps = 1000 * x.frames / dt;  // (the VR menu shows it)
+      console.log(`WebXR: ${x.fps.toFixed(1)} fps, ${x.skipped ?? 0} frames skipped by Filament`);
       x.frames = 0; x.skipped = 0; x.t0 = performance.now();
     }
   }
@@ -1473,7 +1562,7 @@ function snapshot(app) {
 }
 
 try {
-  await new Promise((resolve) => Filament.init([MAT_LIT, MAT_CHECKER, MAT_TEXTURED, MAT_TRANSPARENT, MAT_TEXTURED_TRANSPARENT], resolve));
+  await new Promise((resolve) => Filament.init([MAT_LIT, MAT_CHECKER, MAT_TEXTURED, MAT_TRANSPARENT, MAT_TEXTURED_TRANSPARENT, MAT_UNLIT_TEXTURED], resolve));
   Filament = window.Filament;
   const app = new App(document.getElementById('canvas'));
   app.panel = new StagePanel(app, document.getElementById('stage'), {
@@ -1486,6 +1575,8 @@ try {
   app.physics = loadPhysics();  // World panel settings (physics.js)
   app.world = new WorldPanel(app, document.getElementById('world'));
   app.renderPanel = new RenderPanel(app, document.getElementById('render'));
+  app.cameras = new Cameras(app);
+  app.camerasPanel = new CamerasPanel(app.cameras, document.getElementById('cameras'));
   // Frame meter (stats.js) in the bottom-right corner; click it to cycle
   // FPS / ms per frame (JS time of App.frame) / MB of JS heap.
   app.stats = new Stats();
@@ -1544,7 +1635,7 @@ try {
         try {
           return {
             rel, parts: app.buildVisual(mujoco, model, images, models),
-            inertia: bodyInertia(model), sig, key: firstKey(docs), refs: referencedNames(docs),
+            inertia: bodyInertia(model), sig, key: firstKey(docs), refs: referencedNames(docs), cameras: modelCameras(mujoco, model),
             dims: { nq: model.nq, nv: model.nv, na: model.na, nu: model.nu, nmocap: model.nmocap },
           };
         } finally {
@@ -2019,7 +2110,7 @@ try {
         await nextFrame();
         return {
           rel, parts: app.buildVisual(NET_MUJOCO, model, images, models),
-          kin: model, dims: model.dims, inertia: { nbody: model.nbody },
+          kin: model, dims: model.dims, inertia: { nbody: model.nbody }, cameras: modelCameras(NET_MUJOCO, model),
         };
       })();
       pending.then((v) => { pending.visual = v; }, () => netVisuals.delete(rel));

@@ -231,21 +231,34 @@ images again, so it can be compared on the spot: a kitchen's 18 textures
 are 63 MB at 1024 and 0.3 MB at 64). Ultra low is Low with 64 px textures,
 to see what textures cost. The WebXR eyes leave these out: no FXAA, SSAO
 or shadows (they come out different in each eye and shimmer as the head
-moves), 4× MSAA instead; Filament renders them straight into the
+moves), MSAA instead (4× unless the VR menu says otherwise), and shadows
+only if the VR menu turns them on; Filament renders them straight into the
 session's layer, and renders every session frame. **Enter AR** (where
 `immersive-ar` is supported, e.g. Quest 3) is the same with passthrough:
 no sky and no world floor, so the robots stand in your room, on its floor.
 
 **VR/AR controllers** (`public/js/xr.js`; Quest Touch, or any xr-standard
 gamepad), in local and network mode. Each controller points a ray, which
-ends on the IK marker or the floor it meets:
+ends on the menu, the IK marker or the floor it meets:
 
 - **Grip** on an IK marker of the driven robot, reached by hand or with the
   ray: the target follows the controller while held, moved as the hand moves
   and turned as it turns (about the marker's center). Let go and grab again
   to go on, like a clutch; each hand can hold its own chain (two arms at
-  once). On any other body: pulls it with the selection spring, like
-  Shift+drag, held at the end of the ray as on a stick.
+  once).
+- **A** (right controller), held on any body under the ray: pulls it with
+  the selection spring, like Shift+drag on the desktop, held at the end of
+  the ray as on a stick. (The grip did this too at first, but just holding
+  the controllers squeezes it.)
+- **Y** (left controller), held 0.4 s, opens the **menu** (and closes it;
+  a short press closes it too): a panel in front of you, the trigger
+  choosing the row under the ray (`public/js/xrmenu.js`, menus of submenus
+  with a Back row). **Reset TCP** puts the driven robot's IK targets back
+  on its tips; **Quality** sets the headset's **Resolution** (0.6× to 1.5×
+  its default framebuffer, at once), **Anti-alias** (MSAA off, 2×, 4×),
+  **Shadows** (the sun's, off by default; these three are kept in this
+  browser) and the scene's **Textures** (as the Render panel); **FPS**
+  shows the session's frame rate.
 - **Trigger** while the same hand holds a marker: closes that arm's gripper
   as far as it is pressed (released: open), once pressed at all during the
   hold. On a marker under the ray: opens or closes its gripper. Held on the goal marker: drags it over the floor like the
@@ -258,6 +271,32 @@ ends on the IK marker or the floor it meets:
 - **Right stick** sideways turns you by 30° about where you stand; pushed
   forward it aims at the floor (the spawn marker shows where), and letting
   go puts you there. In AR this moves the scene in your room.
+
+## Cameras panel
+
+The **Cameras** panel (`public/js/cameras.js`) lists the MJCF `<camera>`s
+of everything spawned, per robot (24 of the library's robots have some:
+wrist cameras on ALOHA, SO-101, Kinova, head cameras on TIAGo and
+Microduck, Stretch 3's five). Ticking one opens it in a picture-in-picture
+window (drag it by its title bar), at a resolution (the camera's own
+`resolution`, else 320×240) and rate (5 to 30 Hz) of its own; **◉** looks
+through it in the main view (Esc: back). Local and network mode alike: the
+pose comes from the world's body poses (MuJoCo's in local mode, the page's
+own forward kinematics in network mode; it matches MuJoCo's `cam_xpos` /
+`cam_xmat` exactly) and the camera's model (fixed cameras ride their body;
+track / trackcom keep their initial world orientation and offset, following
+the body), its definition from the robot's model (the server's render data
+has it in network mode).
+
+Each camera is a Filament View rendered after the window's frame into a
+framebuffer of its own: the page makes Filament bind it where it binds the
+default framebuffer (as for WebXR), so the main canvas is untouched. The
+pixels are read back asynchronously (into a pixel buffer, collected once a
+fence has passed), so the window keeps its frame rate: on an RTX 3080 a
+320×240 camera at 30 Hz costs the main loop nothing visible. The viewer's
+own markers (selection, IK and goal markers, origin axes, VR controllers
+and menu) are on a layer the cameras do not see; their views have no SSAO
+or anti-aliasing, and the sun's shadows as the scene has them.
 
 ## Teleop panel and controllers
 
@@ -766,6 +805,7 @@ matc -a opengl -p mobile -o public/materials/checker.filamat materials/checker.m
 matc -a opengl -p mobile -o public/materials/lit_textured.filamat materials/lit_textured.mat
 matc -a opengl -p mobile -o public/materials/lit_transparent.filamat materials/lit_transparent.mat
 matc -a opengl -p mobile -o public/materials/lit_textured_transparent.filamat materials/lit_textured_transparent.mat
+matc -a opengl -p mobile -o public/materials/unlit_textured.filamat materials/unlit_textured.mat
 ```
 
 ## Relation to MuJoCo's own Filament renderer
