@@ -109,6 +109,7 @@ export class Cameras {
     this.marked = new Set();  // keys of the cameras whose pose marker shows
     this.parts = [];       // marker rods, {e, mi, color} (App.xrPart), reused each frame
     this.look = null;      // key of the camera the window looks through, or null
+    this.frameDt = 1000 / 60;  // ms between window frames (render)
     this.pips = el('div', { id: 'pips' });
     document.body.append(this.pips);
     this.onChange = () => {};  // the panel re-renders
@@ -305,7 +306,7 @@ export class Cameras {
       c = null;
     }
     if (!c) {
-      c = { key, ...found, width, height, last: -Infinity };
+      c = { key, ...found, width, height, next: -Infinity };
       this.create(c);
       if (place) { Object.assign(c.pip.style, { position: 'fixed', ...place }); document.body.append(c.pip); }
       this.on.set(key, c);
@@ -455,9 +456,18 @@ export class Cameras {
   }
 
   // After the window's frame: the reads that have arrived collected, then
-  // the cameras that are due (and have no read in flight) rendered.
+  // the cameras that are due (and have no read in flight) rendered. A
+  // camera keeps a timetable of its own (c.next: when its next frame is
+  // due, a period after the last one was due), taken in the window frame
+  // nearest to it, i.e. up to half a window frame early: going by when the
+  // last frame was actually taken instead, a frame that came late in its
+  // window frame (the main thread's work varies) made the next one wait a
+  // window frame more, a hitch.
   render(now = performance.now()) {
     if (this.marked.size || this.parts.length) this.drawMarkers();
+    const dt = now - (this.lastRender ?? now);
+    this.lastRender = now;
+    if (dt > 0 && dt < 100) this.frameDt += 0.1 * (dt - this.frameDt);  // the window's frame interval, smoothed
     if (!this.on.size || !this.app.data) return;
     for (const c of this.on.values()) {
       if (c.fence && this.collect(c)) {
@@ -465,10 +475,13 @@ export class Cameras {
         this.onFrame(c);
       }
     }
-    const due = [...this.on.values()].filter((c) => !c.fence && now - c.last >= 1000 / c.hz - 4).sort((a, b) => a.last - b.last);
+    const early = this.frameDt / 2;
+    const due = [...this.on.values()].filter((c) => !c.fence && now >= c.next - early).sort((a, b) => a.next - b.next);
     for (const c of due.slice(0, PER_FRAME)) {
-      c.last = now;
-      this.capture(c);
+      if (!this.capture(c)) continue;  // skipped by Filament: due still
+      const period = 1000 / c.hz;
+      if (now - c.next > period) c.next = now;  // fell behind (or the first frame): a new timetable
+      c.next += period;
     }
   }
 
@@ -494,11 +507,19 @@ export class Cameras {
     // its state cache believes the default framebuffer is bound throughout.
     app.offscreen = c.fb;
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    if (app.renderer.beginFrame(app.swapChain)) {
+    // Filament skips a frame while the GPU is behind: then nothing is read
+    // (the framebuffer still holds the last frame), and it is tried again.
+    const drawn = app.renderer.beginFrame(app.swapChain);
+    if (drawn) {
       app.renderer.renderView(c.view);
       app.renderer.endFrame();
     }
     app.engine.execute();
+    if (!drawn) {
+      app.offscreen = null;
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      return false;
+    }
     // Into the pixel buffer, collected once the fence has passed.
     gl.bindFramebuffer(gl.READ_FRAMEBUFFER, c.fb);
     gl.bindBuffer(gl.PIXEL_PACK_BUFFER, c.pbo);
@@ -509,6 +530,7 @@ export class Cameras {
     c.shot = Date.now();  // when it was taken (stamp: of the frame in c.pixels)
     app.offscreen = null;
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    return true;
   }
 
   // Into its window: rows flipped (GL reads bottom up), opaque.
