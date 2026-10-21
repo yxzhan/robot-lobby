@@ -180,11 +180,12 @@ properties:
   impratio, friction cone** go into the world spec's `<option>` at every rebuild and onto
   the live `model.opt`, so they act at once. Wind and fluid drag need a
   medium (density or viscosity > 0).
-  Contacts default to an **elliptic cone with impratio 10** (in the browser
-  and on the server), not MuJoCo's pyramidal cone and 1: with those, friction
-  is soft and a Panda's fingers let a 100 g box creep out within seconds; with
-  these it holds the box through a lift and a swing to within 2 mm, for about
-  5% more step time.
+  Contacts default to MuJoCo's **pyramidal cone with impratio 1** (in the
+  browser and on the server): an elliptic cone with impratio 10 made friction
+  too strong and costs about 5% more step time. Friction is softer this way,
+  and a Panda's fingers let a 100 g box creep out within seconds; for
+  grasping, elliptic with impratio 10 holds the box through a lift and a
+  swing to within 2 mm.
 - **Timestep and speed** (Simulation): the physics step (0.002 s by default,
   changed live; larger steps cost less per simulated second but are less
   stable, and walking policies were trained at 0.002–0.005 s) and the most

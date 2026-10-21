@@ -108,11 +108,11 @@ def cpus():
 # environment overrides it (1: none).
 PHYSICS_THREADS = int(os.environ.get('PHYSICS_THREADS') or min(8, cpus()))
 
-# As in the browser (physics.js): elliptic cones and impratio 10, not
-# MuJoCo's pyramidal and 1, so that held things do not creep out of grippers.
+# As in the browser (physics.js): MuJoCo's pyramidal cones and impratio 1
+# (elliptic and 10 made friction too strong).
 PHYSICS_DEFAULTS = {
     'gravity': [0, 0, -9.81], 'wind': [0, 0, 0], 'magnetic': [0, -0.5, 0],
-    'density': 0, 'viscosity': 0, 'impratio': 10, 'cone': 'elliptic',
+    'density': 0, 'viscosity': 0, 'impratio': 1, 'cone': 'pyramidal',
     'timestep': 0.002,  # s, live
     'speed': 1,         # the most sim seconds per wall second; 0: as fast as it goes
     'stateHz': 30,      # state broadcasts per second (not physics, but the server's too)
