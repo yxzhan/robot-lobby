@@ -9,7 +9,7 @@
     "robots/digital_twin/garmi",
     "environments/custom",
     "objects/digital_twin",
-    "objects/robocasa/banana"
+    "objects/robocasa_spawn/banana_1"
   ],
   "policies": ["GR00T-WholeBodyControl_g1", "playground_go2", "playground_spot", "microduck_rl"],
   "binder": { "hub": "https://mybinder.org", "repo": null, "path": "robot-lobby/" }

@@ -7,7 +7,8 @@
 // then turns them into panel thumbnails.
 //
 //   npm start &                                   # serves public/ on :4000
-//   node scripts/render_previews.mjs [filter…]    # e.g. objects, robots/digital_twin; default: all
+//   node scripts/render_previews.mjs [filter…]    # e.g. objects, robots/digital_twin,
+//                                                 # objects/robocasa_spawn/apple; default: all
 //   node scripts/vendor.mjs && python3 scripts/thumbnails.py
 //
 // Options (env): CHROME=/path/to/chrome (default: Playwright's headless
@@ -42,8 +43,11 @@ for (const m of JSON.parse(readFileSync(index, 'utf8'))) {
   if (m.screenshot && !process.env.FORCE) continue;
   // m.dir is 'mjcf_assets/<category dir>/<source>/<name>' (relative to public/,
   // where mjcf_assets is a symlink to the one next to package.json).
-  const where = m.dir.split('/').slice(1, 3).join('/');
-  if (filters.length && !filters.some((f) => where === f || where.startsWith(`${f}/`))) continue;
+  // A filter also matches a model (<category>/<source>/<name>) or a group
+  // (<category>/<source>/<group>, e.g. objects/robocasa_spawn/apple).
+  const where = m.dir.split('/').slice(1).join('/');
+  const group = `${m.dir.split('/').slice(1, 3).join('/')}/${m.group}`;
+  if (filters.length && !filters.some((f) => [where, group].some((w) => w === f || w.startsWith(`${f}/`)))) continue;
   todo.push({ name: m.name, rel: `${m.dir}/${m.main}`, out: join(m.dir, `${m.name}.png`) });
 }
 console.log(`${todo.length} assets to render`);

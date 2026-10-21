@@ -60,6 +60,18 @@ for (const p of picked) {
     filter: (src) => !src.split('/').includes('.git') && !screenshots.has(src),
   });
 }
+// Directories a picked model takes its meshes and textures from through
+// <compiler meshdir/texturedir> outside its own (objects/robocasa_spawn ->
+// objects/robocasa, scripts/import_robocasa.py).
+const outside = new Set();
+for (const m of assets) {
+  const compiler = readFileSync(join(m.dir, m.main), 'utf8').match(/<compiler\b[^>]*>/)?.[0] ?? '';
+  for (const [, d] of compiler.matchAll(/\b(?:meshdir|texturedir|assetdir)="([^"]+)"/g)) {
+    const p = join(m.dir, d);
+    if (!isPicked(p)) outside.add(p);
+  }
+}
+for (const p of outside) cpSync(p, join(out, p), { recursive: true, dereference: true });
 writeFileSync(join(out, 'json', 'assets.json'), JSON.stringify(assets, null, 1));
 let thumbs = 0;
 for (const m of assets) {

@@ -33,7 +33,11 @@ console.log('vendored', Object.keys(copies).length, 'files into public/vendor');
 // thumbnails.py makes the panel thumbnail from it). Directories without
 // <name>.xml are skipped with a warning. The one exception is upstream
 // mujoco_menagerie, which keeps its own file names and is indexed from its
-// README's model table instead (menagerieModels).
+// README's model table instead (menagerieModels). Sources in RAW_SOURCES
+// are untouched upstream copies that are not indexed at all: objects/robocasa
+// (RoboCasa's <category>/<instance>/model.xml) is spawned through the
+// converted copies scripts/import_robocasa.py writes to objects/
+// robocasa_spawn, which take their meshes from it.
 //
 // Each entry: {name, dir, main, category, source, group, screenshot}, `dir`
 // relative to public/, `screenshot` relative to `dir`. `group` is the header
@@ -47,6 +51,7 @@ const LIBRARY = 'mjcf_assets';
 const CATEGORIES = { environments: 'environment', robots: 'robot', objects: 'object' };
 const FIRST_SOURCES = ['digital_twin'];
 const MENAGERIE = 'mujoco_menagerie';
+const RAW_SOURCES = ['robocasa'];
 
 const includedFile = (path) => readFileSync(path, 'utf8').match(/<include\s+file="([^"]+\.xml)"/)?.[1] ?? null;
 
@@ -165,6 +170,7 @@ function indexLibrary() {
     const category = CATEGORIES[catDir];
     if (!category) { console.warn(`skipping ${LIBRARY}/${catDir}: not one of ${Object.keys(CATEGORIES)}`); continue; }
     for (const source of subdirs(`${LIBRARY}/${catDir}`)) {
+      if (RAW_SOURCES.includes(source)) continue;
       const sourceDir = `${LIBRARY}/${catDir}/${source}`;
       const found = source === MENAGERIE ? menagerieModels(sourceDir) : conventionModels(sourceDir, source);
       for (const { name, dir, main, group, rank, screenshot } of found) {

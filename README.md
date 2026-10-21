@@ -99,14 +99,18 @@ Picking uses `mj_ray` on the physics world, so it hits collision geoms.
   models without a screenshot show their initials. A `<name>.png` added after
   the index was written is picked up too, and models with no image at all
   are listed at the end.
-- **Objects from RoboCasa** — `python3 scripts/import_robocasa.py
-  [/path/to/robocasa]` copies one instance of each picked kitchen category
-  (`PICKS` in the script) into `mjcf_assets/objects/robocasa/`, adding a free
-  joint (raised so the object rests on the floor) and moving collision geoms
-  to group 3. Models without a screenshot get one from
-  `node scripts/render_previews.mjs [category[/source]…]`, which spawns each
-  alone in headless Chrome (needs the page served, e.g. `npm start`) and
-  writes `<name>.png` next to it.
+- **Objects from RoboCasa** — `mjcf_assets/objects/robocasa/` is an
+  untouched copy of RoboCasa's objects (`<category>/<instance>/model.xml`),
+  which the index skips. `python3 scripts/import_robocasa.py [category…]`
+  writes a spawnable copy of each instance's MJCF to
+  `mjcf_assets/objects/robocasa_spawn/<instance>/<instance>.xml`, taking
+  meshes and textures from the original directory (`<compiler meshdir>`),
+  adding a free joint (raised so the object rests on the floor) and moving
+  collision geoms to group 3; the panel groups them by category. Models
+  without a screenshot get one from
+  `node scripts/render_previews.mjs [category[/source[/name or group]]…]`,
+  which spawns each alone in headless Chrome (needs the page served, e.g.
+  `npm start`) and writes `<name>.png` next to it.
 - **Loading** — Spawning fetches only the files it
   references — the `<include>` tree, then the mesh/texture/hfield/skin files
   resolved via `<compiler meshdir/texturedir/assetdir>` — into MuJoCo's
