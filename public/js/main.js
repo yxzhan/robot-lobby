@@ -28,6 +28,7 @@ import { IkController } from './ik.js';
 import { applyOptions, geomOverrides, geomSignature, injectGeomDefaults, loadPhysics, needsRebuild } from './physics.js';
 import { WorldPanel } from './worldpanel.js';
 import { RenderPanel, loadQuality } from './render.js';
+import { FLOOR_STYLES, floorTexture, hexRgb, loadFloor, saveFloor } from './floor.js';
 import { ServerPanel } from './serverpanel.js';
 import { SharePanel } from './share.js';
 import { MARKER } from './marker.js';
@@ -614,17 +615,10 @@ class App {
       Filament.IndirectLight.Builder().irradianceSh(3, sh).intensity(25000).build(engine));
 
     // The floor of world.js's base XML (a size-0, i.e. infinite, plane), drawn
-    // 40 m x 40 m: 40 x 40 checker cells.
-    const floor = this.matChecker.createInstance();
-    floor.setColor3Parameter('color1', Filament.RgbType.sRGB, [0.25, 0.3, 0.36]);
-    floor.setColor3Parameter('color2', Filament.RgbType.sRGB, [0.45, 0.5, 0.56]);
-    floor.setFloatParameter('scale', 1.0);  // checker cell size (m)
-    // Pushed back in depth: an environment's own floor usually lies exactly
-    // at z = 0 too, and two coplanar surfaces z-fight (flicker between each
-    // other with the view). Offset, the world floor always loses such ties.
-    floor.setPolygonOffset(1, 1);
-    this.floor = makeEntity(engine, makeGeometry(engine, plane(20, 20)), floor);
-    this.scene.addEntity(this.floor);
+    // 40 m x 40 m, as the World panel's Floor settings say (floor.js).
+    this.floor = null;
+    this.floorTextures = new Map();  // style -> texture, made once
+    this.setFloor(loadFloor());
 
     // Perturbation markers: the selection point, the drag target and a rope
     // between them. Hidden (scaled to zero) when unused.
@@ -697,6 +691,56 @@ class App {
     this.setSpawnMarker(null);
     this.setQuality(this.quality);  // sizes the canvas too
     window.addEventListener('resize', () => this.resize());
+  }
+
+  // The world floor's look: `f` as loadFloor returns it (floor.js).
+  setFloor(f) {
+    this.floorSettings = f;
+    saveFloor(f);
+    const F = Filament, engine = this.engine, old = this.floor;
+    if (old) {
+      this.scene.remove(old.e);
+      engine.destroyEntity(old.e);
+      engine.destroyVertexBuffer(old.vb);
+      engine.destroyIndexBuffer(old.ib);
+      engine.destroyMaterialInstance(old.mi);
+      this.floor = null;
+    }
+    const style = FLOOR_STYLES[f.style], color = hexRgb(f.color);
+    if (f.style === 'none') return;
+    const shape = plane(20, 20);
+    let mi, uv = null;
+    if (f.style === 'checker') {
+      mi = this.matChecker.createInstance();
+      mi.setColor3Parameter('color1', F.RgbType.sRGB, color.map((v) => v * 0.55));
+      mi.setColor3Parameter('color2', F.RgbType.sRGB, color);
+      mi.setFloatParameter('scale', f.size);  // checker cell size (m)
+    } else if (f.style === 'plain') {
+      mi = this.matLit.createInstance();
+      mi.setColor4Parameter('baseColor', F.RgbaType.sRGB, [...color, 1]);
+      mi.setFloatParameter('roughness', style.roughness);
+      mi.setFloatParameter('metallic', 0.0);
+    } else {
+      if (!this.floorTextures.has(f.style)) {
+        const { w, h, rgba } = floorTexture(f.style);
+        this.floorTextures.set(f.style, uploadTexture(engine, w, h, rgba));
+      }
+      mi = this.matTextured.createInstance();
+      mi.setColor4Parameter('baseColor', F.RgbaType.sRGB, [...color, 1]);
+      mi.setTextureParameter('baseColorMap', this.floorTextures.get(f.style), this.sampler);
+      mi.setFloatParameter('roughness', style.roughness);
+      mi.setFloatParameter('metallic', 0.0);
+      const repeat = f.size * style.cells;  // m per texture
+      uv = new Float32Array(shape.pos.length / 3 * 2);
+      for (let i = 0; i < uv.length / 2; i++) { uv[2 * i] = shape.pos[3 * i] / repeat; uv[2 * i + 1] = shape.pos[3 * i + 1] / repeat; }
+    }
+    // Pushed back in depth: an environment's own floor usually lies exactly
+    // at z = 0 too, and two coplanar surfaces z-fight (flicker between each
+    // other with the view). Offset, the world floor always loses such ties.
+    mi.setPolygonOffset(1, 1);
+    const geo = makeGeometry(engine, shape, uv);
+    this.floor = { e: makeEntity(engine, geo, mi), vb: geo.vb, ib: geo.ib, mi };
+    if (!this.passthroughOn) this.scene.addEntity(this.floor.e);
   }
 
   // The Render panel's settings (render.js): `q` as loadQuality returns it.
@@ -1407,8 +1451,11 @@ class App {
   // Sky, world floor and an opaque clear off (AR) or back on.
   passthrough(on) {
     this.scene.setSkybox(on ? null : this.skybox);
-    if (on) this.scene.remove(this.floor);
-    else this.scene.addEntity(this.floor);
+    this.passthroughOn = on;
+    if (this.floor) {
+      if (on) this.scene.remove(this.floor.e);
+      else this.scene.addEntity(this.floor.e);
+    }
     this.renderer.setClearOptions({ clearColor: on ? [0, 0, 0, 0] : [0.1, 0.11, 0.13, 1], clear: true });
   }
 

@@ -1,8 +1,10 @@
 // The World panel: global physics options and default geom properties
-// (physics.js). Options apply as soon as a field changes; default geom
-// properties change masses, so they wait for Apply (a rebuild).
+// (physics.js), and how the floor looks (floor.js). Options and the floor
+// apply as soon as a field changes; default geom properties change masses,
+// so they wait for Apply (a rebuild).
 
 import { CONES, PHYSICS_DEFAULTS, SPEEDS, STATE_RATES } from './physics.js';
+import { FLOOR_STYLES, floorDefaults } from './floor.js';
 
 const el = (tag, props = {}, ...children) => {
   const e = Object.assign(document.createElement(tag), props);
@@ -82,6 +84,7 @@ export class WorldPanel {
       this.body.append(row(label, unit, title, ...inputs));
     }
     this.body.append(el('div', { className: 'hint', textContent: 'Applied at once (Sleep rebuilds the world). Wind and fluid drag only act with a medium density or viscosity.' }));
+    this.floor(row, num);
 
     if (this.app.net) {  // network mode: the server's options (server/server.py)
       this.body.append(el('div', { className: 'hint', textContent: 'Shared world: these are the server\'s settings, for everyone. Default geom properties are not available in server mode yet.' }));
@@ -117,5 +120,27 @@ export class WorldPanel {
     };
     this.body.append(el('div', { className: 'bar' }, apply, reset, status));
     if (dirty) status.textContent = 'not applied';
+  }
+
+  // The Floor section: style, cell size and color (this page only).
+  floor(row, num) {
+    const f = this.app.floorSettings, set = (change) => { this.app.setFloor({ ...this.app.floorSettings, ...change }); this.render(); };
+    this.body.append(el('div', { className: 'sub', textContent: 'Floor' }));
+    const sel = el('select', { title: 'how the floor looks (not its physics)' });
+    for (const [k, s] of Object.entries(FLOOR_STYLES)) sel.append(new Option(s.label, k, false, k === f.style));
+    sel.onchange = () => { set(floorDefaults(sel.value)); };  // each style starts from its own size and color
+    this.body.append(row('Style', '', sel.title, sel));
+    if (f.style === 'none') return;
+    if (f.style !== 'plain') {
+      const what = { checker: 'one checker cell', grid: 'one grid cell', tiles: 'one tile', wood: 'one plank\'s width', concrete: 'one repeat of the pattern' }[f.style];
+      this.body.append(row('Size', 'm', what, num(f.size, (v) => { if (v > 0.01 && v <= 100) set({ size: v }); else this.render(); }, what)));
+    }
+    const title = f.style === 'checker' ? 'the light cells (the dark ones are darker)' : f.style === 'plain' ? 'the floor\'s color' : 'tints the pattern (white: as drawn)';
+    const color = el('input', { type: 'color', value: f.color, title });
+    color.oninput = () => this.app.setFloor({ ...this.app.floorSettings, color: color.value });
+    color.onchange = () => this.render();
+    const reset = el('button', { type: 'button', textContent: 'Default', title: 'this style\'s own size and color' });
+    reset.onclick = () => set(floorDefaults(f.style));
+    this.body.append(row('Color', '', title, color, reset));
   }
 }

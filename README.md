@@ -193,6 +193,12 @@ properties:
 - **Sync rate** (network mode only): the server's state broadcasts per
   second, 10–60 Hz (30 by default): more is smoother and fresher, and more
   traffic for every page.
+- **Floor** (`public/js/floor.js`, saved in this browser, in network mode
+  too since it is only this page's view): how the world floor looks, not its
+  physics. Checker (the procedural `checker.mat`), grid, tiles, wood and
+  concrete (textures drawn in code, tileable, tinted by the color), plain (one
+  color) or none. Size is one cell, tile, plank width or pattern repeat;
+  picking a style starts from its own size and color. Robot cameras see it too.
 - **Default geom density, mass and friction** apply to geoms that do not
   set them themselves or through their own default classes, as a top-level
   `<default><geom/></default>` would: density and friction are written into
