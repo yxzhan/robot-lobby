@@ -1,11 +1,17 @@
 // Builds the static site for GitHub Pages into dist/: the page (public/,
-// with its vendored runtimes) and the part of the model library and the
-// policies that pages.json names, with their slice of assets.json,
-// policies.json and the thumbnails. The page runs locally on those; its
-// Server panel joins a server (server/server.py, e.g. on Binder) for the
-// whole library and a shared world (public/js/endpoint.js).
+// with its vendored runtimes), every model of public/mjcf_assets with its
+// index and thumbnails, and the policies that pages.json names, with their
+// slice of policies.json. In CI public/mjcf_assets is the archive pages.json's
+// `assets` names (scripts/fetch_assets.mjs), part of the library; here it is
+// usually a link to the whole library, which this would publish. The
+// page runs locally on those; its Server panel joins a server
+// (server/server.py, e.g. on Binder) for the whole library and a shared
+// world (public/js/endpoint.js). .github/workflows/pages.yml runs it on
+// every push to main.
 //
-//   node scripts/vendor.mjs && python3 scripts/thumbnails.py   # public/ up to date
+//   node scripts/fetch_assets.mjs               # public/mjcf_assets, if not there
+//   node scripts/vendor.mjs                     # public/vendor, the indexes
+//   python3 scripts/thumbnails.py               # public/thumbs
 //   node scripts/build_pages.mjs [--out dist] [--binder gh/<owner>/<repo>/<ref>] [--hub https://mybinder.org]
 //   node scripts/build_pages.mjs --push origin    # and publish it as branch gh-pages
 //
@@ -33,40 +39,37 @@ const out = opt('out', 'dist');
 const config = JSON.parse(readFileSync('pages.json', 'utf8'));
 const git = (...a) => execFileSync('git', a, { encoding: 'utf8' }).trim();
 
-for (const f of ['public/json/assets.json', 'public/json/policies.json', 'public/vendor']) {
-  if (!existsSync(f)) throw new Error(`no ${f}: run node scripts/vendor.mjs first`);
+for (const f of ['public/mjcf_assets', 'public/json/assets.json', 'public/json/policies.json', 'public/vendor']) {
+  if (!existsSync(f)) throw new Error(`no ${f}: run node scripts/fetch_assets.mjs and node scripts/vendor.mjs first`);
 }
 rmSync(out, { recursive: true, force: true });
 mkdirSync(out, { recursive: true });
 
 // The page: public/ but for the library, its indexes and the thumbnails,
-// which follow in their pages.json slice.
-const LIBRARY = ['mjcf_assets', 'pretrained_policies', 'thumbs', 'json/assets.json', 'json/policies.json', 'json/deploy.json'];
+// which follow below.
+const LIBRARY = ['mjcf_assets', 'pretrained_policies', 'thumbs', 'json/assets.json', 'json/policies.json', 'json/recent.json', 'json/deploy.json'];
 cpSync('public', out, {
   recursive: true, dereference: true,
-  filter: (src) => !LIBRARY.includes(src.slice('public/'.length)),
+  filter: (src) => !LIBRARY.includes(src.slice('public/'.length)) && !src.split('/').some((p) => p.startsWith('.mjcf_assets-')),
 });
 
-// The models: whole directories (a menagerie directory holds several), but
-// not the screenshots thumbnails.py made the thumbnails from.
-const picked = config.models.map((d) => `mjcf_assets/${d.replace(/\/$/, '')}`);
-const isPicked = (dir) => picked.some((p) => dir === p || dir.startsWith(`${p}/`));
-const assets = JSON.parse(readFileSync('public/json/assets.json', 'utf8')).filter((m) => isPicked(m.dir));
-for (const p of picked) if (!existsSync(p)) throw new Error(`pages.json: no ${p}`);
-const screenshots = new Set(assets.filter((m) => m.screenshot).map((m) => join(m.dir, m.screenshot)));
-for (const p of picked) {
-  cpSync(p, join(out, p), {
-    recursive: true, dereference: true,
-    filter: (src) => !src.split('/').includes('.git') && !screenshots.has(src),
-  });
-}
+// The models: all of public/mjcf_assets, its index, the recent list's models
+// that are there, and their thumbnails.
+cpSync('public/mjcf_assets', join(out, 'mjcf_assets'), {
+  recursive: true, dereference: true,
+  filter: (src) => !src.split('/').includes('.git'),
+});
+const assets = JSON.parse(readFileSync('public/json/assets.json', 'utf8'));
 writeFileSync(join(out, 'json', 'assets.json'), JSON.stringify(assets, null, 1));
+const rels = new Set(assets.map((m) => `${m.dir}/${m.main}`));
+const recent = JSON.parse(readFileSync('public/json/recent.json', 'utf8')).filter((r) => rels.has(r));
+writeFileSync(join(out, 'json', 'recent.json'), JSON.stringify(recent, null, 1));
 let thumbs = 0;
 for (const m of assets) {
   const t = `thumbs/${m.category}/${m.source}/${m.name}.webp`;  // thumbPath in public/js/assets.js
-  if (!existsSync(`public/${t}`)) continue;
+  if (!existsSync(join('public', t))) continue;
   mkdirSync(dirname(join(out, t)), { recursive: true });
-  cpSync(`public/${t}`, join(out, t));
+  cpSync(join('public', t), join(out, t));
   thumbs++;
 }
 
@@ -114,7 +117,7 @@ const big = [];
 console.log(`${out}/: ${assets.length} models (${thumbs} thumbnails), ${Object.keys(policies).length} policies, ` +
   `${(total / 1e6).toFixed(0)} MB${binder.repo ? `; Binder: ${binder.hub} ${binder.repo}` : ''}`);
 if (big.length) throw new Error(`over GitHub's ${MAX_FILE / 1e6} MB per file: ${big.join(', ')}`);
-if (total > MAX_SITE) console.warn(`over GitHub Pages' ${MAX_SITE / 1e9} GB: take models out of pages.json`);
+if (total > MAX_SITE) console.warn(`over GitHub Pages' ${MAX_SITE / 1e9} GB: pack fewer models into the archive`);
 
 if (args.includes('--push')) {
   const remote = git('remote', 'get-url', opt('push'));

@@ -1,12 +1,10 @@
 {
-  "_comment": "What scripts/build_pages.mjs puts on the static site (GitHub Pages) besides the page itself: model directories under mjcf_assets/, policy directories under pretrained_policies/, and the Binder repository the Server panel starts sessions of (repo null: this checkout's GitHub remote and branch).",
-  "models": [
-    "robots/mujoco_menagerie/unitree_go2",
-    "robots/mujoco_menagerie/boston_dynamics_spot",
-    "robots/mujoco_menagerie/franka_emika_panda",
-    "robots/mujoco_menagerie/unitree_g1",
-    "robots/digital_twin/microduck"
-  ],
+  "_comment": "What scripts/build_pages.mjs puts on the static site (GitHub Pages) besides the page itself: the models of the archive `assets` (scripts/fetch_assets.mjs unpacks it as public/mjcf_assets), policy directories under pretrained_policies/, and the Binder repository the Server panel starts sessions of (repo null: this checkout's GitHub remote and branch).",
+  "assets": "https://github.com/yxzhan/robot-lobby/releases/download/v1.0.0/mjcf_assets.tar.gz",
   "policies": ["GR00T-WholeBodyControl_g1", "playground_go2", "playground_spot", "microduck_rl"],
-  "binder": { "hub": "https://mybinder.org", "repo": null, "path": "robot-lobby/" }
+  "binder": {
+    "hub": "https://binder.intel4coro.de",
+    "repo": null,
+    "path": "robot-lobby/"
+  }
 }

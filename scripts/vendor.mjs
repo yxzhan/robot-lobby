@@ -95,7 +95,8 @@ function menagerieModels(sourceDir) {
     if (!byDir.has(m.dirName)) byDir.set(m.dirName, []);
     byDir.get(m.dirName).push(m);
   };
-  for (const row of readmeRows(sourceDir)) {
+  const rows = readmeRows(sourceDir);
+  for (const row of rows) {
     const dir = `${sourceDir}/${row.dir}`, linked = `${dir}/${row.file}`;
     if (!existsSync(linked)) { console.warn(`skipping ${linked}: listed in the README but missing`); continue; }
     const main = includedFile(linked) ?? row.file;
@@ -126,6 +127,23 @@ function menagerieModels(sourceDir) {
       const shot = [`${stem(main)}.png`, `${stem(base.main)}_${suffix}.png`, `${name}.png`].find((f) => pngs.includes(f))
         ?? (pngs.length === 1 ? pngs[0] : base.screenshot);
       add({ name, dirName, dir, main, scene, group: base.group, rank: base.rank, screenshot: shot });
+    }
+    // A copy of part of menagerie without its README (like the GitHub Pages
+    // one, scripts/fetch_assets.mjs), in a directory without a scene: each
+    // model file that no other one includes,
+    // the shortest named after the directory, the others <dir>_<suffix>
+    // (spot_arm.xml next to spot.xml: boston_dynamics_spot_arm), under
+    // "Others".
+    if (!rows.length && !scenes.length) {
+      const xmls = files.filter((f) => f.endsWith('.xml')).sort((a, b) => a.length - b.length || a.localeCompare(b));
+      const included = new Set(xmls.flatMap((f) => [...readFileSync(`${dir}/${f}`, 'utf8').matchAll(/<include\s+file="([^"]+)"/g)].map((m) => m[1])));
+      const mains = xmls.filter((f) => !included.has(f));
+      for (const main of mains) {
+        const base = stem(mains[0]);
+        const name = main === mains[0] ? dirName : `${dirName}_${stem(main).replace(new RegExp(`^${base}_`), '')}`;
+        const shot = [`${stem(main)}.png`, `${name}.png`].find((f) => pngs.includes(f));
+        add({ name, dirName, dir, main, scene: main, group: 'Others', rank: Infinity, screenshot: shot });
+      }
     }
   }
   return models;

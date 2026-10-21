@@ -781,20 +781,35 @@ and `/render` come from it. The server answers any origin (CORS); on Binder
 the session's token, which the page puts on every request, WebSockets
 included, is what guards it.
 
-**The static site.** `pages.json` lists the model and policy directories
-it carries (the default: Go2, Spot, Panda, G1, the microduck, Garmi, the
-custom environments, the digital_twin objects, the banana and the four
-policies; ~290 MB). Then:
+**The static site.** Its models are an archive of part of the library,
+a GitHub release asset that `pages.json`'s `assets` names
+(`mjcf_assets/<category>/<source>/<model>/` at its top, e.g.
+`tar czf mjcf_assets.tar.gz ./mjcf_assets` of a trimmed copy; screenshots
+included make the thumbnails). `scripts/fetch_assets.mjs` downloads it and
+unpacks it as `public/mjcf_assets`, which `scripts/vendor.mjs` indexes like
+the library (menagerie directories without their README or scenes are
+indexed by their model files) and `scripts/check_assets.py` compiles model
+by model. `pages.json` also lists the policy directories the site carries.
+The site serves the models at `mjcf_assets/`, so asset paths are the same
+as with the library. `build_pages.mjs` publishes whatever
+`public/mjcf_assets` is: locally that is usually the link to the whole
+library, so build from a checkout without it, as CI does.
 
 ```sh
-node scripts/vendor.mjs && python3 scripts/thumbnails.py
+node scripts/fetch_assets.mjs                # public/mjcf_assets, unless there
+node scripts/vendor.mjs                      # runtimes and indexes
+python3 scripts/thumbnails.py
+python3 scripts/check_assets.py              # every model compiles
 node scripts/build_pages.mjs                 # into dist/
-node scripts/build_pages.mjs --push origin   # and force-push it as branch gh-pages
+node scripts/build_pages.mjs --push origin   # or force-push it as branch gh-pages
 ```
 
-Set the repository's Pages source to the `gh-pages` branch. It is one
-commit each time, so model files never pile up in its history. The build
-fails on a file over 100 MB and warns over 1 GB, GitHub's limits.
+`.github/workflows/pages.yml` does this on every push to `main` (and by
+hand, Actions → Pages → Run workflow): it fetches and checks the models, builds `dist/`
+and deploys it. Set the repository's Settings → Pages → Source to "GitHub
+Actions" for it, or to the `gh-pages` branch for `--push` (one commit each
+time, so model files never pile up in its history). The build fails on a
+file over 100 MB and warns over 1 GB, GitHub's limits.
 `json/deploy.json` on the site names the Binder repository the panel starts:
 `pages.json`'s `binder`, by default this checkout's GitHub remote and branch
 on mybinder.org (`--binder gh/<owner>/<repo>/<ref>`, `--hub <url>` to
