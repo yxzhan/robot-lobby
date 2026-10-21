@@ -172,5 +172,10 @@ export class WorldPanel {
     const reset = el('button', { type: 'button', textContent: 'Default', title: 'this style\'s own size and color' });
     reset.onclick = () => set(floorDefaults(f.style));
     this.body.append(row('Color', '', title, color, reset));
+    const tip = 'glossier toward polished: reflects the sky, and the robots with Reflections on (Render panel)';
+    const shine = el('input', { type: 'range', min: 0, max: 100, step: 5, value: f.shine ?? 0, title: tip });
+    const out = el('span', { className: 'unit', textContent: `${f.shine ?? 0}%` });
+    shine.oninput = () => { this.app.setFloor({ ...this.app.floorSettings, shine: Number(shine.value) }); out.textContent = `${shine.value}%`; };
+    this.body.append(el('div', { className: 'field', title: tip }, el('span', { textContent: 'Shine' }), el('div', { className: 'ctl' }, shine), out));
   }
 }

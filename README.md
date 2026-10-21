@@ -195,14 +195,23 @@ properties:
   traffic for every page.
 - **Floor** (`public/js/floor.js`, saved in this browser, in network mode
   too since it is only this page's view): how the world floor looks, not its
-  physics. Checker (the procedural `checker.mat`), grid, tiles, wood and
-  concrete (textures drawn in code, tileable, tinted by the color), plain (one
-  color) or none. Size is one cell, tile, plank width or pattern repeat;
-  picking a style starts from its own size and color. Robot cameras see it too.
+  physics. Checker, grid, tiles, wood and concrete (textures drawn in code,
+  tileable, tinted by the color), plain (one color) or none. Size is one cell,
+  tile, plank width or pattern repeat; picking a style starts from its own
+  size and color. **Shine** takes the floor from its style's roughness toward
+  polished (0.05; checker starts at 100 %): it then reflects the sky, and the robots with the Render
+  panel's Reflections on. Robot cameras see the floor too.
 - **Lighting** (`public/js/lighting.js`, saved in this browser like the
   floor): the sun's brightness, azimuth, elevation and color, and the ambient
   (sky) light's brightness, live while a slider moves; Default resets them.
   Shadows stay in the Render panel.
+- **Reflections**: the sky is also the scene's reflection map (IBL), its mip
+  levels prefiltered in code for each roughness, so metal and shiny surfaces
+  reflect it everywhere (VR and robot cameras included) at no extra cost.
+  Screen-space reflections (mirroring the robots on a shiny floor) are the
+  Render panel's Reflections setting, on in the High preset and off in VR;
+  only the opaque lit materials take part (`reflections : screenspace` in
+  `lit.mat` and `lit_textured.mat`).
 - **Default geom density, mass and friction** apply to geoms that do not
   set them themselves or through their own default classes, as a top-level
   `<default><geom/></default>` would: density and friction are written into
@@ -324,8 +333,9 @@ pixels are read back asynchronously (into a pixel buffer, collected once a
 fence has passed), so the window keeps its frame rate: on an RTX 3080 a
 320×240 camera at 30 Hz costs the main loop nothing visible. The viewer's
 own markers (selection, IK and goal markers, origin axes, VR controllers
-and menu) are on a layer the cameras do not see; their views have no SSAO
-or anti-aliasing, and the sun's shadows as the scene has them.
+and menu) are on a layer the cameras do not see; their views take the
+Render panel's anti-aliasing, SSAO, reflections and shadows, like the window
+(more GPU time per camera frame at the higher settings).
 
 ## Teleop panel and controllers
 
@@ -840,7 +850,6 @@ same Filament release
 
 ```sh
 matc -a opengl -p mobile -o public/materials/lit.filamat     materials/lit.mat
-matc -a opengl -p mobile -o public/materials/checker.filamat materials/checker.mat
 matc -a opengl -p mobile -o public/materials/lit_textured.filamat materials/lit_textured.mat
 matc -a opengl -p mobile -o public/materials/lit_transparent.filamat materials/lit_transparent.mat
 matc -a opengl -p mobile -o public/materials/lit_textured_transparent.filamat materials/lit_textured_transparent.mat

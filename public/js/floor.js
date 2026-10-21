@@ -1,16 +1,17 @@
 // The world floor's look (the World panel's Floor settings): a style, its
-// cell size and a color. Checker is the procedural material (checker.mat);
-// the other patterns are drawn here into a tileable texture, repeated over
-// the floor and tinted by the color; plain is one color, none no floor.
+// cell size, a color and a shine. The patterns are drawn here into a
+// tileable texture, repeated over the floor and tinted by the color; plain
+// is one color, none no floor. Shine makes it glossier, toward polished.
 // Only how the floor looks: the physics floor (world.js) stays the same.
 
 const STORE = 'mujoco-filament/floor';
 
 // style -> {label, size (m: one cell, tile, plank or texture repeat),
 // color (hex: checker's light cells, the tint of a texture, plain's color),
+// shine (%, default 0),
 // cells (cells one texture covers), roughness}
 export const FLOOR_STYLES = {
-  checker: { label: 'Checker', size: 1, color: '#737f8f' },
+  checker: { label: 'Checker', size: 1, color: '#737f8f', cells: 2, roughness: 0.6, shine: 100 },
   grid: { label: 'Grid', size: 1, color: '#ffffff', cells: 1, roughness: 0.7 },
   tiles: { label: 'Tiles', size: 0.5, color: '#ffffff', cells: 4, roughness: 0.35 },
   wood: { label: 'Wood', size: 0.2, color: '#ffffff', cells: 4, roughness: 0.55 },
@@ -19,7 +20,7 @@ export const FLOOR_STYLES = {
   none: { label: 'None' },
 };
 
-export const floorDefaults = (style = 'checker') => ({ style, size: FLOOR_STYLES[style].size ?? 1, color: FLOOR_STYLES[style].color ?? '#ffffff' });
+export const floorDefaults = (style = 'checker') => ({ style, size: FLOOR_STYLES[style].size ?? 1, color: FLOOR_STYLES[style].color ?? '#ffffff', shine: FLOOR_STYLES[style].shine ?? 0 });
 
 export function loadFloor() {
   try {
@@ -89,6 +90,12 @@ const scale = (c, k) => c.map((v) => v * k);
 const edge = (x, step) => { const m = ((x % step) + step) % step; return Math.min(m, step - m); };
 
 const SHADERS = {
+  // 2 x 2 cells, light and dark (0.55 of it, as sRGB: the color's dark cells).
+  checker(x, y) {
+    const k = (Math.floor(x / (N / 2)) + Math.floor(y / (N / 2))) % 2 ? 1 : 0.55;
+    return [k, k, k];
+  },
+
   // One cell: a line at its border and four faint ones across it.
   grid(x, y) {
     const base = [0.62, 0.65, 0.69], line = [0.3, 0.33, 0.37];

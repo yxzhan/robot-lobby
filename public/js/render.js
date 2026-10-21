@@ -9,6 +9,8 @@
 //   quality) or high (full resolution, high quality);
 // - shadows: the sun's shadow map, on or off (its size cannot be set: this
 //   Filament build does not bind LightManager's shadow options);
+// - reflections: Filament's screen-space reflections, on or off (the sky's
+//   reflections, IBL, are always on: they cost nothing extra);
 // - textures: the longest side image textures are scaled down to (main.js
 //   decodeImage); a change decodes the scene's images again.
 //
@@ -19,10 +21,10 @@
 const STORE = 'mujoco-filament/render';
 
 export const PRESETS = {
-  high: { pixelRatio: 'screen', antialiasing: 'fxaa', ao: 'high', shadows: 'on', textures: 2048 },
-  medium: { pixelRatio: 'screen', antialiasing: 'fxaa', ao: 'on', shadows: 'on', textures: 1024 },
-  low: { pixelRatio: 'screen', antialiasing: 'fxaa', ao: 'off', shadows: 'off', textures: 512 },
-  ultralow: { pixelRatio: 'screen', antialiasing: 'fxaa', ao: 'off', shadows: 'off', textures: 64 },  // Low, but textures
+  high: { pixelRatio: 'screen', antialiasing: 'fxaa', ao: 'high', shadows: 'on', reflections: 'on', textures: 2048 },
+  medium: { pixelRatio: 'screen', antialiasing: 'fxaa', ao: 'on', shadows: 'on', reflections: 'off', textures: 1024 },
+  low: { pixelRatio: 'screen', antialiasing: 'fxaa', ao: 'off', shadows: 'off', reflections: 'off', textures: 512 },
+  ultralow: { pixelRatio: 'screen', antialiasing: 'fxaa', ao: 'off', shadows: 'off', reflections: 'off', textures: 64 },  // Low, but textures
 };
 const PRESET_NAMES = { high: 'High', medium: 'Medium', low: 'Low', ultralow: 'Ultra low' };
 const DEFAULT = matchMedia('(pointer: coarse)').matches ? 'low' : 'medium';
@@ -37,6 +39,8 @@ const FIELDS = [
     'ambient occlusion (SSAO): contact darkening in corners and under objects; high is full resolution'],
   ['shadows', 'Shadows', [['off', 'off'], ['on', 'on']],
     'the sun\'s shadows: off saves drawing the whole scene a second time, into the shadow map'],
+  ['reflections', 'Reflections', [['off', 'off'], ['on', 'on']],
+    'screen-space reflections: shiny surfaces (a floor with Shine, World panel) mirror what is on screen; one more pass over the image'],
   ['textures', 'Textures', [[64, '64'], [512, '512'], [1024, '1024'], [2048, '2048']],
     'longest side of image textures in GPU memory: less memory and bandwidth, blurrier surfaces'],
 ];

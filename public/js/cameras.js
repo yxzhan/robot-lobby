@@ -379,9 +379,7 @@ export class Cameras {
     c.view.setScene(app.scene);
     c.view.setVisibleLayers(0xff, 0x1);  // the world only, not the viewer's markers (main.js SCENE)
     c.view.setViewport([0, 0, c.width, c.height]);
-    c.view.setAntiAliasing(F.View$AntiAliasing.NONE);
-    c.view.setMultiSampleAntiAliasingOptions({ enabled: false, sampleCount: 1 });
-    c.view.setAmbientOcclusionOptions({ enabled: false });
+    app.viewQuality(c.view);  // anti-aliasing, SSAO and reflections as the Render panel says (App.setQuality keeps it so)
     c.rb = gl.createRenderbuffer();
     gl.bindRenderbuffer(gl.RENDERBUFFER, c.rb);
     gl.renderbufferStorage(gl.RENDERBUFFER, gl.RGBA8, c.width, c.height);

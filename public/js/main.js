@@ -44,7 +44,6 @@ import { RemoteBase, RemoteIk, RemotePolicy } from './remote.js';
 // Filament.init() replaces the global with the loaded module, so re-read it after init.
 let Filament = window.Filament;
 const MAT_LIT = 'materials/lit.filamat';
-const MAT_CHECKER = 'materials/checker.filamat';
 const MAT_TEXTURED = 'materials/lit_textured.filamat';
 // Alpha-blended variants, for geoms whose rgba alpha is below 1.
 const MAT_TRANSPARENT = 'materials/lit_transparent.filamat';
@@ -278,34 +277,83 @@ function uploadTexture(engine, w, h, rgba) {
 }
 
 // Sky cubemap: a vertical gradient (the scene is Z-up), zenith blue to a pale
-// horizon, then a darker haze below it. Faces +X, -X, +Y, -Y, +Z, -Z.
+// horizon, then a darker haze below it. Faces +X, -X, +Y, -Y, +Z, -Z. Its
+// mip levels are the sky prefiltered for IBL reflections: level i blurred
+// by the GGX lobe of the roughness Filament samples it at (perceptual
+// roughness r with r(2 - r) = i / (levels - 1)); level 0, the sharp sky, is
+// what the skybox shows. The sky only changes with height, so each level is
+// a table over z, filled into the faces.
+const SKY = { zenith: [0.22, 0.42, 0.72], horizon: [0.78, 0.85, 0.92], ground: [0.36, 0.39, 0.43] };
+
+function skyRgb(z) {  // sRGB, 0..1
+  const { zenith, horizon, ground } = SKY;
+  const [a, b, t] = z >= 0 ? [horizon, zenith, Math.pow(z, 0.6)] : [horizon, ground, Math.min(1, -z * 4)];
+  return a.map((v, k) => v + (b[k] - v) * t);
+}
+
+// The sky seen in a GGX lobe of roughness `alpha` (squared perceptual) around
+// directions of height z: a table of BINS sRGB colors over z in -1..1.
+function skyLobe(alpha, BINS = 256, SAMPLES = 128) {
+  const out = new Float32Array(3 * BINS);
+  for (let b = 0; b < BINS; b++) {
+    const z = 2 * (b + 0.5) / BINS - 1, s = Math.sqrt(1 - z * z);
+    if (alpha === 0) { out.set(skyRgb(z), 3 * b); continue; }
+    const sum = [0, 0, 0];
+    let w = 0;
+    for (let i = 0; i < SAMPLES; i++) {
+      // Hammersley point -> half vector around N = (s, 0, z), tangent T = (-z, 0, s)
+      let bits = i;
+      bits = ((bits << 16) | (bits >>> 16)) >>> 0;
+      bits = (((bits & 0x55555555) << 1) | ((bits & 0xAAAAAAAA) >>> 1)) >>> 0;
+      bits = (((bits & 0x33333333) << 2) | ((bits & 0xCCCCCCCC) >>> 2)) >>> 0;
+      bits = (((bits & 0x0F0F0F0F) << 4) | ((bits & 0xF0F0F0F0) >>> 4)) >>> 0;
+      bits = (((bits & 0x00FF00FF) << 8) | ((bits & 0xFF00FF00) >>> 8)) >>> 0;
+      const u1 = i / SAMPLES, u2 = bits / 4294967296;
+      const cos = Math.sqrt((1 - u2) / (1 + (alpha * alpha - 1) * u2)), sin = Math.sqrt(1 - cos * cos);
+      const hz = sin * Math.cos(2 * Math.PI * u1) * s + cos * z;  // H's z
+      const nol = 2 * cos * cos - 1;                               // L = 2 (N.H) H - N, with V = N
+      if (nol <= 0) continue;
+      const lz = Math.max(-1, Math.min(1, 2 * cos * hz - z));
+      const c = skyRgb(lz);
+      for (let k = 0; k < 3; k++) sum[k] += Math.pow(c[k], 2.2) * nol;
+      w += nol;
+    }
+    for (let k = 0; k < 3; k++) out[3 * b + k] = Math.pow(sum[k] / w, 1 / 2.2);
+  }
+  return out;
+}
+
 function skyTexture(engine, size = 128) {
-  const zenith = [0.22, 0.42, 0.72], horizon = [0.78, 0.85, 0.92], ground = [0.36, 0.39, 0.43];
   const faces = [
     (u, v) => [1, -v, -u], (u, v) => [-1, -v, u],
     (u, v) => [u, 1, v], (u, v) => [u, -1, -v],
     (u, v) => [u, -v, 1], (u, v) => [-u, -v, -1],
   ];
   const srgb = (c) => Math.round(255 * Math.min(1, Math.max(0, c)));
-  const px = new Uint8Array(6 * size * size * 4);
-  let o = 0;
-  for (const dir of faces) {
-    for (let y = 0; y < size; y++) {
-      for (let x = 0; x < size; x++) {
-        const d = dir((2 * x + 1) / size - 1, (2 * y + 1) / size - 1);
-        const z = d[2] / Math.hypot(...d);
-        const [a, b, t] = z >= 0 ? [horizon, zenith, Math.pow(z, 0.6)] : [horizon, ground, Math.min(1, -z * 4)];
-        for (let k = 0; k < 3; k++) px[o++] = srgb(a[k] + (b[k] - a[k]) * t);
-        px[o++] = 255;
-      }
-    }
-  }
+  const levels = Math.log2(size) + 1;
   const tex = Filament.Texture.Builder()
-    .width(size).height(size).levels(1)
+    .width(size).height(size).levels(levels)
     .sampler(Filament.Texture$Sampler.SAMPLER_CUBEMAP)
     .format(Filament.Texture$InternalFormat.SRGB8_A8)
     .build(engine);
-  tex.setImageCube(engine, 0, Filament.PixelBuffer(px, Filament.PixelDataFormat.RGBA, Filament.PixelDataType.UBYTE));
+  for (let level = 0; level < levels; level++) {
+    const n = size >> level, t = level / (levels - 1), r = 1 - Math.sqrt(1 - t);
+    const table = skyLobe(r * r), BINS = table.length / 3;
+    const px = new Uint8Array(6 * n * n * 4);
+    let o = 0;
+    for (const dir of faces) {
+      for (let y = 0; y < n; y++) {
+        for (let x = 0; x < n; x++) {
+          const d = dir((2 * x + 1) / n - 1, (2 * y + 1) / n - 1);
+          const f = Math.min(BINS - 1, Math.max(0, ((d[2] / Math.hypot(...d)) + 1) / 2 * BINS - 0.5));
+          const i = Math.floor(f), j = Math.min(BINS - 1, i + 1), u = f - i;
+          for (let k = 0; k < 3; k++) px[o++] = srgb(table[3 * i + k] + (table[3 * j + k] - table[3 * i + k]) * u);
+          px[o++] = 255;
+        }
+      }
+    }
+    tex.setImageCube(engine, level, Filament.PixelBuffer(px, Filament.PixelDataFormat.RGBA, Filament.PixelDataType.UBYTE));
+  }
   return tex;
 }
 
@@ -585,7 +633,6 @@ class App {
     this.renderer.setClearOptions({ clearColor: [0.1, 0.11, 0.13, 1], clear: true });
 
     this.matLit = engine.createMaterial(MAT_LIT);
-    this.matChecker = engine.createMaterial(MAT_CHECKER);
     this.matTextured = engine.createMaterial(MAT_TEXTURED);
     this.matTransparent = engine.createMaterial(MAT_TRANSPARENT);
     this.matTexturedTransparent = engine.createMaterial(MAT_TEXTURED_TRANSPARENT);
@@ -598,7 +645,8 @@ class App {
     this.whiteTexture = uploadTexture(engine, 1, 1, new Uint8Array([255, 255, 255, 255]));
     this.images = new Map();  // image file(s) -> shared texture entry (bindTexture)
 
-    // Sun with shadows + flat-ish ambient (SH band 0 only) so nothing is pitch black.
+    // Sun with shadows + flat-ish ambient (SH band 0 only) so nothing is pitch
+    // black, and the sky's reflections.
     this.sun = Filament.EntityManager.get().create();
     Filament.LightManager.Builder(Filament.LightManager$Type.SUN)
       .color([1.0, 0.97, 0.92])
@@ -610,9 +658,11 @@ class App {
     this.scene.addEntity(this.sun);
     const sh = new Float32Array(27);
     sh.set([0.65, 0.7, 0.8], 0);
-    this.skybox = Filament.Skybox.Builder().environment(skyTexture(engine)).build(engine);
+    // The sky, and its blurred levels as the reflections of shiny surfaces.
+    const sky = skyTexture(engine);
+    this.skybox = Filament.Skybox.Builder().environment(sky).build(engine);
     this.scene.setSkybox(this.skybox);
-    this.indirect = Filament.IndirectLight.Builder().irradianceSh(3, sh).intensity(AMBIENT).build(engine);
+    this.indirect = Filament.IndirectLight.Builder().irradianceSh(3, sh).reflections(sky).intensity(AMBIENT).build(engine);
     this.scene.setIndirectLight(this.indirect);
     this.setLighting(loadLighting());  // the World panel's (lighting.js)
 
@@ -724,15 +774,12 @@ class App {
     if (f.style === 'none') return;
     const shape = plane(20, 20);
     let mi, uv = null;
-    if (f.style === 'checker') {
-      mi = this.matChecker.createInstance();
-      mi.setColor3Parameter('color1', F.RgbType.sRGB, color.map((v) => v * 0.55));
-      mi.setColor3Parameter('color2', F.RgbType.sRGB, color);
-      mi.setFloatParameter('scale', f.size);  // checker cell size (m)
-    } else if (f.style === 'plain') {
+    // Shine: from the style's own roughness toward a polished 0.05.
+    const roughness = style.roughness + (0.05 - style.roughness) * (f.shine ?? 0) / 100;
+    if (f.style === 'plain') {
       mi = this.matLit.createInstance();
       mi.setColor4Parameter('baseColor', F.RgbaType.sRGB, [...color, 1]);
-      mi.setFloatParameter('roughness', style.roughness);
+      mi.setFloatParameter('roughness', roughness);
       mi.setFloatParameter('metallic', 0.0);
     } else {
       if (!this.floorTextures.has(f.style)) {
@@ -742,7 +789,7 @@ class App {
       mi = this.matTextured.createInstance();
       mi.setColor4Parameter('baseColor', F.RgbaType.sRGB, [...color, 1]);
       mi.setTextureParameter('baseColorMap', this.floorTextures.get(f.style), this.sampler);
-      mi.setFloatParameter('roughness', style.roughness);
+      mi.setFloatParameter('roughness', roughness);
       mi.setFloatParameter('metallic', 0.0);
       const repeat = f.size * style.cells;  // m per texture
       uv = new Float32Array(shape.pos.length / 3 * 2);
@@ -764,6 +811,7 @@ class App {
     maxTexture = q.textures;
     if (textures) for (const e of this.images.values()) e.reload?.();  // the scene's image textures at the new size
     this.viewQuality(this.view);
+    for (const c of this.cameras?.on.values() ?? []) if (c.view) this.viewQuality(c.view);  // the robots' cameras (cameras.js) look the same
     this.shadows();
     this.resize();
   }
@@ -789,6 +837,9 @@ class App {
       enabled: q.ao !== 'off' && !xr, radius: 0.2,
       resolution: high ? 1 : 0.5, quality: high ? Q.HIGH : Q.LOW, upsampling: high ? Q.HIGH : Q.LOW,
     });
+    // Screen-space reflections (shiny floors mirror the robots): off in VR,
+    // like SSAO, for the same reason.
+    view.setScreenSpaceReflectionsOptions({ enabled: q.reflections === 'on' && !xr, thickness: 0.1, bias: 0.01, maxDistance: 3, stride: 2 });
   }
 
   resize() {
@@ -1623,7 +1674,7 @@ function snapshot(app) {
 }
 
 try {
-  await new Promise((resolve) => Filament.init([MAT_LIT, MAT_CHECKER, MAT_TEXTURED, MAT_TRANSPARENT, MAT_TEXTURED_TRANSPARENT, MAT_UNLIT_TEXTURED], resolve));
+  await new Promise((resolve) => Filament.init([MAT_LIT, MAT_TEXTURED, MAT_TRANSPARENT, MAT_TEXTURED_TRANSPARENT, MAT_UNLIT_TEXTURED], resolve));
   Filament = window.Filament;
   const app = new App(document.getElementById('canvas'));
   app.panel = new StagePanel(app, document.getElementById('stage'), {
