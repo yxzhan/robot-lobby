@@ -1,0 +1,27 @@
+{
+  "digital_twin/microduck/microduck.xml": {
+    "cameras": [
+      { "name": "head_camera", "link": "jaw_soft", "follow": "link", "pos": [0.015, 0, -0.08], "rpy": [0, 90, 0], "fovy": 45, "width": 256, "height": 256, "hz": 10 }
+    ]
+  },
+  "mujoco_menagerie/unitree_go2/go2.xml": {
+    "cameras": [
+      { "name": "front_camera", "link": "base", "follow": "link", "pos": [0.32, 0, 0.04], "rpy": [0, 0, 0], "fovy": 60, "width": 256, "height": 256, "hz": 10 }
+    ]
+  },
+  "digital_twin/garmi/garmi.xml": {
+    "cameras": [
+      { "name": "camera1", "link": "head", "follow": "link", "pos": [0.11, 0.035, -0.01], "rpy": [0, 0, 0], "fovy": 60, "width": 256, "height": 256, "hz": 10 }
+    ]
+  },
+  "mujoco_menagerie/unitree_g1/g1_with_hands.xml": {
+    "cameras": [
+      { "name": "head_camera", "link": "torso_link", "follow": "link", "pos": [0.06, 0, 0.43], "rpy": [0, 47.6, 0], "fovy": 55.2, "width": 256, "height": 256, "hz": 10 }
+    ]
+  },
+  "mujoco_menagerie/boston_dynamics_spot/spot_arm.xml": {
+    "cameras": [
+      { "name": "front_camera", "link": "body", "follow": "link", "pos": [0.4, 0, 0], "rpy": [0, 20, 0], "fovy": 70, "width": 256, "height": 256, "hz": 10 }
+    ]
+  }
+}

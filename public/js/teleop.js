@@ -554,7 +554,18 @@ export class TeleopPanel {
     box.append(el('div', { className: 'sub', textContent: 'Publish' }));
     topic('jointStates', 'Joints', 'sensor_msgs/JointState: the robot\'s joint positions (and velocities in local mode)');
     topic('tf', 'TF', 'tf2_msgs/TFMessage: every body in its parent\'s frame, the root in "world"');
-    topic('camera', 'Camera', 'sensor_msgs/Image: not yet, it comes with cameras', false);
+    {
+      // Cameras: the namespace of their topics (the robot's id unless set), and JPEG or raw.
+      const c = s.camera;
+      const on = el('input', { type: 'checkbox', checked: c.on });
+      const ns = el('input', { type: 'text', value: c.topic, placeholder: `${link.robot.prefix.slice(0, -1)} (robot id)`, title: 'Namespace of the camera topics: empty, the robot\'s id; / for none', spellcheck: false });
+      on.onchange = () => { c.on = on.checked; changed(); };
+      ns.onchange = () => { c.topic = ns.value.trim(); changed(); };
+      ns.onkeydown = (e) => { if (e.key === 'Enter') ns.blur(); };
+      const format = this.select([['jpeg', 'JPEG'], ['raw', 'raw']], c.format, (v) => { c.format = v; changed(); });
+      row('Cameras', 'The cameras ticked in the Cameras panel, each frame: <namespace>/<camera>/image_raw/compressed (sensor_msgs/CompressedImage, JPEG) '
+        + 'or …/image_raw (sensor_msgs/Image, rgb8), and …/camera_info; with TF, <camera>_optical_frame in its link\'s frame', on, ns, format);
+    }
     box.append(el('div', { className: 'sub', textContent: 'Subscribe' }));
     topic('jointCommand', 'Joint cmd', 'sensor_msgs/JointState: position targets for the actuators on those joints');
     topic('cmdVel', 'cmd_vel', 'geometry_msgs/Twist: linear x, y and angular z drive the walking policy or the base');
@@ -570,6 +581,7 @@ export class TeleopPanel {
     const counts = el('div', { className: 'readout' });
     box.append(counts, el('div', { className: 'hint', textContent:
       'Joint commands set the actuators\' targets; a running policy or IK writes over the joints it drives. ' +
+      'Cameras publish while ticked in the Cameras panel, at their own rate. ' +
       'Topics are per robot connection, so robots on one bridge need topics of their own.' }));
     this.rosView = { link, state, counts };
     link.onChange = () => this.showRos();
@@ -586,7 +598,7 @@ export class TeleopPanel {
     if (v.state.textContent !== text) v.state.textContent = text;
     v.state.className = `ros-state ${link.status}`;
     const tw = link.freshTwist();
-    const counts = `sent ${link.sent} · received ${link.received}` + (tw ? `\ncmd_vel vx ${tw[0].toFixed(2)} vy ${tw[1].toFixed(2)} ωz ${tw[2].toFixed(2)}` : '');
+    const counts = `sent ${link.sent} · received ${link.received}` + (link.dropped ? ` · camera frames dropped ${link.dropped}` : '') + (tw ? `\ncmd_vel vx ${tw[0].toFixed(2)} vy ${tw[1].toFixed(2)} ωz ${tw[2].toFixed(2)}` : '');
     if (v.counts.textContent !== counts) v.counts.textContent = counts;
   }
 

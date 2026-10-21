@@ -138,10 +138,20 @@
     :is(#world, #cameras, #render, #server, #share) select { flex: 1; min-width: 0; font: inherit; color: #eee; background: #222; border: 1px solid #555; border-radius: 4px; }
     :is(#world, #cameras, #render, #server, #share) .hint { color: #999; margin: 4px 0; line-height: 1.5; }
     :is(#world, #cameras, #render, #server, #share) .sub { margin-top: 8px; padding-top: 6px; border-top: 1px solid #3a3d44; font-weight: 600; }
-    #cameras .camrow { display: grid; grid-template-columns: 1fr 86px 62px 28px; gap: 4px; align-items: center; margin: 3px 0; }
-    #cameras .cam { display: flex; align-items: center; gap: 4px; min-width: 0; }
-    #cameras .cam span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #cameras > .body > .field { grid-template-columns: 42px 1fr; }
+    #cameras details.camera { border: 1px solid #3a3d44; border-radius: 5px; padding: 2px 6px; margin: 6px 0; }
+    #cameras details.camera > summary { cursor: pointer; display: flex; align-items: center; gap: 4px; padding: 3px 0; list-style: none; }
+    #cameras details.camera > summary::-webkit-details-marker { display: none; }
+    #cameras details.camera > summary::before { content: '▸'; color: #888; width: 10px; }
+    #cameras details.camera[open] > summary::before { content: '▾'; }
+    #cameras details.camera .title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+    #cameras details.camera .field { grid-template-columns: 42px 1fr; }
+    #cameras details.camera .field > span { color: #aaa; }
+    #cameras details.camera .ctl { align-items: center; }
+    #cameras details.camera input[type=text] { flex: 1; min-width: 0; font: inherit; color: #eee; background: #222; border: 1px solid #555; border-radius: 4px; padding: 1px 4px; }
+    #cameras details.camera summary button { padding: 0 6px; }
     #cameras button.on { background: #2b5fa8; }
+    #cameras .bar .note { color: #8a8; }  /* as the IK panel's */
     #pips { position: fixed; left: 110px; bottom: 12px; display: flex; gap: 8px; align-items: flex-end; pointer-events: none; z-index: 5; }
     .pip { pointer-events: auto; background: #1b1d22; border: 1px solid #444; border-radius: 6px; overflow: hidden; box-shadow: 0 2px 10px #0008; z-index: 5; }
     .pip.looking { border-color: #4a8ef0; }

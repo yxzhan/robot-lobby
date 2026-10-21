@@ -1577,6 +1577,7 @@ try {
   app.renderPanel = new RenderPanel(app, document.getElementById('render'));
   app.cameras = new Cameras(app);
   app.camerasPanel = new CamerasPanel(app.cameras, document.getElementById('cameras'));
+  app.cameras.onFrame = (c) => app.teleop.ros.get(c.robot.prefix)?.publishCamera(c);  // the robot's ROS connection, if on
   // Frame meter (stats.js) in the bottom-right corner; click it to cycle
   // FPS / ms per frame (JS time of App.frame) / MB of JS heap.
   app.stats = new Stats();

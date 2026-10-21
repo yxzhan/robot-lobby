@@ -274,19 +274,38 @@ ends on the menu, the IK marker or the floor it meets:
 
 ## Cameras panel
 
-The **Cameras** panel (`public/js/cameras.js`) lists the MJCF `<camera>`s
-of everything spawned, per robot (24 of the library's robots have some:
-wrist cameras on ALOHA, SO-101, Kinova, head cameras on TIAGo and
-Microduck, Stretch 3's five). Ticking one opens it in a picture-in-picture
-window (drag it by its title bar), at a resolution (the camera's own
-`resolution`, else 320×240) and rate (5 to 30 Hz) of its own; **◉** looks
-through it in the main view (Esc: back). Local and network mode alike: the
-pose comes from the world's body poses (MuJoCo's in local mode, the page's
-own forward kinematics in network mode; it matches MuJoCo's `cam_xpos` /
-`cam_xmat` exactly) and the camera's model (fixed cameras ride their body;
-track / trackcom keep their initial world orientation and offset, following
-the body), its definition from the robot's model (the server's render data
-has it in network mode).
+The **Cameras** panel (`public/js/cameras.js`) works like the Teleop
+panel's IK chains: it shows one robot at a time (picked at the top; a
+newly spawned one comes up) and its cameras, each in a foldable box. They
+start as the MJCF `<camera>`s of the robot's model (24 of the library's
+robots have some: wrist cameras on ALOHA, SO-101, Kinova, head cameras on
+TIAGo and Microduck, Stretch 3's five), and every one of them can be
+edited, deleted or added to (**+ Camera**: on the selected, double-clicked,
+body if it is the robot's, else its base). A camera rides a **link** (**◎**
+takes the selected body; "robot frame" the robot's own) at an **offset** in
+the link's frame, **turned** by roll / pitch / yaw (degrees about the link's
+x, y, z) from looking along the link's +x with +z up, so pitch > 0 looks
+down; **follow** "position only" keeps its turn in the robot's frame while
+following where the link is (how MJCF track / trackcom cameras come in).
+Each has a size (width × height, 256×256 unless the model gives a
+`resolution`), rate (5 to 30 Hz) and vertical field of view.
+
+Ticking a camera opens it in a picture-in-picture window (drag it by its
+title bar; its **◉** looks through it in the main view, Esc: back); **⌖**
+shows where it is in the scene: a frustum of its field of view and aspect,
+a green tick on its top edge. **Save** keeps the robot's cameras for every
+spawn of its model in this browser; without, a model starts from its
+built-in setup in `public/json/camera_defaults.json` (keyed like
+`ik_defaults.json`: the file under `mjcf_assets/robots/`, other models by
+theirs under `mjcf_assets/`), else the model's cameras. **Export** copies
+the setup as JSON for that file, **Defaults** / **Auto** goes back to it /
+to the model's.
+
+Local and network mode alike: the pose comes from the world's body poses
+(MuJoCo's in local mode, the page's own forward kinematics in network
+mode); an MJCF camera comes in at the pose MuJoCo gives it (`cam_xpos` /
+`cam_xmat`), its definition from the robot's model (the server's render
+data has it in network mode).
 
 Each camera is a Filament View rendered after the window's frame into a
 framebuffer of its own: the page makes Filament bind it where it binds the
@@ -368,8 +387,18 @@ for the actuators on those joints; a running policy or IK keeps writing
 the joints it drives, the panel says so) and `cmd_vel`
 (`geometry_msgs/Twist` on `/cmd_vel`: linear x / y and angular z drive the
 walking policy or the base like the keys do, before a goal; one older than
-0.5 s counts as zero); the publishing rate (1–60 Hz, 30 by default); and a
-camera topic (`sensor_msgs/Image`), a placeholder until there are cameras.
+0.5 s counts as zero); the publishing rate (1–60 Hz, 30 by default); and
+the cameras. Each camera of the robot ticked in the Cameras panel is
+published every frame it renders (its own rate): `<namespace>/<camera>/image_raw/compressed`
+(`sensor_msgs/CompressedImage`, JPEG, the default) or
+`<namespace>/<camera>/image_raw` (`sensor_msgs/Image`, `rgb8`), and
+`<namespace>/<camera>/camera_info` (`sensor_msgs/CameraInfo`: a pinhole of
+its vertical field of view, fx = fy = (h/2)/tan(fovy/2), centered, no
+distortion); the namespace is the robot's id by default (`r1/wrist_cam/…`;
+`/` for none). With TF on, every camera
+of the robot also has `<camera>_optical_frame` (z forward, x right, y down)
+in its link's frame. Frames are dropped while the WebSocket is more than
+8 MB behind (counted in the panel).
 Stamps are wall time in ROS 2's form (`sec`, `nanosec`). Settings are kept
 per robot file in this browser. A page on HTTPS (GitHub Pages, Binder) may
 still connect to `ws://localhost`; browsers treat localhost as secure.

@@ -129,6 +129,37 @@
     ],
     "auto": true
   },
+  "mujoco_menagerie/unitree_g1/g1.xml": {
+    "chains": [
+      {
+        "name": "left_wrist_yaw",
+        "tip": "left_wrist_yaw_link",
+        "root": "left_shoulder_pitch_link",
+        "site": "",
+        "offset": [
+          0.1,
+          -0.02,
+          -0.01
+        ],
+        "locked": [],
+        "gripper": ""
+      },
+      {
+        "name": "right_wrist_yaw",
+        "tip": "right_wrist_yaw_link",
+        "root": "right_shoulder_pitch_link",
+        "site": "",
+        "offset": [
+          0.1,
+          0.02,
+          -0.01
+        ],
+        "locked": [],
+        "gripper": ""
+      }
+    ],
+    "auto": true
+  },
   "mujoco_menagerie/pal_tiago/tiago_position.xml": {
     "chains": [
       {

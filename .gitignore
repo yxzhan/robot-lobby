@@ -11,7 +11,9 @@ public/thumbs/
 dist/
 # model library / policies checked out next to package.json
 mjcf_assets/
+mjcf_assets_lite/
 # IK setups saved from the Teleop panel in network mode
 server/saved/
 __pycache__/
 **.tar.gz
+**.rviz
