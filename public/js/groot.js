@@ -21,6 +21,8 @@
 // - The IMU is the floating base: orientation qpos[3:7] (world, wxyz) and
 //   angular velocity qvel[3:6] (pelvis frame), as the sim's bridge reports it.
 
+import { runBatched } from './batch.js';
+
 export const CONTROL_DT = 0.02;
 
 // Menagerie joint (and actuator) names in G1_29_JointIndex order.
@@ -174,8 +176,7 @@ export class GrootController {
   async infer(obs) {
     const { ort, balance, walk } = this.policy;
     const session = Math.hypot(...this.cmd) < 0.05 ? balance : walk;
-    const out = await session.run({ [session.inputNames[0]]: new ort.Tensor('float32', obs, [1, obs.length]) });
-    this.action = Float32Array.from(out[session.outputNames[0]].data);
+    this.action = await runBatched(ort, session, obs);
     return this.action;
   }
 

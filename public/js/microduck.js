@@ -27,6 +27,8 @@
 //   `delay` seconds after inference, as the command delay of training.
 // server/policies.py (MicroduckController, BamServos) is the same in Python.
 
+import { runBatched } from './batch.js';
+
 const FRICTION_DOF = 3;  // mjCNSTR_FRICTION_DOF
 
 // {ort, session, spec}. `source(name)` returns a file's URL.
@@ -192,9 +194,9 @@ export class MicroduckController {
 
   async step(data, valid = () => true) {
     const obs = this.observe(data), { ort } = this.policy, s = this.spec;
-    const out = await this.session.run({ [s.input]: new ort.Tensor('float32', obs, [1, obs.length]) });
+    const action = await runBatched(ort, this.session, obs, s.input, s.output);
     if (!valid()) return;
-    this.action = Float32Array.from(out[s.output].data);
+    this.action = action;
     const target = Float64Array.from(this.action, (a, i) => s.default_pose[i] + a * s.action_scale);
     this.pending.push([data.time + s.bam.delay, target]);
   }

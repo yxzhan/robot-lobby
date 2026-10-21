@@ -115,7 +115,10 @@ def mlp_layers(policy_params):
 
 
 def build_onnx(mean, std, layers, act_size):
-  """obs -> (obs - mean) / std -> Dense+swish ... -> Dense -> first act_size -> tanh."""
+  """obs -> (obs - mean) / std -> Dense+swish ... -> Dense -> first act_size -> tanh.
+
+  The batch size is free, so the page runs several robots in one call (public/js/batch.js).
+  """
   inits = [numpy_helper.from_array(mean.astype(np.float32), 'obs_mean'),
            numpy_helper.from_array(std.astype(np.float32), 'obs_std')]
   nodes = [helper.make_node('Sub', ['obs', 'obs_mean'], ['obs_c']),
@@ -137,8 +140,8 @@ def build_onnx(mean, std, layers, act_size):
             helper.make_node('Tanh', ['loc'], ['action'])]
   graph = helper.make_graph(
       nodes, 'policy',
-      [helper.make_tensor_value_info('obs', TensorProto.FLOAT, [1, len(mean)])],
-      [helper.make_tensor_value_info('action', TensorProto.FLOAT, [1, act_size])],
+      [helper.make_tensor_value_info('obs', TensorProto.FLOAT, ['batch', len(mean)])],
+      [helper.make_tensor_value_info('action', TensorProto.FLOAT, ['batch', act_size])],
       inits)
   model = helper.make_model(graph, opset_imports=[helper.make_opsetid('', 17)], producer_name='mujoco-filament training')
   model.ir_version = 8  # onnxruntime-web reads it

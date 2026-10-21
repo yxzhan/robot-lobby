@@ -34,6 +34,8 @@
 //   min_command ({speed, turn}, optional): its dead band, below which it
 //   stands (drive.minSpeed / minTurn for the goal marker, goal.js).
 
+import { runBatched } from './batch.js';
+
 // {ort, session, spec}. `source(name)` returns a file's URL.
 export async function loadPlaygroundPolicy(ort, source) {
   const spec = await fetch(source('policy.json')).then((r) => {
@@ -205,8 +207,7 @@ export class PlaygroundController {
 
   async infer(obs) {
     const { ort, session } = this.policy;
-    const out = await session.run({ [this.spec.input]: new ort.Tensor('float32', obs, [1, obs.length]) });
-    return Float32Array.from(out[this.spec.output].data);
+    return runBatched(ort, session, obs, this.spec.input, this.spec.output);
   }
 
   apply(data, action) {
