@@ -183,7 +183,7 @@ properties:
   and a Panda's fingers let a 100 g box creep out within seconds; for
   grasping, elliptic with impratio 10 holds the box through a lift and a
   swing to within 2 mm.
-- **Timestep and speed** (Simulation): the physics step (0.002 s by default,
+- **Timestep and speed** (Simulation): the physics step (0.005 s by default,
   changed live; larger steps cost less per simulated second but are less
   stable, and walking policies were trained at 0.002–0.005 s) and the most
   simulated time per second of wall time: 0.1× to 10× or **max**, as fast as
@@ -214,6 +214,12 @@ properties:
   Render panel's Reflections setting, on in the High preset and off in VR;
   only the opaque lit materials take part (`reflections : screenspace` in
   `lit.mat` and `lit_textured.mat`).
+- **Camera** (last, saved in this browser): *Follow selection*, off by
+  default. A double-click selects a body and the camera turns to it once;
+  with this on it keeps following it (orbit, zoom and pan go on, a pan
+  offsetting the view) until the selection is cleared or changes, and holds
+  still while something is dragged through the pointer (a pulled body, an IK
+  or goal marker).
 - **Default geom density, mass and friction** apply to geoms that do not
   set them themselves or through their own default classes, as a top-level
   `<default><geom/></default>` would: density and friction are written into

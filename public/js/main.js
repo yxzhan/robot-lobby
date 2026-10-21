@@ -47,6 +47,7 @@ const MAT_LIT = 'materials/lit.filamat';
 const MAT_TEXTURED = 'materials/lit_textured.filamat';
 // Alpha-blended variants, for geoms whose rgba alpha is below 1.
 const MAT_TRANSPARENT = 'materials/lit_transparent.filamat';
+const FOLLOW = 'mujoco-filament/follow-selection';  // localStorage: the camera follows the selection
 const MAT_TEXTURED_TRANSPARENT = 'materials/lit_textured_transparent.filamat';
 const MAT_UNLIT_TEXTURED = 'materials/unlit_textured.filamat';  // the WebXR menu panel
 // WebXR settings (the VR menu, xr.js), kept in this browser: MSAA samples of
@@ -571,15 +572,42 @@ class OrbitCamera {
   // Glides the target to point p (over ~0.3 s), keeping the distance and
   // the angles; a pan or another focus on the way takes over.
   focus(p) {
-    const from = [...this.center], t0 = performance.now(), id = this.focusing = {};
+    const t0 = performance.now(), glide = this.focusing = { from: [...this.center], to: [...p] };
     const step = () => {
-      if (this.focusing !== id) return;
+      if (this.focusing !== glide) return;
       const k = Math.min(1, (performance.now() - t0) / 300), e = 1 - (1 - k) ** 3;
-      for (let i = 0; i < 3; i++) this.center[i] = from[i] + (p[i] - from[i]) * e;
+      for (let i = 0; i < 3; i++) this.center[i] = glide.from[i] + (glide.to[i] - glide.from[i]) * e;
       if (k < 1) requestAnimationFrame(step);
       else this.focusing = null;
     };
     step();
+  }
+
+  // Follows a moving point (the selection): `get()` gives it each frame,
+  // null once there is none, which ends the tracking (track(null) too). The
+  // target glides to it, then moves along with it (update()); orbiting,
+  // zooming and panning go on meanwhile, a pan offsetting the view from it.
+  // While `hold()` is true (a drag through the pointer ray, which a moving
+  // camera would run away with) the target stays put.
+  track(get, hold = () => false) {
+    this.tracking = get && { get, hold, prev: get() };
+    if (this.tracking?.prev) this.focus(this.tracking.prev);
+  }
+
+  // Every frame: moves the target (and a glide on the way) as far as the
+  // tracked point moved since the last frame.
+  update() {
+    const t = this.tracking;
+    if (!t) return;
+    const p = t.get();
+    if (!p) { this.tracking = null; return; }
+    if (t.hold()) { t.prev = p; return; }
+    for (let i = 0; i < 3; i++) {
+      const d = p[i] - t.prev[i];
+      this.center[i] += d;
+      if (this.focusing) { this.focusing.from[i] += d; this.focusing.to[i] += d; }
+    }
+    t.prev = p;
   }
 
   // Moves the target in the view plane by a pointer motion of (dx, dy) pixels.
@@ -760,9 +788,28 @@ class App {
     this.setOriginMarker(true);
 
     this.orbit = new OrbitCamera(canvas, [0, 0, 0.4], 4);
+    // Whether the camera follows the selection (the World panel's switch,
+    // saved in this browser), else turns to it once.
+    try { this.follow = localStorage.getItem(FOLLOW) === '1'; } catch { this.follow = false; }
     this.setSpawnMarker(null);
     this.setQuality(this.quality);  // sizes the canvas too
     window.addEventListener('resize', () => this.resize());
+  }
+
+  // The camera follows the selection (setFollow(true)) or not.
+  setFollow(on) {
+    this.follow = on;
+    try { localStorage.setItem(FOLLOW, on ? '1' : '0'); } catch { /* no storage */ }
+    if (on) this.trackSelection();
+    else this.orbit.track(null);
+  }
+
+  // Makes the camera follow the selected body until it is cleared or another
+  // body is selected; not while something is dragged through the pointer.
+  trackSelection() {
+    const b = this.perturb.body;
+    this.orbit.track(b > 0 ? () => (this.perturb.body === b ? this.perturb.point() : null) : null,
+      () => !!this.perturb.target || !!this.teleop?.dragging);
   }
 
   // The sun and the ambient light: `l` as loadLighting returns it (lighting.js).
@@ -1437,6 +1484,7 @@ class App {
         this.camera.setModelMatrix(look.matrix);
         this.camera.setProjectionFov(look.fovy, this.canvas.width / this.canvas.height, 0.01, 200, Filament.Camera$Fov.VERTICAL);
       } else {
+        this.orbit.update();  // follows the selection
         this.camera.lookAt(this.orbit.eye(), this.orbit.center, [0, 0, 1]);
       }
       if (this.renderer.beginFrame(this.swapChain)) {
@@ -2453,7 +2501,13 @@ try {
   const selectAt = async (x, y) => {
     const hit = await app.pickBody(x, y);  // a promise in network mode
     app.perturb.select(hit);
-    if (hit?.body > 0) app.orbit.focus(hit.point);  // the camera turns about the selection
+    // The camera turns about the selection, and follows it if the World
+    // panel says so.
+    if (app.follow) app.trackSelection();
+    else {
+      app.orbit.track(null);
+      if (hit?.body > 0) app.orbit.focus(hit.point);
+    }
     const robot = hit && app.robotOfBody(hit.body);
     app.teleop.drive(robot ?? null);
   };

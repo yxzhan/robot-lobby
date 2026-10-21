@@ -94,6 +94,7 @@ export class WorldPanel {
       const reset = el('button', { type: 'button', textContent: 'Defaults', title: 'Every option back to its default' });
       reset.onclick = () => this.app.setPhysics({ ...structuredClone(PHYSICS_DEFAULTS), geom: this.app.physics.geom });
       this.body.append(el('div', { className: 'bar' }, reset));
+      this.camera(row);
       return;
     }
     this.body.append(el('div', { className: 'sub', textContent: 'Default geom' }));
@@ -123,6 +124,17 @@ export class WorldPanel {
     };
     this.body.append(el('div', { className: 'bar' }, apply, reset, status));
     if (dirty) status.textContent = 'not applied';
+    this.camera(row);
+  }
+
+  // The Camera section, last: whether the camera follows the selection
+  // (App.setFollow; saved in this browser, off by default).
+  camera(row) {
+    this.body.append(el('div', { className: 'sub', textContent: 'Camera' }));
+    const title = 'The camera keeps following the body selected with a double-click; off: it only turns to it once';
+    const box = el('input', { type: 'checkbox', checked: !!this.app.follow, title });
+    box.onchange = () => this.app.setFollow(box.checked);
+    this.body.append(row('Follow selection', '', title, box));
   }
 
   // The Lighting section: sliders for the sun and the ambient light, live

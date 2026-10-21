@@ -113,7 +113,7 @@ PHYSICS_THREADS = int(os.environ.get('PHYSICS_THREADS') or min(8, cpus()))
 PHYSICS_DEFAULTS = {
     'gravity': [0, 0, -9.81], 'wind': [0, 0, 0], 'magnetic': [0, -0.5, 0],
     'density': 0, 'viscosity': 0, 'impratio': 1, 'cone': 'pyramidal',
-    'timestep': 0.002,  # s, live
+    'timestep': 0.005,  # s, live
     'speed': 1,         # the most sim seconds per wall second; 0: as fast as it goes
     'stateHz': 30,      # state broadcasts per second (not physics, but the server's too)
     'sleep': True,  # island sleeping (physics.js): set at compile time

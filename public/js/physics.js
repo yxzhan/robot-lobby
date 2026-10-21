@@ -40,7 +40,7 @@ export const PHYSICS_DEFAULTS = Object.freeze({
   viscosity: 0,
   impratio: 1,
   cone: 'pyramidal',
-  timestep: 0.002,
+  timestep: 0.005,
   speed: 1,
   stateHz: 30,  // network mode: the server's state broadcasts per second
   sleep: true,
