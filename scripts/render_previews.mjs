@@ -8,7 +8,7 @@
 //
 //   npm start &                                   # serves public/ on :4000
 //   node scripts/render_previews.mjs [filter…]    # e.g. objects, robots/digital_twin,
-//                                                 # objects/robocasa_spawn/apple; default: all
+//                                                 # objects/robocasa/apple; default: all
 //   node scripts/vendor.mjs && python3 scripts/thumbnails.py
 //
 // Options (env): CHROME=/path/to/chrome (default: Playwright's headless
@@ -44,7 +44,7 @@ for (const m of JSON.parse(readFileSync(index, 'utf8'))) {
   // m.dir is 'mjcf_assets/<category dir>/<source>/<name>' (relative to public/,
   // where mjcf_assets is a symlink to the one next to package.json).
   // A filter also matches a model (<category>/<source>/<name>) or a group
-  // (<category>/<source>/<group>, e.g. objects/robocasa_spawn/apple).
+  // (<category>/<source>/<group>, e.g. objects/robocasa/apple).
   const where = m.dir.split('/').slice(1).join('/');
   const group = `${m.dir.split('/').slice(1, 3).join('/')}/${m.group}`;
   if (filters.length && !filters.some((f) => [where, group].some((w) => w === f || w.startsWith(`${f}/`)))) continue;

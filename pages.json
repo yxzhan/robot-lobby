@@ -5,11 +5,7 @@
     "robots/mujoco_menagerie/boston_dynamics_spot",
     "robots/mujoco_menagerie/franka_emika_panda",
     "robots/mujoco_menagerie/unitree_g1",
-    "robots/digital_twin/microduck",
-    "robots/digital_twin/garmi",
-    "environments/custom",
-    "objects/digital_twin",
-    "objects/robocasa_spawn/banana_1"
+    "robots/digital_twin/microduck"
   ],
   "policies": ["GR00T-WholeBodyControl_g1", "playground_go2", "playground_spot", "microduck_rl"],
   "binder": { "hub": "https://mybinder.org", "repo": null, "path": "robot-lobby/" }

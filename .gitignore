@@ -17,3 +17,4 @@ server/saved/
 __pycache__/
 **.tar.gz
 **.rviz
+tmp/
