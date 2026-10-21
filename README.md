@@ -199,6 +199,10 @@ properties:
   concrete (textures drawn in code, tileable, tinted by the color), plain (one
   color) or none. Size is one cell, tile, plank width or pattern repeat;
   picking a style starts from its own size and color. Robot cameras see it too.
+- **Lighting** (`public/js/lighting.js`, saved in this browser like the
+  floor): the sun's brightness, azimuth, elevation and color, and the ambient
+  (sky) light's brightness, live while a slider moves; Default resets them.
+  Shadows stay in the Render panel.
 - **Default geom density, mass and friction** apply to geoms that do not
   set them themselves or through their own default classes, as a top-level
   `<default><geom/></default>` would: density and friction are written into

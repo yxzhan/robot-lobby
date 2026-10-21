@@ -29,6 +29,7 @@ import { applyOptions, geomOverrides, geomSignature, injectGeomDefaults, loadPhy
 import { WorldPanel } from './worldpanel.js';
 import { RenderPanel, loadQuality } from './render.js';
 import { FLOOR_STYLES, floorTexture, hexRgb, loadFloor, saveFloor } from './floor.js';
+import { AMBIENT, SUN_LUX, linearRgb, loadLighting, saveLighting, sunDirection } from './lighting.js';
 import { ServerPanel } from './serverpanel.js';
 import { SharePanel } from './share.js';
 import { MARKER } from './marker.js';
@@ -611,8 +612,9 @@ class App {
     sh.set([0.65, 0.7, 0.8], 0);
     this.skybox = Filament.Skybox.Builder().environment(skyTexture(engine)).build(engine);
     this.scene.setSkybox(this.skybox);
-    this.scene.setIndirectLight(
-      Filament.IndirectLight.Builder().irradianceSh(3, sh).intensity(25000).build(engine));
+    this.indirect = Filament.IndirectLight.Builder().irradianceSh(3, sh).intensity(AMBIENT).build(engine);
+    this.scene.setIndirectLight(this.indirect);
+    this.setLighting(loadLighting());  // the World panel's (lighting.js)
 
     // The floor of world.js's base XML (a size-0, i.e. infinite, plane), drawn
     // 40 m x 40 m, as the World panel's Floor settings say (floor.js).
@@ -691,6 +693,18 @@ class App {
     this.setSpawnMarker(null);
     this.setQuality(this.quality);  // sizes the canvas too
     window.addEventListener('resize', () => this.resize());
+  }
+
+  // The sun and the ambient light: `l` as loadLighting returns it (lighting.js).
+  setLighting(l) {
+    this.lighting = l;
+    saveLighting(l);
+    const lm = this.engine.getLightManager(), sun = lm.getInstance(this.sun);
+    lm.setIntensity(sun, SUN_LUX * l.sun / 100);
+    lm.setDirection(sun, sunDirection(l));
+    lm.setColor(sun, linearRgb(l.color));
+    sun.delete();
+    this.indirect.setIntensity(AMBIENT * l.ambient / 100);
   }
 
   // The world floor's look: `f` as loadFloor returns it (floor.js).

@@ -1,10 +1,12 @@
 // The World panel: global physics options and default geom properties
-// (physics.js), and how the floor looks (floor.js). Options and the floor
+// (physics.js), how the floor looks (floor.js) and the lighting
+// (lighting.js). Options, the floor and the lighting
 // apply as soon as a field changes; default geom properties change masses,
 // so they wait for Apply (a rebuild).
 
 import { CONES, PHYSICS_DEFAULTS, SPEEDS, STATE_RATES } from './physics.js';
 import { FLOOR_STYLES, floorDefaults } from './floor.js';
+import { LIGHTING_DEFAULTS } from './lighting.js';
 
 const el = (tag, props = {}, ...children) => {
   const e = Object.assign(document.createElement(tag), props);
@@ -85,6 +87,7 @@ export class WorldPanel {
     }
     this.body.append(el('div', { className: 'hint', textContent: 'Applied at once (Sleep rebuilds the world). Wind and fluid drag only act with a medium density or viscosity.' }));
     this.floor(row, num);
+    this.lighting(row);
 
     if (this.app.net) {  // network mode: the server's options (server/server.py)
       this.body.append(el('div', { className: 'hint', textContent: 'Shared world: these are the server\'s settings, for everyone. Default geom properties are not available in server mode yet.' }));
@@ -120,6 +123,33 @@ export class WorldPanel {
     };
     this.body.append(el('div', { className: 'bar' }, apply, reset, status));
     if (dirty) status.textContent = 'not applied';
+  }
+
+  // The Lighting section: sliders for the sun and the ambient light, live
+  // while dragging (this page only).
+  lighting(row) {
+    const l = this.app.lighting;
+    this.body.append(el('div', { className: 'sub', textContent: 'Lighting' }));
+    const slider = (k, label, min, max, step, unit, title) => {
+      const out = el('span', { className: 'unit', textContent: `${l[k]}${unit}` });
+      const inp = el('input', { type: 'range', min, max, step, value: l[k], title });
+      inp.oninput = () => {
+        this.app.setLighting({ ...this.app.lighting, [k]: Number(inp.value) });
+        out.textContent = `${inp.value}${unit}`;
+      };
+      const f = el('div', { className: 'field', title }, el('span', { textContent: label }), el('div', { className: 'ctl' }, inp), out);
+      this.body.append(f);
+    };
+    slider('sun', 'Sun', 0, 300, 5, '%', 'brightness of the sunlight (100 %: the default)');
+    slider('azimuth', 'Azimuth', 0, 360, 1, '°', 'where the sun stands around the world: degrees from +x toward +y');
+    slider('elevation', 'Elevation', 5, 90, 1, '°', 'how high the sun stands above the horizon: low makes long shadows, 90 straight down');
+    slider('ambient', 'Ambient', 0, 300, 5, '%', 'light from all around (the sky): fills the shadows (100 %: the default)');
+    const title = 'the sunlight\'s color';
+    const color = el('input', { type: 'color', value: l.color, title });
+    color.oninput = () => this.app.setLighting({ ...this.app.lighting, color: color.value });
+    const reset = el('button', { type: 'button', textContent: 'Default', title: 'every lighting setting back to its default' });
+    reset.onclick = () => { this.app.setLighting({ ...LIGHTING_DEFAULTS }); this.render(); };
+    this.body.append(row('Sun color', '', title, color, reset));
   }
 
   // The Floor section: style, cell size and color (this page only).
