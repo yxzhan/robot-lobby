@@ -24,3 +24,21 @@ Plan: keep ros2_control on the ROS side and swap only the hardware plugin for
 Limits: rosbridge JSON gives tens to ~200 Hz; no 1 kHz torque control.
 Alternative without the lobby: [mujoco_ros2_control](https://control.ros.org/jazzy/doc/mujoco_ros2_control/doc/index.html)
 (MuJoCo inside the ROS process).
+
+## To discuss
+
+Ideas to scope later; no plan yet.
+
+- **Several policies at once, switched automatically**: more than one policy enabled per
+  robot, with automatic switching between them.
+- **Stages**: save, share and export a stage, the same way in online (server) and
+  offline (browser-only) mode.
+- **Benchmark scenes**: scenes from mainstream benchmarks, e.g. LIBERO.
+- **Tasks and challenges**: a task challenge system and a task creation system, with
+  success conditions. Focus on multiplayer tasks, both competitive and cooperative.
+  Data recording and trajectory replay.
+- **Assets**: the page mounts a local directory to load assets from, or uploads them to
+  the server; or one unified asset management system. Policy files become assets too.
+- **Command line and agent mode**: a command for every GUI interaction, so that agents
+  can be connected later; a mode where an agent is in control.
+- **SO-ARM101 via feetech.js**: read the real arm (Feetech servos) as a real2sim input.
