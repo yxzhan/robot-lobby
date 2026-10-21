@@ -27,6 +27,7 @@ import { BaseController, KINDS } from './base.js';
 import { POLICIES, POLICY_ROOT, defaultPolicy, isInstalled, policyById } from './policy.js';
 import { bodyPose, goalCommand } from './goal.js';
 import { RosLink, bridgeUrl } from './ros.js';
+import { ACTIONS, BINDINGS, GamepadMap, bindingName, gamepad } from './gamepad.js';
 
 // Per held key: [command index (vx, vy, yaw rate), direction, drive speed].
 const DRIVE = {
@@ -51,11 +52,18 @@ export const TOUCH = matchMedia('(pointer: coarse)').matches || navigator.maxTou
 
 // WASD walk, QE turn, held R/F raise/lower the commanded base height; on a
 // touch screen also two on-screen sticks (TouchSticks), left to walk and
-// right to turn.
+// right to turn; and a gamepad through its bindings (gamepad.js): walk, turn,
+// height, and two grippers closed part way, as with a WebXR trigger
+// (TeleopPanel.padGrippers).
 export class KeyboardInput {
   constructor() {
     this.held = new Set();
     this.stick = [0, 0, 0];  // [forward, left, turn left], each in [-1, 1]
+    this.pad = [0, 0, 0];    // the same from a gamepad (poll())
+    this.padHeight = 0;      // -1, 0, 1: its height actions held
+    this.padGrippers = [0, 0];  // its grippers 1 and 2, 0 (let go) .. 1 (pressed)
+    this.padMap = new GamepadMap();
+    this.learning = null;    // {action, before, done}: the next input pressed binds `action`
     this.sticks = TOUCH ? new TouchSticks(this.stick) : null;
     const onKey = (e) => {
       const k = e.key.toLowerCase();
@@ -71,16 +79,53 @@ export class KeyboardInput {
     this.enabled = false;  // only while a robot is being driven
   }
 
+  // Reads the first connected gamepad, every frame (the Gamepad API has no
+  // events for sticks and buttons). Returns whether it walks or turns.
+  poll() {
+    const gp = gamepad(), map = this.padMap;
+    this.pad.fill(0);
+    this.padHeight = 0;
+    this.padGrippers.fill(0);
+    if (!gp) return false;
+    if (this.learning) {  // binding an action: nothing drives meanwhile
+      const b = map.detect(gp, this.learning.before);
+      if (b) { map.set(this.learning.action, b); this.learning.done(); this.learning = null; }
+      return false;
+    }
+    const clamp = (v, lo) => Math.min(1, Math.max(lo, v));
+    for (const [i, a] of ['forward', 'left', 'turn'].entries()) this.pad[i] = clamp(map.value(gp, a), -1);
+    this.padHeight = (map.value(gp, 'height_up') > 0.5) - (map.value(gp, 'height_down') > 0.5);
+    for (const [i, a] of ['gripper1', 'gripper2'].entries()) this.padGrippers[i] = clamp(map.value(gp, a), 0);
+    return this.pad.some((v) => v);
+  }
+
+  // Binds `action` to the next input pressed or pushed on the gamepad; calls
+  // done() then.
+  learn(action, done) {
+    this.learning = { action, before: GamepadMap.snapshot(gamepad()), done };
+  }
+
   // {cmd: [vx, vy, yaw rate], dh: height change} for the last `dt` seconds,
   // with the key speeds of `drive` ({forward, back, side, turn}).
   read(dt, drive) {
     const cmd = [0, 0, 0];
     for (const k of this.held) if (DRIVE[k]) cmd[DRIVE[k][0]] += DRIVE[k][1] * drive[DRIVE[k][2]];
-    const [f, l, t] = this.stick;
-    cmd[0] += f * (f > 0 ? drive.forward : drive.back);
-    cmd[1] += l * drive.side;
-    cmd[2] += t * drive.turn;
-    return { cmd, dh: (this.held.has('r') - this.held.has('f')) * HEIGHT_RATE * dt };
+    for (const [f, l, t] of [this.stick, this.pad]) {
+      cmd[0] += f * (f > 0 ? drive.forward : drive.back);
+      cmd[1] += l * drive.side;
+      cmd[2] += t * drive.turn;
+    }
+    return { cmd, dh: this.height() * HEIGHT_RATE * dt };
+  }
+
+  // Whether a drive key (WASD, QE) is held.
+  driving() {
+    return [...this.held].some((k) => DRIVE[k]);
+  }
+
+  // -1, 0, 1: the commanded height going down / staying / going up (R/F, d-pad).
+  height() {
+    return Math.sign((this.held.has('r') - this.held.has('f')) + this.padHeight);
   }
 }
 
@@ -137,7 +182,7 @@ class TouchSticks {
 
 const FOLDED = 'mujoco-filament/teleop-folded';
 const INPUT = 'mujoco-filament/teleop-input';
-const INPUTS = [['keyboard', 'Keyboard'], ['goal', 'Goal marker']];
+const INPUTS = [['keyboard', 'Keyboard'], ['goal', 'Goal marker'], ['gamepad', 'Gamepad']];
 const GOAL_TURN = Math.PI / 12;  // per wheel notch or Q/E press while dragging a goal (like assets.js)
 const GOAL_GRAB = 0.35;          // m: grab radius around the goal marker's center
 const GOAL_GAP_MS = 50;          // network mode: a dragged goal goes to the server at most this often
@@ -176,7 +221,7 @@ export class TeleopPanel {
     this.dragging = null;    // marker.js drag state + {index, chain} while a marker is dragged, or {goal} for the goal marker
     this.hover = null;       // {index, part} of the marker under the pointer, or {goal: true}
     this.held = new Map();   // chain index -> marker part, held by a WebXR controller (xr.js)
-    try { this.mode = localStorage.getItem(INPUT) === 'keyboard' ? 'keyboard' : 'goal'; } catch { this.mode = 'goal'; }
+    try { this.mode = ['keyboard', 'gamepad'].find((m) => m === localStorage.getItem(INPUT)) ?? 'goal'; } catch { this.mode = 'goal'; }
     this.goalReadout = null;
     // While the goal marker is dragged, the wheel and Q/E turn it and Esc puts
     // it back (capture phase: before the camera zoom and the drive keys).
@@ -195,14 +240,49 @@ export class TeleopPanel {
       e.preventDefault();
       e.stopImmediatePropagation();
     }, { capture: true });
-    // G opens or closes the gripper of the chain dragged last.
+    // G opens or closes the gripper of the chain dragged last (a gamepad
+    // sets them part way, padGrippers()).
     window.addEventListener('keydown', (e) => {
       if (e.key.toLowerCase() !== 'g' || e.ctrlKey || e.metaKey || e.altKey || isTyping(e.target)) return;
-      const ik = this.active?.use?.ik && this.active.ik;
-      const chain = ik?.enabled && ik.chains[ik.focus];
-      if (chain) ik.toggleGripper(chain, this.app.data);
+      this.toggleGripper();
     });
+    // The panel's hints mention a gamepad while one is connected.
+    window.addEventListener('gamepadconnected', () => this.render());
+    window.addEventListener('gamepaddisconnected', () => this.render());
     this.last = performance.now();
+  }
+
+  // The IK of the driven robot and its chain dragged last, if it has one.
+  focusChain() {
+    const ik = this.active?.use?.ik && this.active.ik;
+    const chain = ik?.enabled && ik.chains[ik.focus];
+    return chain ? { ik, chain } : null;
+  }
+
+  toggleGripper() {
+    const f = this.focusChain();
+    if (f) f.ik.toggleGripper(f.chain, this.app.data);
+  }
+
+  // A gamepad's grippers 1 and 2 (by default its triggers), like a WebXR
+  // controller's trigger: once touched, the gripper of the driven robot's
+  // first or second IK chain closes as far as it is pressed; let go, it
+  // opens, and the input leaves it alone until touched again (so G still
+  // works).
+  padGrippers() {
+    const ik = this.active?.use?.ik && this.active.ik;
+    this.padSqueeze ??= [null, null];
+    this.input.padGrippers.forEach((t, i) => {
+      if (t > 0.05) this.padSqueeze[i] ??= { amount: -1 };
+      const s = this.padSqueeze[i];
+      if (!s) return;
+      const amount = t > 0.05 ? t : 0, chain = ik?.enabled && ik.chains[i];
+      if (chain?.gripper?.length && Math.abs(amount - s.amount) > 0.02) {
+        s.amount = amount;
+        ik.setGripper(chain, this.app.data, amount);
+      }
+      if (amount === 0) this.padSqueeze[i] = null;
+    });
   }
 
   // Every frame, from App.frame (the window's animation loop, or the WebXR
@@ -489,19 +569,27 @@ export class TeleopPanel {
       rosBox, el('span', { textContent: 'ROS' })));
     this.body.append(el('div', { className: 'field' }, el('span', { textContent: 'Controllers' }), chips));
     const locos = locomotion(r);
-    if (locos.length) {
-      field('Input', this.select(INPUTS, this.mode, (v) => {
+    // Input: for walking robots keyboard, goal marker or gamepad; for the rest
+    // with IK chains the gamepad (its grippers).
+    if (locos.length || (r.use.ik && r.ik?.chains.length)) {
+      const mode = locos.length ? this.mode : 'gamepad';
+      field('Input', this.select(locos.length ? INPUTS : INPUTS.filter(([m]) => m === 'gamepad'), mode, (v) => {
         this.mode = v;
         try { localStorage.setItem(INPUT, v); } catch { /* no storage */ }
         this.setGoal(r, null);  // a new goal starts where the robot is
         this.render();
       }));
       const keys = el('div', { className: 'hint' });
-      if (this.mode === 'goal') {
+      if (mode === 'gamepad') {
+        this.goalReadout = null;
+        this.renderGamepad(locos.length > 0);
+      } else if (mode === 'goal') {
         keys.innerHTML = TOUCH
           ? 'Drag the ring on the floor to where the robot should go; a second finger twisted around it turns it (the arrow is the heading).'
           : 'Drag the ring on the floor to where the robot should go; while dragging, the mouse wheel or '
-            + '<kbd>Q</kbd><kbd>E</kbd> turn it (the arrow is the heading), <kbd>Esc</kbd> puts it back.';
+            + '<kbd>Q</kbd><kbd>E</kbd> turn it (the arrow is the heading), <kbd>Esc</kbd> puts it back. '
+            + '<kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> <kbd>Q</kbd><kbd>E</kbd> drive it directly, dropping the goal'
+            + (locos.some((c) => 'height' in c) ? '; hold <kbd>R</kbd><kbd>F</kbd> for its height.' : '.');
         this.goalReadout = el('span', { className: 'note' });
         this.body.append(keys, el('div', { className: 'bar' },
           this.button('Stop', 'Forget the goal: the robot stops where it is', () => this.setGoal(r, null)), this.goalReadout));
@@ -512,8 +600,11 @@ export class TeleopPanel {
           + (TOUCH ? ' · or the sticks at the bottom: left walks, right turns' : '');
         this.body.append(keys);
       }
-      this.readout = el('div', { className: 'readout' });
-      this.body.append(this.readout);
+      if (mode !== 'gamepad' && gamepad()) {
+        this.body.append(el('div', { className: 'note', textContent: 'The gamepad drives too (its buttons: Input → Gamepad); a pushed stick takes over from the goal.' }));
+      }
+      this.readout = locos.length ? el('div', { className: 'readout' }) : null;
+      if (this.readout) this.body.append(this.readout);
     }
     if (r.use.policy || r.errors?.policy) this.renderPolicy(r);
     if (r.use.base && r.base) this.renderBase(r.base);
@@ -654,6 +745,41 @@ export class TeleopPanel {
     return inp;
   }
 
+  // The gamepad's bindings (gamepad.js): per action a select and Set, which
+  // binds the next input pressed; the dead zone; back to the defaults
+  // (gamepad_defaults.json); Export copies them as JSON for that file.
+  renderGamepad(walks) {
+    const map = this.input.padMap, gp = gamepad();
+    this.body.append(el('div', { className: 'hint', textContent: gp
+      ? `${gp.id}.${walks ? ' The keyboard drives too.' : ''}`
+      : `No gamepad: connect one and press a button on it (browsers report it only then).${walks ? ' The keyboard drives meanwhile.' : ''}` }));
+    for (const [action, label, title] of ACTIONS) {
+      if (!walks && !action.startsWith('gripper')) continue;
+      const learning = this.input.learning?.action === action;
+      const set = this.button(learning ? 'Press…' : 'Set', 'Bind the next button pressed or stick pushed on the gamepad', () => {
+        this.input.learn(action, () => this.render());
+        this.render();
+      });
+      const row = el('div', { className: 'field', title }, el('span', { textContent: label }),
+        el('div', { className: 'ctl' }, this.select(BINDINGS, map.map[action] ?? '', (v) => { map.set(action, v); this.render(); }), set));
+      this.body.append(row);
+    }
+    if (walks) {
+      this.body.append(el('label', { className: 'field' }, el('span', { textContent: 'Dead zone' }),
+        this.num(map.map.deadzone ?? 0, 0.05, (v) => map.set('deadzone', Math.min(0.9, Math.max(0, v))), 'sticks within this of center count as let go')));
+    }
+    const note = el('span', { className: 'note', textContent: map.saved ? 'saved in this browser' : 'defaults' });
+    this.body.append(el('div', { className: 'bar' },
+      this.button('Defaults', 'Back to the built-in bindings (gamepad_defaults.json)', () => { map.reset(); this.render(); }),
+      this.button('Export', 'Copy the bindings as JSON (for gamepad_defaults.json)', () => {
+        const json = JSON.stringify(map.toJSON(), null, 2);
+        navigator.clipboard?.writeText(json).catch(() => {});
+        console.log(json);
+        note.textContent = 'copied (also in the console)';
+      }),
+      note));
+  }
+
   // The mobile-base setup of the driven robot (base.js).
   renderBase(c) {
     const cfg = c.config ?? {};
@@ -764,7 +890,10 @@ export class TeleopPanel {
     const hint = el('div', { className: 'hint' });
     hint.innerHTML = ik.chains.length
       ? 'Drag a marker: arrows move along an axis, rings turn about it, the ball moves in the view plane · '
-        + '<kbd>G</kbd> or a right-click (on a marker, or while dragging it) opens/closes its gripper. Pick bodies for tip/root by double-clicking them, then ◎.'
+        + '<kbd>G</kbd> or a right-click (on a marker, or while dragging it) opens/closes its gripper'
+        + (gamepad() ? `; the gamepad's ${['gripper1', 'gripper2'].map((a) => bindingName(this.input.padMap.map[a]) || 'none').join(' / ')}`
+          + ' close the first / second chain\'s as far as pressed (Input → Gamepad)' : '')
+        + '. Pick bodies for tip/root by double-clicking them, then ◎.'
       : 'No IK chains found in this robot: double-click the body to move (e.g. a hand), then + Chain.';
     box.append(hint);
 
@@ -927,13 +1056,17 @@ export class TeleopPanel {
   tick(dt) {
     const robots = this.controllable();
     const locos = locomotion(this.active);
-    // In WebXR the left stick drives while pushed (xr.js), and takes over
-    // from the driven robot's goal, which is dropped.
-    const xrStick = this.input.xr && this.input.stick.some((v) => v);
-    if (xrStick && this.active?.goal && !this.dragging?.goal) this.setGoal(this.active, null);
-    const keyboard = this.mode === 'keyboard' || xrStick;
-    this.input.enabled = locos.length > 0 && keyboard;
-    this.input.sticks?.show(this.input.enabled);
+    // In goal-marker mode too, the drive keys, a gamepad's sticks and in
+    // WebXR the left stick (xr.js) drive while held or pushed, taking over
+    // from the driven robot's goal, which is dropped. The height (R/F, d-pad)
+    // and the gamepad's trigger work in either mode.
+    const pad = this.input.poll();
+    this.input.enabled = locos.length > 0;  // keys count whenever a robot is driven
+    const takeover = (this.input.xr && this.input.stick.some((v) => v)) || pad || this.input.driving();
+    if (takeover && this.active?.goal && !this.dragging?.goal) this.setGoal(this.active, null);
+    this.padGrippers();
+    const keyboard = this.mode !== 'goal' || takeover;  // keyboard or gamepad: driven directly
+    this.input.sticks?.show(this.input.enabled && this.mode === 'keyboard');
     for (const r of robots) {
       const mine = r === this.active ? locos : [];
       // A goal is followed until reached or cleared, also while another robot is
@@ -957,6 +1090,12 @@ export class TeleopPanel {
         const { cmd, dh } = this.input.read(dt, c.drive);
         c.cmd = cmd;
         if ('height' in c) c.height = Math.min(HEIGHT_RANGE[1], Math.max(HEIGHT_RANGE[0], c.height + dh));
+      }
+    }
+    // The height also while following a goal (in keyboard mode read() has it).
+    if (!keyboard && this.input.height()) {
+      for (const c of locos) {
+        if ('height' in c) c.height = Math.min(HEIGHT_RANGE[1], Math.max(HEIGHT_RANGE[0], c.height + this.input.height() * HEIGHT_RATE * dt));
       }
     }
     if (this.goalReadout) {

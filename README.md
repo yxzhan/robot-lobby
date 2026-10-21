@@ -370,6 +370,19 @@ sideways, and at the point it turns to the goal heading (6 cm, 3.5°, with
 hysteresis). A robot keeps going to its goal while another one is driven;
 Reaching the goal lets it go (the readout says *arrived*; pushed or carried
 off afterwards, the robot stays put). **Stop** forgets the goal, and so does Reset or driving it with the keys.
+
+A **gamepad** (the Gamepad API's standard mapping, Xbox / PlayStation
+layout; browsers report one once a button on it is pressed) drives too, in
+any Input mode: its sticks walk and turn and take over from a goal like the
+keys, which also do so in goal-marker mode. Two of its inputs close the
+grippers of the driven robot's first and second IK chain as far as they
+are pressed, like a WebXR trigger (let go: open). Its bindings are
+`public/json/gamepad_defaults.json` (by default left stick walk, right
+stick turn, d-pad up/down height, LT/RT the grippers); **Input → Gamepad**
+(the only choice for a robot that does not walk but has IK chains) shows
+them per action, **Set** binds the next button pressed or stick pushed,
+changes are kept in the browser, **Defaults** goes back to the file and
+**Export** copies them as JSON for it.
 In network mode a robot has one goal for everyone: the server follows it
 (`server/goal.py`), every client shows it, and the last one set wins.
 
