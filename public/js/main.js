@@ -691,20 +691,21 @@ class App {
     this.floorTextures = new Map();  // style -> texture, made once
     this.setFloor(loadFloor());
 
-    // Perturbation markers: the selection point, the drag target and a rope
-    // between them. Hidden (scaled to zero) when unused.
-    const marker = (rgb, geo) => {
-      const mi = this.matLit.createInstance();
-      mi.setColor4Parameter('baseColor', Filament.RgbaType.sRGB, [...rgb, 1]);
+    // Perturbation markers: the selection point (half transparent, so the
+    // object under it shows), the drag target and a rope between them.
+    // Hidden (scaled to zero) when unused.
+    const marker = (rgb, geo, alpha = 1) => {
+      const mi = (alpha < 1 ? this.matTransparent : this.matLit).createInstance();
+      mi.setColor4Parameter('baseColor', Filament.RgbaType.sRGB, [...rgb, alpha]);
       mi.setFloatParameter('roughness', 0.4);
       mi.setFloatParameter('metallic', 0.0);
-      const e = makeEntity(engine, geo, mi, true, OVERLAY);
+      const e = makeEntity(engine, geo, mi, alpha === 1, OVERLAY);  // a see-through one casts no shadow
       this.scene.addEntity(e);
       return e;
     };
     const sphere = makeGeometry(engine, roundShape(1, 1, 1));
     this.markers = {
-      sel: marker([1, 0.45, 0.1], sphere),
+      sel: marker([1, 0.45, 0.1], sphere, 0.8),
       target: marker([1, 0.8, 0.2], sphere),
       rope: marker([1, 0.65, 0.15], makeGeometry(engine, cylinder(1, 0.5))),
     };

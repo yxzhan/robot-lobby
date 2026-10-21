@@ -8,13 +8,15 @@ scripts/vendor.mjs). Environments, in environments/custom:
         south, exit in the north (green and red pads); a recursive
         backtracker with a fixed seed, so exactly one path between any two
         cells
-  microduck_soccer
+  microkduck_football
         a mini football pitch for Microduck (about 20 cm tall, walking
         at up to 0.4 m/s): 4 x 2.6 m, about 1:26 of a real one, with
         0.3 m of run-off inside 12 cm boards, 0.8 x 0.3 m goals with
         nets (geoms goal_west_*, goal_east_*: x < 0 and x > 0), and an
-        8 cm, 45 g ball on the centre spot (body "ball", free joint,
-        rolling friction so it comes to rest). The lines and mowing
+        8 cm, 45 g ball on the centre spot (body "ball", free joint):
+        white with 12 black spots where a football has its pentagons,
+        bouncy (restitution about 0.6 at a 2 ms timestep), with rolling
+        friction so it comes to rest. The lines and mowing
         stripes are a texture (field.png, written here too).
 
 All are static geoms centred on the origin, on the floor (z = 0), but for
@@ -227,10 +229,15 @@ def soccer():
   LINE = 0.025           # line width
   GOAL_W, GOAL_H, GOAL_D = 0.8, 0.3, 0.25
   POST = 0.015           # post and bar radius
+  NET = 0.01             # half thickness of the net slabs, outside the goal
   BOARD_H, BOARD_T = 0.12, 0.02
   BALL_R, BALL_M = 0.04, 0.045
+  # The ball's contacts: a softer, lightly damped spring than MuJoCo's
+  # (0.02 s, 1) makes it bounce; its priority makes that win over the turf's
+  # and the boards'. 0.01 s bounced more but blew up at a 5 ms timestep.
+  BALL_SOLREF = (0.03, 0.15)
   X, Y = L / 2 + RUN, W / 2 + RUN  # half extents of the grass
-  name = 'microduck_soccer'
+  name = 'microkduck_football'
 
   # The texture: the whole grass, one tile over the field geom. The viewer
   # maps a box's top face planarly from its centre (u = x / (2 X), v = y /
@@ -279,11 +286,13 @@ def soccer():
       geoms.append(f'<geom name="{g}_post_{k}" class="post" fromto="{f(x0, y, 0, x0, y, GOAL_H)}"/>')
       geoms.append(f'<geom name="{g}_back_{k}" class="post" fromto="{f(x1, y, 0, x1, y, GOAL_H)}"/>')
       geoms.append(f'<geom name="{g}_top_{k}" class="post" fromto="{f(x0, y, GOAL_H, x1, y, GOAL_H)}"/>')
-      geoms.append(f'<geom name="{g}_net_{k}" class="net" size="{f(abs(x1 - x0) / 2, 0.003, GOAL_H / 2)}" pos="{f((x0 + x1) / 2, y, GOAL_H / 2)}"/>')
+      yn = y + (NET if y > 0 else -NET)
+      geoms.append(f'<geom name="{g}_net_{k}" class="net" size="{f(abs(x1 - x0) / 2, NET, GOAL_H / 2)}" pos="{f((x0 + x1) / 2, yn, GOAL_H / 2)}"/>')
+    geoms.append(f'<geom name="{g}_floor" class="goal_floor" size="{f(GOAL_D / 2, yo, 0.005)}" pos="{f(s * (L / 2 + GOAL_D / 2), 0, -0.004)}"/>')
     geoms.append(f'<geom name="{g}_bar" class="post" fromto="{f(x0, -yo, GOAL_H, x0, yo, GOAL_H)}"/>')
     geoms.append(f'<geom name="{g}_back_bar" class="post" fromto="{f(x1, -yo, GOAL_H, x1, yo, GOAL_H)}"/>')
-    geoms.append(f'<geom name="{g}_net_back" class="net" size="{f(0.003, yo, GOAL_H / 2)}" pos="{f(x1 + s * 0.003, 0, GOAL_H / 2)}"/>')
-    geoms.append(f'<geom name="{g}_net_top" class="net" size="{f(abs(x1 - x0) / 2, yo, 0.003)}" pos="{f((x0 + x1) / 2, 0, GOAL_H + 0.003)}"/>')
+    geoms.append(f'<geom name="{g}_net_back" class="net" size="{f(NET, yo + 2 * NET, GOAL_H / 2)}" pos="{f(x1 + s * NET, 0, GOAL_H / 2)}"/>')
+    geoms.append(f'<geom name="{g}_net_top" class="net" size="{f(abs(x1 - x0) / 2, yo + 2 * NET, NET)}" pos="{f((x0 + x1) / 2, 0, GOAL_H + NET)}"/>')
   t = BOARD_T / 2
   boards = [
       ('board_south', (X + BOARD_T, t, BOARD_H / 2), (0, -Y - t, BOARD_H / 2)),
@@ -293,9 +302,24 @@ def soccer():
   ]
   geoms += [f'<geom name="{n}" class="board" size="{f(*sz)}" pos="{f(*p)}"/>' for n, sz, p in boards]
   body = '\n      '.join(geoms)
+  # Black spots at the 12 vertices of an icosahedron (a football's
+  # pentagons): visual-only ellipsoids, flattened so their top is curved like
+  # the ball, poking out 0.4 mm and showing as patches of about 17 degrees
+  # (the viewer's planar texture mapping would smear a patterned sphere).
+  phi = (1 + 5 ** 0.5) / 2
+  verts = [(0, a, b * phi) for a in (-1, 1) for b in (-1, 1)]
+  verts = verts + [(v[1], v[2], v[0]) for v in verts] + [(v[2], v[0], v[1]) for v in verts]
+  sa = 0.014                                      # spot half width
+  sb = sa * sa / BALL_R                           # ellipsoid's top curvature = the ball's
+  sc = BALL_R + 0.0004 - sb                       # its centre's distance from the ball's
+  spots = []
+  for i, v in enumerate(verts):
+    n = [x / math.hypot(*v) for x in v]
+    spots.append(f'<geom name="ball_spot{i}" class="spot" pos="{f(*(sc * x for x in n))}" zaxis="{f(*n)}"/>')
+  spots = '\n      '.join(spots)
   write(name, f"""<!-- A mini football pitch for Microduck (scripts/basic_scenes.py): {L:g} x {W:g} m inside the
      lines, {RUN:g} m run-off, {BOARD_H * 100:.0f} cm boards; {GOAL_W * 100:.0f} x {GOAL_H * 100:.0f} cm goals at x = -/+{L / 2:g} (west, east)
-     with nets; an {BALL_R * 200:.0f} cm, {BALL_M * 1000:.0f} g ball on the centre spot. Lines and stripes: field.png. -->
+     with nets; an {BALL_R * 200:.0f} cm, {BALL_M * 1000:.0f} g bouncy black-and-white ball on the centre spot. Lines and stripes: field.png. -->
 <mujoco model="{name}">
   <asset>
     <texture type="2d" name="field" file="field.png"/>
@@ -303,12 +327,24 @@ def soccer():
     <material name="post" rgba="0.95 0.95 0.95 1" roughness="0.4"/>
     <material name="net" rgba="0.95 0.95 0.95 0.3" roughness="0.9"/>
     <material name="board" rgba="0.16 0.22 0.36 1" roughness="0.6"/>
-    <material name="ball" rgba="1 0.45 0.05 1" roughness="0.5"/>
+    <material name="ball" rgba="0.96 0.96 0.96 1" roughness="0.45"/>
+    <material name="spot" rgba="0.05 0.05 0.05 1" roughness="0.45"/>
   </asset>
   <default>
     <default class="post"><geom type="capsule" size="{f(POST)}" material="post"/></default>
-    <default class="net"><geom type="box" material="net"/></default>
+    <!-- Contact parameters by priority: the nets' and goal floors' over the ball's, the ball's over
+         the turf's. Nets: 2 cm thick, outside the goal (no tunnelling at a 5 ms step), stiff and damped, little
+         friction. Goal floors: invisible, flush with the turf, no bounce and strong rolling friction,
+         so a ball in the goal stays in (it would come back out spinning, as a real slack net does not
+         let it). -->
+    <default class="net"><geom type="box" material="net" priority="2" solref="0.01 2" friction="0.3 0.005 0.0001"/></default>
+    <default class="goal_floor">
+      <geom type="box" group="3" rgba="0 0 0 0" priority="2" condim="6" solref="0.02 1" friction="1 0.05 0.03"/>
+    </default>
     <default class="board"><geom type="box" material="board"/></default>
+    <default class="spot">
+      <geom type="ellipsoid" size="{f(sa, sa, sb)}" material="spot" contype="0" conaffinity="0" density="0"/>
+    </default>
   </default>
   <worldbody>
     <geom name="field" type="box" material="field" size="{f(X, Y, 0.005)}" pos="0 0 -0.004"/>
@@ -317,9 +353,10 @@ def soccer():
     </body>
     <body name="ball" pos="{f(0, 0, BALL_R + 0.002)}">
       <freejoint name="ball"/>
-      <!-- a hollow plastic ball: shell inertia; rolling friction so it stops -->
+      <!-- a hollow plastic ball: shell inertia; bouncy contacts; rolling friction so it stops -->
       <geom name="ball" type="sphere" size="{f(BALL_R)}" mass="{f(BALL_M)}" shellinertia="true"
-            material="ball" condim="6" friction="0.8 0.005 0.0015"/>
+            material="ball" condim="6" friction="0.8 0.005 0.0015" solref="{f(*BALL_SOLREF)}" priority="1"/>
+      {spots}
     </body>
   </worldbody>
 </mujoco>
@@ -330,7 +367,7 @@ SCENES = {
     'ramp': lambda a: ramp(),
     'maze': lambda a: maze(a.seed),
     'objects': lambda a: objects(),
-    'microduck_soccer': lambda a: soccer(),
+    'microkduck_football': lambda a: soccer(),
 }
 
 
