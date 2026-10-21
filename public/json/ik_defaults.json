@@ -21,7 +21,13 @@
           -0.05
         ],
         "locked": [],
-        "gripper": "arm_f1x"
+        "gripper": [
+          {
+            "actuator": "arm_f1x",
+            "open": -1.57,
+            "closed": 0
+          }
+        ]
       }
     ],
     "auto": true
