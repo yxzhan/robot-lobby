@@ -259,6 +259,25 @@ function geomUVs(model, g, shape, matid) {
   return uv;
 }
 
+// A geom's PBR surface from its MuJoCo material (`matid`, -1: none):
+// metallic and roughness as the material sets them (MuJoCo 3.2+; -1 when
+// unset), else roughness from the classic attributes: shininess (0..1,
+// 0.5 by default: 0.45, as geoms without a material) makes it smoother,
+// a weak specular rougher, reflectance (mirror-like) smoother still.
+// Fields a model lacks (an older server's render data) count as unset.
+function surface(model, matid) {
+  const at = (field, dflt) => (matid >= 0 && model[field]?.length > matid ? model[field][matid] : dflt);
+  const metallic = at('mat_metallic', -1), rough = at('mat_roughness', -1);
+  let roughness = rough;
+  if (rough < 0) {
+    const shininess = at('mat_shininess', 0.5), specular = at('mat_specular', 0.5), reflectance = at('mat_reflectance', 0);
+    roughness = 0.85 - 0.8 * shininess;
+    roughness += (1 - roughness) * Math.max(0, 1 - specular / 0.5);  // no highlight: matte
+    roughness += (0.05 - roughness) * Math.min(1, reflectance);
+  }
+  return { roughness: Math.min(1, Math.max(0.03, roughness)), metallic: metallic < 0 ? 0 : Math.min(1, metallic) };
+}
+
 // RGBA8 pixels (row 0 = v 0) -> Filament sRGB texture with mipmaps.
 function uploadTexture(engine, w, h, rgba) {
   const levels = Math.floor(Math.log2(Math.max(w, h))) + 1;
@@ -887,8 +906,9 @@ class App {
         mi = (transparent ? this.matTransparent : this.matLit).createInstance();
       }
       mi.setColor4Parameter('baseColor', Filament.RgbaType.sRGB, [rgba[0], rgba[1], rgba[2], transparent ? rgba[3] : 1]);
-      mi.setFloatParameter('roughness', 0.45);
-      mi.setFloatParameter('metallic', 0.0);
+      const { roughness, metallic } = surface(model, matid);
+      mi.setFloatParameter('roughness', roughness);
+      mi.setFloatParameter('metallic', metallic);
       parts.push({
         ...makeGeometry(this.engine, shape, uv), mi, transparent,
         body: model.geom_bodyid[g],

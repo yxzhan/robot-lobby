@@ -89,7 +89,8 @@ def build(spec, model, rel, public):
 
   # Materials (all; few) and textures: pixels only for 2D textures MuJoCo
   # made itself, image files go by path.
-  for f in ('mat_rgba', 'mat_texid', 'mat_texrepeat', 'mat_texuniform'):
+  for f in ('mat_rgba', 'mat_texid', 'mat_texrepeat', 'mat_texuniform',
+            'mat_metallic', 'mat_roughness', 'mat_shininess', 'mat_specular', 'mat_reflectance'):
     arrays[f] = getattr(m, f)
   images = image_textures(spec, rel, public) if len(spec.textures) == m.ntex else {}
   data, tex_adr = [], []

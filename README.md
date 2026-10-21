@@ -666,6 +666,14 @@ flipped/grid textures still come from `tex_data`. Meshes use their `mesh_texcoor
 projection per face. `texrepeat`/`texuniform` are baked into the UVs. Planes
 without any material get the built-in checker; otherwise the material color.
 
+Surfaces are PBR (Filament's lit model): a material's `metallic` and
+`roughness` (MuJoCo 3.2+) are used as they are; a material without them gets
+a roughness from its classic attributes, `shininess` (0.5 by default: 0.45)
+smoother, a `specular` under 0.5 more matte, `reflectance` toward polished,
+and is not metallic. Texture layers other than `rgb` (orm, normal, …) are not
+drawn yet. In network mode the server sends these fields with the render
+data (`server/render_asset.py`).
+
 GPU memory is what limits a scene, and textures take most of it (RGBA8 plus
 mipmaps: a 2048² image is 21 MB). So images are scaled down on their
 longer side (to 1024 px by default: the Render panel's Textures), one
