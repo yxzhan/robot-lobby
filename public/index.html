@@ -270,8 +270,12 @@
       #ui { top: 8px; left: 8px; right: 8px; min-width: 0; gap: 4px; padding: 5px 6px; }
       #ui button { padding: 5px 9px; }
       #status { font-size: 11px; color: #bbb; }
-      #views { top: 72px; left: 8px; right: auto; }
-      #views button { padding: 5px 8px; }
+      /* The toggles scroll sideways when they do not fit (no scrollbar: the
+         cut-off last one shows there is more). */
+      #views { top: 72px; left: 8px; right: auto; max-width: calc(100% - 16px); box-sizing: border-box;
+               overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; }
+      #views::-webkit-scrollbar { display: none; }
+      #views button { flex: none; padding: 5px 8px; }
       #assets, #side { top: 112px; left: 8px; right: 8px; width: auto; max-height: calc(100% - 112px - 12px); }
       #assets { right: auto; width: min(300px, calc(100% - 16px)); }  /* as on desktop: two columns */
       #assets input[type=search], #teleop select, #world select, #world input, #render select, #teleop input[type=number], #teleop .ros input[type=text] { font-size: 16px; }  /* no zoom on focus (iOS) */
