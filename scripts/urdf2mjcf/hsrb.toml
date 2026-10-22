@@ -7,7 +7,6 @@ name = "hsrb"
 out = "robots/digital_twin/hsrb"
 source = "https://github.com/code-iai/hsr_description/tree/ros2-jazzy"
 package = "hsr_description"
-package_dir = ""
 xacro = "robots/hsrb4s.urdf.xacro"
 
 title = "HSR"

@@ -11,9 +11,11 @@ name = "pr2"                         # the model (and file) name
 out = "robots/digital_twin/pr2"      # under mjcf_assets/
 source = "https://github.com/PR2/pr2_common"
 package = "pr2_description"          # the ROS package: $(find ...), package://...
-package_dir = "pr2_description"      # where it is in the clone ("" for the root)
 xacro = "robots/pr2.urdf.xacro"      # in the package
-# xacro_args = { KINECT1 = "false" }
+# xacro_args = { KINECT1 = "false" }  # $(find <package>) works in values
+# root = "base_footprint"            # the link the model starts from (the URDF's root by default)
+# root_pos = [0, 0, 0.16]            # where that link is above the spawn point
+# root_rpy = [0, 0, 3.14159]         # and how it is turned (rad), e.g. to face the model's +x
 
 title = "PR2"
 readme = """
@@ -46,7 +48,7 @@ no_collision = ['_caster_']
 weld = ['_caster_']                  # made fixed (regexes)
 
 [base]
-kind = "planar"                      # x / y / yaw servos on the root; else a free joint
+kind = "planar"                      # x / y / yaw servos on the root; "fixed": none; default "free"
 kp_xy = 100000
 kp_yaw = 20000
 damping = [100, 50]                  # x / y, yaw
@@ -91,6 +93,15 @@ wide_stereo_l_stereo_camera_sensor = "wide_stereo"
 narrow_stereo_l_stereo_camera_sensor = "narrow_stereo"
 l_forearm_cam_sensor = "l_forearm_cam"
 r_forearm_cam_sensor = "r_forearm_cam"
+
+# More cameras: on a link, looking along its +x (+z up), or along +z for a ROS
+# optical frame (optical = true); fovy in degrees.
+# [[camera]]
+# name = "head"
+# link = "head_camera_link"
+# fovy = 45
+# width = 640
+# height = 480
 
 # TCP sites for the viewer's IK: link -> site, put on its parent at the link's origin.
 [tcp]

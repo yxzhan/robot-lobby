@@ -1,0 +1,72 @@
+# IAI's Donbot (a UR5 with a WSG 50 gripper on an omnidirectional base) for
+# scripts/urdf2mjcf.py (keys: see pr2.toml):
+#
+#   git clone -b ros-jazzy https://github.com/code-iai/iai_robots
+#   # iai_adapters_description, iai_wsg_50_description: the split_boxy_urdf branch
+#   python3 scripts/urdf2mjcf.py scripts/urdf2mjcf/donbot.toml iai_robots <split_boxy_urdf packages>
+
+name = "donbot"
+out = "robots/digital_twin/donbot"
+source = "https://github.com/code-iai/iai_robots/tree/ros-jazzy"
+package = "iai_donbot_description"
+xacro = "robots/iai_donbot.urdf.xacro"
+# The URDF's odom x / y / z joints become the viewer's planar base on base_link.
+root = "base_link"
+root_pos = [0, 0, 0.1616]   # base_footprint, on the floor, is this far below
+
+title = "Donbot"
+readme = """
+IAI's Donbot: a UR5 with a Weiss WSG 50 gripper and a wrist camera on an
+omnidirectional base. The base drives as a planar base (x / y / yaw servos on
+base_link, in place of the URDF's odom joints; its wheels are welded); every
+arm joint has a position servo and the arm is gravity compensated. The
+gripper is its gripper_joint (actuator `gripper`), the left finger follows it
+(the URDF's mimic).
+"""
+license = """
+From [iai_robots](https://github.com/code-iai/iai_robots) (`iai_donbot_description`, GPLv3+), with
+meshes from its iai_ur_description, iai_wsg_50_description, iai_adapters_description,
+iai_kms_40_description, iai_boxy_base_2 and iai_table_robot_description.
+"""
+
+gravcomp = ["ur5_base_link"]
+
+[links]
+no_collision = ['^wheel_']
+
+[joints]
+weld = ['^wheel_']
+
+[base]
+kind = "planar"
+kp_xy = 50000
+kp_yaw = 20000
+
+[[servo]]
+match = '^ur5_(shoulder_pan|shoulder_lift|elbow)_joint$'
+kp = 1000
+armature = 0.2
+[[servo]]
+match = '^ur5_wrist_[123]_joint$'
+kp = 200
+armature = 0.05
+[[servo]]
+match = '^gripper_joint$'
+name = 'gripper'
+kp = 200
+forcerange = 40
+armature = 0.01
+
+[[camera]]
+name = "wrist_camera"
+link = "rs_camera_link"
+fovy = 58
+
+[tcp]
+gripper_tool_frame = "tcp"
+
+[home]
+ur5_shoulder_lift_joint = -1.57
+ur5_elbow_joint = 1.57
+ur5_wrist_1_joint = -1.57
+gripper_joint = 0.06

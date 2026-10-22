@@ -3,8 +3,9 @@ MJCF, set up for the viewer. What is particular to a robot is in a TOML file
 next to this script (scripts/urdf2mjcf/<robot>.toml, documented in
 pr2.toml); the rest is generic:
 
-  - xacro is run with a throwaway ament index, so $(find <package>) and
-    package:// URIs resolve to the clone (ROS 2's xacro: source
+  - xacro is run with a throwaway ament index of the ROS packages found
+    under the directories given (and the installed ones), so $(find ...) and
+    package:// URIs resolve to them (ROS 2's xacro: source
     /opt/ros/<distro>/setup.bash first);
   - every URDF link becomes a body of the same name (fixed links too, so the
     TF frames match the real robot's); `drop` leaves links out with
@@ -18,10 +19,12 @@ pr2.toml); the rest is generic:
   - URDF mimic joints become joint equalities; when the joint they follow is
     left out, the first follower leads instead;
   - position servos by `servo` rules (gains, armature), a planar base (x /
-    y / yaw servos on the root, as on TidyBot) when `base.kind = "planar"`,
+    y / yaw servos on the root, as on TidyBot) when `base.kind = "planar"`
+    (a free joint by default, none when "fixed"),
     gravity compensation from the `gravcomp` bodies down;
   - MJCF cameras where the Gazebo camera / depth sensors are, looking along
-    the reference link's +x like Gazebo, with their field of view;
+    the reference link's +x like Gazebo, with their field of view, and
+    where `camera` puts them;
   - TCP sites for the viewer's IK (`tcp`);
   - contact excludes for neighbouring bodies (at most 3 joints apart) whose
     collision hulls overlap at home or in many random poses, as the
@@ -30,7 +33,7 @@ pr2.toml); the rest is generic:
 
 Needs pycollada, numpy, Pillow and mujoco.
 
-    python3 scripts/urdf2mjcf.py scripts/urdf2mjcf/pr2.toml /path/to/pr2_common
+    python3 scripts/urdf2mjcf.py scripts/urdf2mjcf/pr2.toml /path/to/pr2_common [more package dirs…]
     node scripts/vendor.mjs   # re-index
     node scripts/render_previews.mjs robots/digital_twin/pr2   # its screenshot
 """
@@ -57,9 +60,11 @@ LIBRARY = ROOT / 'mjcf_assets'
 EXCLUDE_HOPS = 3        # neighbours: bodies at most this many joints apart
 EXCLUDE_SHARE = 0.1     # excluded when their hulls touch in this share of random poses
 SAMPLES = 300
+MAX_FACES = 50000       # meshes with more triangles are simplified (max_faces)
 KEYS = {   # what a config may hold, by table ('' the top level)
-  '': ['name', 'out', 'source', 'package', 'package_dir', 'xacro', 'xacro_args', 'title', 'readme', 'license',
-       'gravcomp', 'armature', 'exclude', 'collide', 'links', 'joints', 'base', 'servo', 'cameras', 'tcp', 'colors',
+  '': ['name', 'out', 'source', 'package', 'xacro', 'root', 'root_pos', 'root_rpy', 'xacro_args', 'title', 'readme', 'license',
+       'gravcomp', 'armature', 'exclude', 'collide', 'links', 'joints', 'base', 'servo', 'cameras', 'camera', 'tcp',
+       'colors', 'max_faces',
        'home'],
   'links': ['drop', 'no_collision'],
   'joints': ['weld'],
@@ -69,7 +74,7 @@ KEYS = {   # what a config may hold, by table ('' the top level)
 
 
 def fmt(v):
-  return ' '.join(f'{x:.6g}' if abs(x) > 1e-12 else '0' for x in v)
+  return ' '.join(f'{x:.6g}' if abs(x) > 1e-15 else '0' for x in v)
 
 
 def rpy_matrix(r, p, y):
@@ -102,23 +107,66 @@ def frame(pos, rot):
   return attrs
 
 
+def read_stl(path):
+  """A binary STL's triangles (n, 3, 3), None for an ASCII one."""
+  data = path.read_bytes()
+  n = int.from_bytes(data[80:84], 'little') if len(data) >= 84 else -1
+  if len(data) != 84 + 50 * n:
+    return None
+  rec = np.frombuffer(data, np.dtype([('n', '<f4', 3), ('v', '<f4', (3, 3)), ('a', '<u2')]), n, 84)
+  return rec['v'].astype(np.float64)
+
+
+def write_stl(path, tris):
+  rec = np.zeros(len(tris), np.dtype([('n', '<f4', 3), ('v', '<f4', (3, 3)), ('a', '<u2')]))
+  rec['v'] = tris
+  n = np.cross(tris[:, 1] - tris[:, 0], tris[:, 2] - tris[:, 0])
+  rec['n'] = n / np.maximum(np.linalg.norm(n, axis=1, keepdims=True), 1e-12)
+  with open(path, 'wb') as f:
+    f.write(b'scripts/urdf2mjcf.py'.ljust(80, b' '))
+    f.write(len(tris).to_bytes(4, 'little'))
+    f.write(rec.tobytes())
+
+
 def matches(patterns, name):
   return any(re.search(p, name) for p in patterns)
 
 
-def xacro(clone, cfg):
+def find_packages(roots):
+  """ROS packages {name: dir}: those under `roots` (the shallowest of a name
+  wins), then the installed ones (AMENT_PREFIX_PATH's share/)."""
+  found = {}
+  for root in roots:
+    for xml in sorted(pathlib.Path(root).rglob('package.xml'), key=lambda p: len(p.parts)):
+      if any(part.startswith('.') or part == 'node_modules' for part in xml.parts):
+        continue
+      name = ET.parse(xml).getroot().findtext('name')
+      if name:
+        found.setdefault(name.strip(), xml.parent.resolve())
+  for prefix in os.environ.get('AMENT_PREFIX_PATH', '').split(os.pathsep):
+    share = pathlib.Path(prefix, 'share')
+    if prefix and share.is_dir():
+      for d in share.iterdir():
+        if (d / 'package.xml').exists():
+          found.setdefault(d.name, d)
+  return found
+
+
+def xacro(packages, cfg):
   """The expanded URDF, with a throwaway ament index for $(find <package>)."""
-  package, pkg_dir = cfg['package'], clone / cfg.get('package_dir', '')
   with tempfile.TemporaryDirectory() as tmp:
     index = pathlib.Path(tmp, 'share', 'ament_index', 'resource_index', 'packages')
     index.mkdir(parents=True)
-    (index / package).touch()
-    os.symlink(pkg_dir.resolve(), pathlib.Path(tmp, 'share', package))
+    for name, d in packages.items():
+      (index / name).touch()
+      os.symlink(d, pathlib.Path(tmp, 'share', name))
     env = dict(os.environ, AMENT_PREFIX_PATH=os.pathsep.join([tmp, os.environ.get('AMENT_PREFIX_PATH', '')]),
-               ROS_PACKAGE_PATH=os.pathsep.join([str(pkg_dir.parent), os.environ.get('ROS_PACKAGE_PATH', '')]))
-    args = [f'{k}:={v}' for k, v in cfg.get('xacro_args', {}).items()]
+               ROS_PACKAGE_PATH=os.pathsep.join([str(d.parent) for d in packages.values()]))
+    find = lambda v: re.sub(r'\$\(find (\w+)\)', lambda m: str(packages[m.group(1)]), v)
+    args = [f'{k}:={find(v)}' for k, v in cfg.get('xacro_args', {}).items()]
     try:
-      run = subprocess.run(['xacro', str(pkg_dir / cfg['xacro']), *args], env=env, capture_output=True, text=True)
+      run = subprocess.run(['xacro', str(packages[cfg['package']] / cfg['xacro']), *args], env=env,
+                           capture_output=True, text=True)
     except FileNotFoundError:
       raise SystemExit('no xacro: source a ROS setup.bash first')
     if run.returncode:
@@ -127,8 +175,8 @@ def xacro(clone, cfg):
 
 
 class Converter:
-  def __init__(self, cfg, urdf, pkg_dir, out):
-    self.cfg, self.pkg_dir, self.out = cfg, pkg_dir, out
+  def __init__(self, cfg, urdf, packages, out):
+    self.cfg, self.packages, self.out = cfg, packages, out
     self.robot = ET.fromstring(urdf)
     self.links = {l.get('name'): l for l in self.robot.findall('link')}
     self.children = {}
@@ -153,11 +201,13 @@ class Converter:
 
   def mesh_path(self, uri):
     m = re.match(r'package://([^/]+)/(.*)', uri)
-    if not m:
-      raise SystemExit(f'mesh {uri}: not a package:// URI')
-    if m.group(1) != self.cfg['package']:
-      raise SystemExit(f'mesh {uri}: from another package')
-    return self.pkg_dir / m.group(2)
+    if m:
+      if m.group(1) not in self.packages:
+        raise SystemExit(f'mesh {uri}: no package {m.group(1)}')
+      return self.packages[m.group(1)] / m.group(2)
+    if uri.startswith('file://'):
+      return pathlib.Path(uri[len('file://'):])
+    raise SystemExit(f'mesh {uri}: not a package:// or file:// URI')
 
   def asset_name(self, path):
     """A unique name for a mesh file: its stem, with its directory if needed."""
@@ -173,7 +223,7 @@ class Converter:
       name = 'rgba_' + ''.join(f'{int(round(float(c) * 255)):02x}' for c in rgba.split()[:3])
       self.materials[name] = ('rgba', rgba)
     else:
-      name = f'{image.parent.name}_{image.stem}'.lower() if image.parent != self.pkg_dir else image.stem.lower()
+      name = f'{image.parent.name}_{image.stem}'.lower()
       Image.open(image).convert('RGB').save(self.out / 'assets' / f'{name}.png')
       self.materials[name] = ('texture', f'{name}.png')
     self.textures[image] = name
@@ -203,31 +253,14 @@ class Converter:
     for k, (look, sets) in enumerate(groups.values()):
       name = base if len(groups) == 1 else f'{base}_{k}'
       textured = look is not None and look[0] == 'image'
-      v, vt, vn, faces = [], [], [], []
-      for tris in sets:
-        uv = textured and tris.texcoordset is not None and len(tris.texcoordset) > 0
-        o = (len(v), len(vt), len(vn))
-        v += (tris.vertex * scale).tolist()
-        if uv:
-          vt += tris.texcoordset[0].tolist()
-        if tris.normal is not None:
-          vn += tris.normal.tolist()
-        for t in range(len(tris.vertex_index)):
-          corner = []
-          for c in range(3):
-            s = str(tris.vertex_index[t][c] + o[0] + 1)
-            if uv or tris.normal is not None:
-              s += '/' + (str(tris.texcoord_indexset[0][t][c] + o[1] + 1) if uv else '')
-            if tris.normal is not None:
-              s += '/' + str(tris.normal_index[t][c] + o[2] + 1)
-            corner.append(s)
-          faces.append(corner)
-      with open(self.out / 'assets' / f'{name}.obj', 'w') as f:
-        f.write(f'# {path.name} from {self.cfg["package"]}, converted by scripts/urdf2mjcf.py\n')
-        f.writelines(f'v {fmt(p)}\n' for p in v)
-        f.writelines(f'vt {fmt(t)}\n' for t in vt)
-        f.writelines(f'vn {fmt(n)}\n' for n in vn)
-        f.writelines('f ' + ' '.join(c) + '\n' for c in faces)
+      if not textured:
+        # Untextured: binary STL (MuJoCo works out the normals), simplified if big.
+        tris = np.concatenate([t.vertex[t.vertex_index] * scale for t in sets])
+        file = f'{name}.stl'
+        write_stl(self.out / 'assets' / file, self.simplify(tris, path.name))
+      else:
+        file = f'{name}.obj'
+        self.write_obj(path, file, sets, scale)
       material = None
       if look is not None:
         if textured:
@@ -235,27 +268,64 @@ class Converter:
         else:
           material = 'rgba_' + ''.join(f'{int(round(float(c) * 255)):02x}' for c in look[1].split()[:3])
           self.materials[material] = ('rgba', look[1])
-      out.append((f'{name}.obj', material))
+      out.append((file, material))
     return out
+
+  def simplify(self, tris, what):
+    """Triangles (n, 3, 3), cut down to max_faces."""
+    limit = self.cfg.get('max_faces', MAX_FACES)
+    if len(tris) <= limit:
+      return tris
+    import fast_simplification
+    points, inverse = np.unique(tris.reshape(-1, 3).round(7), axis=0, return_inverse=True)
+    points, faces = fast_simplification.simplify(points.astype(np.float32), inverse.reshape(-1, 3).astype(np.int32),
+                                                 target_reduction=1 - limit / len(tris))
+    print(f'{what}: {len(tris)} triangles simplified to {len(faces)}')
+    return points[faces]
+
+  def write_obj(self, path, file, sets, scale):
+    """Textured triangle sets as OBJ, with their texcoords and normals (only
+    the vertices they use: a Collada source can be shared by many)."""
+    v, vt, vn = [], [], []
+    for tris in sets:
+      v.append(tris.vertex[tris.vertex_index].reshape(-1, 3) * scale)
+      vt.append(tris.texcoordset[0][tris.texcoord_indexset[0]].reshape(-1, 2) if len(tris.texcoordset)
+                else np.zeros((3 * len(tris.vertex_index), 2)))
+      vn.append(tris.normal[tris.normal_index].reshape(-1, 3) if tris.normal is not None
+                else np.repeat(np.cross(*(np.diff(tris.vertex[tris.vertex_index], axis=1).transpose(1, 0, 2))), 3, axis=0))
+    corners = np.hstack([np.concatenate(v), np.concatenate(vt), np.concatenate(vn)]).round(6)
+    unique, index = np.unique(corners, axis=0, return_inverse=True)   # corners shared by triangles
+    with open(self.out / 'assets' / file, 'w') as f:
+      f.write(f'# {path.name}, converted by scripts/urdf2mjcf.py\n')
+      f.writelines(f'v {fmt(c[:3])}\n' for c in unique)
+      f.writelines(f'vt {fmt(c[3:5])}\n' for c in unique)
+      f.writelines(f'vn {fmt(c[5:])}\n' for c in unique)
+      f.writelines('f ' + ' '.join(f'{i}/{i}/{i}' for i in t) + '\n' for t in index.reshape(-1, 3) + 1)
+    if len(corners) // 3 > self.cfg.get('max_faces', MAX_FACES):
+      print(f'warning: {path.name}: {len(corners) // 3} textured triangles, not simplified')
 
   def mesh(self, uri, scale, visual):
     """[(MJCF mesh name, material or None)] for a URDF mesh."""
     path = self.mesh_path(uri)
     key = (path, scale, visual)
     if key not in self.visuals:
-      suffix = '' if visual else '_collision'
-      if scale != '1 1 1':
-        suffix += '_' + re.sub(r'[^0-9]+', '_', scale).strip('_')
+      scaled = '' if scale == '1 1 1' else '_' + re.sub(r'[^0-9]+', '_', scale).strip('_')
+      suffix = ('' if visual else '_collision') + scaled
       if path.suffix.lower() == '.dae':
         files = self.dae(path, visual)
       else:
         file = f'{self.asset_name(path)}{path.suffix.lower()}'
-        shutil.copy2(path, self.out / 'assets' / file)
+        tris = read_stl(path) if path.suffix.lower() == '.stl' else None
+        if tris is not None and len(tris) > self.cfg.get('max_faces', MAX_FACES):
+          write_stl(self.out / 'assets' / file, self.simplify(tris, path.name))
+        else:
+          shutil.copy2(path, self.out / 'assets' / file)
         files = [(file, None)]
       parts = []
       for file, material in files:
-        name = pathlib.Path(file).stem + ('' if file.endswith('.obj') and not visual else suffix)
-        self.meshes[name] = (file, scale)
+        # A Collada mesh's files are named for visual / collision already.
+        name = pathlib.Path(file).stem + (scaled if path.suffix.lower() == '.dae' else suffix)
+        self.meshes[name] = (file, scale, visual)
         parts.append((name, material))
       self.visuals[key] = parts
     return self.visuals[key]
@@ -320,6 +390,11 @@ class Converter:
     i = {k: float(v) for k, v in el.find('inertia').attrib.items()}
     tensor = np.array([[i['ixx'], i['ixy'], i['ixz']], [i['ixy'], i['iyy'], i['iyz']], [i['ixz'], i['iyz'], i['izz']]])
     t = rot @ tensor @ rot.T
+    w, v = np.linalg.eigh(t)
+    if w.min() <= 0:   # not a physical inertia: its principal moments made positive
+      print(f'warning: {link.get("name")}: inertia with principal moments {fmt(w)}, made positive')
+      w = np.maximum(w, max(w.max() * 1e-3, 1e-8))
+      t = v @ np.diag(w) @ v.T
     full = [t[0, 0], t[1, 1], t[2, 2], t[0, 1], t[0, 2], t[1, 2]]
     return [f'{ind}<inertial pos="{fmt(pos)}" mass="{mass:.6g}" fullinertia="{fmt(full)}"/>']
 
@@ -335,7 +410,8 @@ class Converter:
     gravcomp = gravcomp or name in self.cfg.get('gravcomp', [])
     lines, moving = [], False
     if joint is None:   # the root
-      lines.append(f'{ind}<body name="{name}" childclass="robot">')
+      pos, rpy = self.cfg.get('root_pos', [0, 0, 0]), self.cfg.get('root_rpy', [0, 0, 0])
+      lines.append(f'{ind}<body name="{name}" childclass="robot"{frame(np.array(pos, float), rpy_matrix(*rpy))}>')
       if self.cfg.get('base', {}).get('kind') == 'planar':
         d = self.cfg['base'].get('damping', [100, 50])
         lines.append(f'{ind}  <joint name="base_x" type="slide" axis="1 0 0" damping="{d[0]}"/>')
@@ -343,7 +419,7 @@ class Converter:
         lines.append(f'{ind}  <joint name="base_yaw" type="hinge" axis="0 0 1" damping="{d[1]}"/>')
         self.joints += [(j, 'base', None) for j in ('base_x', 'base_y', 'base_yaw')]
         moving = True
-      else:
+      elif self.cfg.get('base', {}).get('kind', 'free') == 'free':
         lines.append(f'{ind}  <freejoint name="root"/>')
         moving = True
     else:
@@ -379,8 +455,10 @@ class Converter:
     lines += self.geoms(link, ind + '  ')
     for cam in self.cameras:
       if cam['link'] == name:
-        # Looking along the link's +x with +z up, as a Gazebo camera.
-        lines.append(f'{ind}  <camera name="{cam["name"]}" xyaxes="0 -1 0 0 0 1" fovy="{cam["fovy"]:.4g}" '
+        # Looking along the link's +x with +z up, as a Gazebo camera, or
+        # optical frames (ROS: z forward, y down) look along +z.
+        axes = '1 0 0 0 -1 0' if cam.get('optical') else '0 -1 0 0 0 1'
+        lines.append(f'{ind}  <camera name="{cam["name"]}" xyaxes="{axes}" fovy="{cam["fovy"]:.4g}" '
                      f'resolution="{cam["width"]} {cam["height"]}"/>')
     tcp = self.cfg.get('tcp', {})
     for j in self.children.get(name, []):
@@ -414,6 +492,9 @@ class Converter:
           out.append({'name': names[sensor] if names else sensor, 'link': g.get('reference'),
                       'fovy': math.degrees(2 * math.atan(math.tan(hfov / 2) * h / w)),
                       'width': round(w * k), 'height': round(h * k)})
+    for c in self.cfg.get('camera', []):   # given by hand
+      out.append({'name': c['name'], 'link': c['link'], 'fovy': c.get('fovy', 45), 'optical': c.get('optical', False),
+                  'width': c.get('width', 640), 'height': c.get('height', 480)})
     return out
 
   # --- the model -------------------------------------------------------------
@@ -463,7 +544,7 @@ class Converter:
 
   def mjcf(self, exclude=()):
     roots = set(self.links) - {j.find('child').get('link') for j in self.robot.findall('joint')}
-    (root,) = roots
+    (root,) = [self.cfg['root']] if 'root' in self.cfg else roots
     self.joints, self.mimic = [], {}
     body = self.body(self.links[root], None, '    ')
     followers = self.leaders()
@@ -482,9 +563,11 @@ class Converter:
         assets.append(f'    <material name="{name}" texture="{name}" specular="0.3" shininess="0.4"/>')
       else:
         assets.append(f'    <material name="{name}" rgba="{v}" specular="0.3" shininess="0.4"/>')
-    for name, (file, scale) in sorted(self.meshes.items()):
+    for name, (file, scale, visual) in sorted(self.meshes.items()):
       sc = f' scale="{scale}"' if scale != '1 1 1' else ''
-      assets.append(f'    <mesh name="{name}" file="{file}"{sc}/>')
+      # Visual meshes weigh nothing: shell, which a flat mesh has too.
+      inertia = ' inertia="shell"' if visual else ''
+      assets.append(f'    <mesh name="{name}" file="{file}"{sc}{inertia}/>')
     eq = [f'    <joint joint1="{f}" joint2="{l}" polycoef="{o:.6g} {m:.6g} 0 0 0" solimp="0.95 0.99 0.001" solref="0.005 1"/>'
           for f, (l, m, o) in followers.items()]
     cfg = self.cfg
@@ -498,6 +581,7 @@ class Converter:
       '  <option integrator="implicitfast"/>',
       '',
       '  <default>',
+      '    <mesh inertia="convex"/>',  # no volume errors for open meshes (only links without an inertial use it)
       '    <default class="robot">',
       '      <default class="visual">',
       '        <geom group="2" contype="0" conaffinity="0" density="0"/>',
@@ -582,7 +666,7 @@ def find_excludes(path, extra, keep):
 
 
 def main():
-  if len(sys.argv) != 3:
+  if len(sys.argv) < 3:
     raise SystemExit(__doc__)
   cfg = tomllib.loads(pathlib.Path(sys.argv[1]).read_text())
   for table, keys in KEYS.items():
@@ -591,25 +675,37 @@ def main():
       raise SystemExit(f'{sys.argv[1]}: unknown keys {sorted(unknown)} in {f"[{table}]" if table else "the top level"}'
                        ' (top-level keys go before the first [table])')
   cfg.setdefault('links', {}); cfg.setdefault('joints', {})
-  clone = pathlib.Path(sys.argv[2])
-  pkg_dir = clone / cfg.get('package_dir', '')
-  if not (pkg_dir / cfg['xacro']).exists():
-    raise SystemExit(f'no {pkg_dir / cfg["xacro"]}: pass the path of a {cfg["source"]} clone')
-  urdf = xacro(clone, cfg)
+  packages = find_packages(sys.argv[2:])
+  pkg_dir = packages.get(cfg['package'])
+  if not pkg_dir or not (pkg_dir / cfg['xacro']).exists():
+    raise SystemExit(f'no {cfg["package"]}/{cfg["xacro"]} under {sys.argv[2:]}: pass the path of a {cfg["source"]} clone')
+  urdf = xacro(packages, cfg)
   out = LIBRARY / cfg['out']
   shutil.rmtree(out / 'assets', ignore_errors=True)
   (out / 'assets').mkdir(parents=True)
-  conv = Converter(cfg, urdf, pkg_dir, out)
+  conv = Converter(cfg, urdf, packages, out)
   xml = out / f'{cfg["name"]}.xml'
   xml.write_text(conv.mjcf())
   xml.write_text(conv.mjcf(find_excludes(xml, cfg.get('exclude', []), {tuple(p) for p in cfg.get('collide', [])})))
-  sha = subprocess.run(['git', '-C', str(clone), 'rev-parse', 'HEAD'], capture_output=True, text=True).stdout.strip()
+  sha = subprocess.run(['git', '-C', str(pkg_dir), 'rev-parse', 'HEAD'], capture_output=True, text=True).stdout.strip()
   (out / 'asset.json').write_text(json.dumps(
-    {'source': cfg['source'], 'file': f'{cfg.get("package_dir", "") and cfg["package_dir"] + "/"}{cfg["xacro"]}', 'commit': sha},
-    indent=2) + '\n')
+    {'source': cfg['source'], 'file': f'{cfg["package"]}/{cfg["xacro"]}', 'commit': sha}, indent=2) + '\n')
   (out / 'README.md').write_text(f'# {cfg["title"]}\n\n{cfg["readme"].strip()}\n\n## License\n\n{cfg["license"].strip()}\n'
                                  f'Converted by `scripts/urdf2mjcf.py` with `scripts/urdf2mjcf/{cfg["name"]}.toml`.\n')
   m = mujoco.MjModel.from_xml_path(str(xml))
+  d = mujoco.MjData(m)
+  mujoco.mj_resetDataKeyframe(m, d, 0)
+  mujoco.mj_forward(m, d)
+  def bottom(g):   # of a collision geom at home
+    R = d.geom_xmat[g].reshape(3, 3)
+    if m.geom_type[g] == mujoco.mjtGeom.mjGEOM_MESH:
+      i = m.geom_dataid[g]
+      return (d.geom_xpos[g] + m.mesh_vert[m.mesh_vertadr[i]:m.mesh_vertadr[i] + m.mesh_vertnum[i]] @ R.T)[:, 2].min()
+    return d.geom_xpos[g][2] - np.abs(R[2]) @ m.geom_size[g] if m.geom_type[g] == mujoco.mjtGeom.mjGEOM_BOX \
+      else d.geom_xpos[g][2] - m.geom_rbound[g]
+  low = min((bottom(g) for g in range(m.ngeom) if m.geom_contype[g] or m.geom_conaffinity[g]), default=0)
+  if cfg.get('base', {}).get('kind', 'free') != 'fixed' and low < -0.005:
+    print(f'warning: collision geoms reach {-low:.3f} m below the floor at home (root_pos, no_collision)')
   print(f'{out.relative_to(ROOT)}: {len(conv.meshes)} meshes, {m.njnt} joints, {m.nu} actuators, '
         f'{m.ncam} cameras, {m.neq} equalities, {m.body_subtreemass[0]:.1f} kg')
 
