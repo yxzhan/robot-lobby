@@ -4,6 +4,7 @@
 material {
     name : mujoco_lit_transparent,
     shadingModel : lit,
+    doubleSided : true,  // instances are one-sided unless set (environments: one-sided walls)
     blending : transparent,
     parameters : [
         { type : float4, name : baseColor },

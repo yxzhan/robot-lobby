@@ -410,6 +410,13 @@ async function decodeImage(bytes) {
   return { w, h, rgba: new Uint8Array(ctx.getImageData(0, 0, w, h).data.buffer) };
 }
 
+// Environments (mjcf_assets/environments/…) are drawn with both sides of
+// their faces: game-engine scenes model walls one-sided, facing in, so from
+// outside they would be invisible.
+function isEnvironment(rel) {
+  return /(^|\/)environments\//.test(rel);
+}
+
 // mjtGeom: PLANE=0 HFIELD=1 SPHERE=2 CAPSULE=3 ELLIPSOID=4 CYLINDER=5 BOX=6 MESH=7
 function geomShape(model, g) {
   const s = model.geom_size.subarray(3 * g, 3 * g + 3);
@@ -686,6 +693,14 @@ class App {
     this.matTransparent = engine.createMaterial(MAT_TRANSPARENT);
     this.matTexturedTransparent = engine.createMaterial(MAT_TEXTURED_TRANSPARENT);
     this.matUnlitTextured = engine.createMaterial(MAT_UNLIT_TEXTURED);
+    // The lit materials are compiled double-sided for environments (walls
+    // modelled one-sided, seen from outside); their instances start
+    // one-sided, back faces culled as MuJoCo draws (setDoubleSided also sets
+    // the culling).
+    for (const mat of [this.matLit, this.matTextured, this.matTransparent, this.matTexturedTransparent]) {
+      const create = mat.createInstance.bind(mat);
+      mat.createInstance = () => { const mi = create(); mi.setDoubleSided(false); return mi; };
+    }
     this.xrSettings = loadXrSettings();
     const F = Filament;
     this.sampler = new F.TextureSampler(F.MinFilter.LINEAR_MIPMAP_LINEAR, F.MagFilter.LINEAR, F.WrapMode.REPEAT);
@@ -926,8 +941,9 @@ class App {
   // every spawned copy, so it is built once per robot file. `images` (texture
   // name -> candidate paths, readable with `read`) supplies the image textures
   // the loader replaced with placeholders (see vfs.js).
-  // Free it with freeVisual once nothing uses it.
-  buildVisual(mujoco, model, images, read) {
+  // `doubleSided` draws back faces too (environments). Free it with
+  // freeVisual once nothing uses it.
+  buildVisual(mujoco, model, images, read, doubleSided = false) {
     const textures = new Map();  // MuJoCo texture id -> texture entry (bindTexture)
     const parts = [];
     for (let g = 0; g < model.ngeom; g++) {
@@ -955,6 +971,7 @@ class App {
       } else {
         mi = (transparent ? this.matTransparent : this.matLit).createInstance();
       }
+      if (doubleSided) mi.setDoubleSided(true);
       mi.setColor4Parameter('baseColor', Filament.RgbaType.sRGB, [rgba[0], rgba[1], rgba[2], transparent ? rgba[3] : 1]);
       const { roughness, metallic } = surface(model, matid);
       mi.setFloatParameter('roughness', roughness);
@@ -1820,7 +1837,7 @@ try {
         const model = mujoco.MjModel.from_xml_path(path);
         try {
           return {
-            rel, parts: app.buildVisual(mujoco, model, images, models),
+            rel, parts: app.buildVisual(mujoco, model, images, models, isEnvironment(rel)),
             inertia: bodyInertia(model), sig, key: firstKey(docs), refs: referencedNames(docs), cameras: modelCameras(mujoco, model),
             dims: { nq: model.nq, nv: model.nv, na: model.na, nu: model.nu, nmocap: model.nmocap },
           };
@@ -2292,7 +2309,7 @@ try {
         progress(`preparing ${label} for rendering…`);
         await nextFrame();
         return {
-          rel, parts: app.buildVisual(NET_MUJOCO, model, images, models),
+          rel, parts: app.buildVisual(NET_MUJOCO, model, images, models, isEnvironment(rel)),
           kin: model, dims: model.dims, inertia: { nbody: model.nbody }, cameras: modelCameras(NET_MUJOCO, model),
         };
       })();

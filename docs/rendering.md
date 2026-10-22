@@ -60,7 +60,10 @@ which the page reports at start-up instead of failing in Filament.
 Geoms whose rgba alpha is below 1 (glass doors, …) use the alpha-blended
 variants `lit_transparent` / `lit_textured_transparent` (the texture's own
 alpha multiplies in) and cast no shadow; alpha 0 hides a geom, as in MuJoCo.
-Back faces are culled like MuJoCo does. Filament sorts transparent
+Back faces are culled like MuJoCo does, except in environments
+(`mjcf_assets/environments/`), which draw both sides: game-engine scenes
+model walls one-sided, facing in, so from outside they would vanish (the lit
+materials are compiled `doubleSided`, their instances set one-sided by default). Filament sorts transparent
 renderables back to front per renderable, so a self-overlapping or
 interpenetrating transparent mesh can blend in the wrong order.
 

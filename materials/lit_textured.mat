@@ -4,6 +4,7 @@
 material {
     name : mujoco_lit_textured,
     shadingModel : lit,
+    doubleSided : true,  // instances are one-sided unless set (environments: one-sided walls)
     reflections : screenspace,  // SSR where the view turns it on (render.js), else the sky (IBL)
     requires : [ uv0 ],
     parameters : [

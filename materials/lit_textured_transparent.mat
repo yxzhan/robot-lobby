@@ -3,6 +3,7 @@
 material {
     name : mujoco_lit_textured_transparent,
     shadingModel : lit,
+    doubleSided : true,  // instances are one-sided unless set (environments: one-sided walls)
     blending : transparent,
     requires : [ uv0 ],
     parameters : [
