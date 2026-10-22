@@ -541,7 +541,7 @@ export class Cameras {
 }
 
 // The Cameras panel, like the Teleop panel's IK chains: one robot at a time
-// (picked; the Teleop panel's at first, a newly spawned one), its cameras each in a
+// (picked, or double-clicked; the Teleop panel's at first, a newly spawned one), its cameras each in a
 // foldable box (window switch, pose marker, delete; name, link, follow,
 // offset, turn, size, rate, field of view), + Camera (on the selected,
 // double-clicked, body if it is the robot's), Save (this browser), Defaults
@@ -554,6 +554,14 @@ export class CamerasPanel {
     this.known = new Set();  // prefixes of the robots seen (a new one gets shown)
     this.closed = new Set();  // keys of folded cameras
     cameras.onChange = () => this.render();
+    this.render();
+  }
+
+  // Shows the robot's cameras (a double-clicked one, as the Teleop panel
+  // drives it); null (nothing, or the floor) keeps the one shown.
+  show(robot) {
+    if (!robot || robot.prefix === this.prefix) return;
+    this.prefix = robot.prefix;
     this.render();
   }
 

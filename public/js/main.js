@@ -1688,6 +1688,8 @@ function stateLayout(robots) {
 // ---------------------------------------------------------------------------
 
 const status = document.getElementById('status');
+// Long messages end in … (index.html): the whole text as the tooltip.
+new MutationObserver(() => { status.title = status.textContent; }).observe(status, { childList: true, characterData: true, subtree: true });
 
 // Full-screen overlay shown while spawning/compiling; it swallows pointer
 // input, and keydowns are dropped here (capture phase, registered first) so
@@ -2497,7 +2499,8 @@ try {
     else if (!e.buttons && e.pointerType !== 'touch') canvas.style.cursor = app.teleop.hoverAt(app.pointerRay(e.clientX, e.clientY)) ? 'grab' : '';
   });
   // Double-clicking a controllable robot also makes it the driven one;
-  // double-clicking anything else releases control.
+  // double-clicking anything else releases control. The Cameras panel shows
+  // the double-clicked robot's cameras.
   const selectAt = async (x, y) => {
     const hit = await app.pickBody(x, y);  // a promise in network mode
     app.perturb.select(hit);
@@ -2510,6 +2513,7 @@ try {
     }
     const robot = hit && app.robotOfBody(hit.body);
     app.teleop.drive(robot ?? null);
+    app.camerasPanel.show(robot);
   };
   let lastTouchEnd = -Infinity;
   const up = (e) => {

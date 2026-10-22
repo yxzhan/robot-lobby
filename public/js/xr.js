@@ -338,7 +338,9 @@ export class XrControls {
     Promise.resolve(app.castRay(h.pick)).then((hit) => {
       if (!app.model) return;
       app.perturb.select(hit);
-      app.teleop.drive((hit && app.robotOfBody(hit.body)) ?? null);
+      const robot = (hit && app.robotOfBody(hit.body)) ?? null;
+      app.teleop.drive(robot);
+      app.camerasPanel.show(robot);
     });
   }
 
