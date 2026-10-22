@@ -2,7 +2,10 @@
 // for every asset (of the given categories or <category>/<source>es of
 // mjcf_assets/) that has no screenshot yet, with the viewer itself in
 // headless Chrome: each asset is spawned alone, framed by its collision
-// geoms' bounds, and captured.
+// geoms' bounds, and captured. A room (bodies named wall_*, as RoboCasa's
+// kitchens) is shown cut away instead: framed by what is in it (its walls
+// and floors left out), from above the side facing its main wall, with the
+// walls on the camera's side hidden.
 // Re-run node scripts/vendor.mjs to pick them up; scripts/thumbnails.py
 // then turns them into panel thumbnails.
 //
@@ -98,20 +101,53 @@ try {
       app.paused = true;
       app.setOriginMarker(false);
       if (app.teleop) app.teleop.active = null;  // no IK or goal markers
-      const { model: m, data: d } = app;
-      const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
-      for (let g = 1; g < m.ngeom; g++) {
-        const r = m.geom_rbound[g];
-        if (!r) continue;
-        for (let k = 0; k < 3; k++) {
-          lo[k] = Math.min(lo[k], d.geom_xpos[3 * g + k] - r);
-          hi[k] = Math.max(hi[k], d.geom_xpos[3 * g + k] + r);
+      const { model: m, data: d, mujoco: M } = app;
+      const r = app.robots[0];
+      const name = (type, i) => (M.mj_id2name(m, M.mjtObj[type].value, i) ?? '').replace(r.prefix, '');
+      const shell = (b) => /^(wall|floor)_(?!accessory)/.test(name('mjOBJ_BODY', b));  // a room's walls, floors
+      const ours = (b) => b >= r.bodyOffset && b < r.bodyOffset + r.visual.inertia.nbody - 1;
+      const mainWall = (b) => /^wall_(main|room)/.test(name('mjOBJ_BODY', b));  // RoboCasa: wall_main_* or wall_room_*
+      const room = Array.from({ length: m.nbody }, (_, b) => b).some((b) => ours(b) && mainWall(b));
+      // World bounds of geoms (their aabb turned into the world) that pass use.
+      const bounds = (use) => {
+        const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+        for (let g = 1; g < m.ngeom; g++) {
+          if (!m.geom_rbound[g] || !use(g)) continue;
+          const a = m.geom_aabb.subarray(6 * g, 6 * g + 6), R = d.geom_xmat.subarray(9 * g, 9 * g + 9);
+          for (let k = 0; k < 3; k++) {
+            let c = d.geom_xpos[3 * g + k], h = 0;
+            for (let j = 0; j < 3; j++) { c += R[3 * k + j] * a[j]; h += Math.abs(R[3 * k + j]) * a[3 + j]; }
+            lo[k] = Math.min(lo[k], c - h);
+            hi[k] = Math.max(hi[k], c + h);
+          }
         }
-      }
+        return [lo, hi];
+      };
+      // A room: what is inside its walls and floors (RoboCasa parks unused
+      // fixture parts 10 m up).
+      const [rlo, rhi] = room ? bounds((g) => ours(m.geom_bodyid[g]) && shell(m.geom_bodyid[g])) : [];
+      const inside = (g) => [0, 1, 2].every((k) => d.geom_xpos[3 * g + k] > rlo[k] && d.geom_xpos[3 * g + k] < rhi[k]);
+      const [lo, hi] = bounds((g) => !room || (ours(m.geom_bodyid[g]) && !shell(m.geom_bodyid[g]) && inside(g)));
       const c = lo.map((v, k) => (v + hi[k]) / 2), radius = 0.5 * Math.hypot(...hi.map((v, k) => v - lo[k]));
       app.orbit.center = c;
       app.orbit.azim = -0.6; app.orbit.elev = 0.45;
       app.orbit.dist = Math.max(0.15, 0.85 * radius / Math.tan(22.5 * Math.PI / 180));
+      if (!room) return;
+      // From the side away from the main wall, a quarter turn off square.
+      const main = [0, 0];
+      for (let b = 1; b < m.nbody; b++) {
+        if (ours(b) && mainWall(b)) { main[0] = d.xpos[3 * b]; main[1] = d.xpos[3 * b + 1]; break; }
+      }
+      app.orbit.azim = Math.atan2(c[1] - main[1], c[0] - main[0]) - 0.35;
+      app.orbit.elev = 0.75;
+      app.orbit.dist = 0.95 * radius / Math.tan(22.5 * Math.PI / 180);
+      // Hide the walls between the camera and the middle.
+      const eye = [Math.cos(app.orbit.azim), Math.sin(app.orbit.azim)];
+      for (const [i, part] of r.visual.parts.entries()) {
+        const b = r.bodyOffset + part.body - 1;
+        if (part.body <= 0 || !/^wall_(?!accessory)/.test(name('mjOBJ_BODY', b))) continue;
+        if ((d.xpos[3 * b] - c[0]) * eye[0] + (d.xpos[3 * b + 1] - c[1]) * eye[1] > 0.3) app.scene.remove(r.entities[i]);
+      }
     })()`);
     await sleep(1500);
     const shot = await send('Page.captureScreenshot', { format: 'png', clip: { x: 280, y: 40, width: 720, height: 720, scale: 1 } });
