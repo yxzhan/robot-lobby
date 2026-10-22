@@ -48,7 +48,7 @@ Picking uses `mj_ray` on the physics world, so it hits collision geoms.
 - **Asset list** — the model library is `mjcf_assets/` next to
   `package.json`, laid out as `<category>/<source>/<model>/`: the category
   (`environments`, `robots`, `objects`) is the panel tab, the source
-  (`digital_twin`, `mujoco_menagerie`, `robocasa`, …) where the models come
+  (`aicor`, `mujoco_menagerie`, `robocasa`, …) where the models come
   from. Naming convention: a model directory `<name>/` holds `<name>.xml`,
   the file that gets spawned, and optionally `<name>.png`, its screenshot;
   directories without `<name>.xml` are skipped with a warning. Upstream
@@ -65,7 +65,7 @@ Picking uses `mj_ray` on the physics world, so it hits collision geoms.
   through the viewer's.
   `npm install` (or `node scripts/vendor.mjs`) links the library as
   `public/mjcf_assets` and indexes it into `public/assets.json`. Within a tab, models are listed under their
-  source, `digital_twin` first and the others by name; menagerie robots are
+  source, `aicor` first and the others by name; menagerie robots are
   split by the table's sections (Humanoids, Quadrupeds, Arms, …); `{"group": "…"}` in an `asset.json` in
   the model directory overrides the group. Re-run
   `node scripts/vendor.mjs` after adding models.

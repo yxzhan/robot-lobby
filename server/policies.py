@@ -536,7 +536,7 @@ POLICIES = [
      'load': load_playground,
      'create': lambda policy, prefix: PlaygroundController(policy, prefix, 'Go2 joystick policy')},
     {'id': 'microduck-walk', 'name': 'Walking · Microduck', 'dir': 'microduck_rl',
-     'defaultFor': re.compile(r'(^|/)digital_twin/microduck/microduck\.xml$'),
+     'defaultFor': re.compile(r'(^|/)custom/microduck/microduck\.xml$'),
      'load': load_microduck,
      'create': MicroduckController},
 ]

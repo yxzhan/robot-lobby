@@ -35,7 +35,7 @@ Needs pycollada, numpy, Pillow and mujoco.
 
     python3 scripts/urdf2mjcf.py scripts/urdf2mjcf/pr2.toml /path/to/pr2_common [more package dirs…]
     node scripts/vendor.mjs   # re-index
-    node scripts/render_previews.mjs robots/digital_twin/pr2   # its screenshot
+    node scripts/render_previews.mjs robots/aicor/pr2   # its screenshot
 """
 
 import json

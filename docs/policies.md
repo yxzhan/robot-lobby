@@ -69,7 +69,7 @@ computes the trained PD torque itself before every physics step.
 Pollen Robotics' [microduck_rl](https://github.com/pollen-robotics/microduck_rl)
 (mjlab, MuJoCo Warp, rsl_rl PPO) trains its 14-servo bipedal duck; with a
 clone next to `package.json`, `scripts/import_microduck.py` copies the
-robot (`digital_twin/microduck/microduck.xml`) and two of its scenes into
+robot (`custom/microduck/microduck.xml`) and two of its scenes into
 the library, and after training `scripts/export_microduck.py` (run in the
 clone's environment, see its docstring) exports the walking policy to
 `pretrained_policies/microduck_rl/` (`walk.onnx`, `policy.json`). The duck

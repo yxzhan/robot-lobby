@@ -1,7 +1,7 @@
 [
  "mjcf_assets/robots/mujoco_menagerie/unitree_g1/g1_with_hands.xml",
  "mjcf_assets/robots/mujoco_menagerie/franka_emika_panda/panda.xml",
- "mjcf_assets/robots/digital_twin/microduck/microduck.xml",
+ "mjcf_assets/robots/custom/microduck/microduck.xml",
  "mjcf_assets/robots/mujoco_menagerie/unitree_go2/go2.xml",
  "mjcf_assets/robots/mujoco_menagerie/robotstudio_so101/so101.xml",
  "mjcf_assets/robots/mujoco_menagerie/boston_dynamics_spot/spot_arm.xml"

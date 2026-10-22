@@ -8,7 +8,7 @@
 # the first [table], or TOML puts them in it).
 
 name = "pr2"                         # the model (and file) name
-out = "robots/digital_twin/pr2"      # under mjcf_assets/
+out = "robots/aicor/pr2"      # under mjcf_assets/
 source = "https://github.com/PR2/pr2_common"
 package = "pr2_description"          # the ROS package: $(find ...), package://...
 xacro = "robots/pr2.urdf.xacro"      # in the package

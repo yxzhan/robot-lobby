@@ -4,7 +4,7 @@
 #   python3 scripts/urdf2mjcf.py scripts/urdf2mjcf/armar7.toml iai_robots
 
 name = "armar7"
-out = "robots/digital_twin/armar7"
+out = "robots/aicor/armar7"
 source = "https://github.com/code-iai/iai_robots/tree/ros-jazzy"
 package = "iai_kit_armar7"
 xacro = "urdf/Armar7.urdf"

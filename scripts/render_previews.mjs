@@ -10,7 +10,7 @@
 // then turns them into panel thumbnails.
 //
 //   npm start &                                   # serves public/ on :4000
-//   node scripts/render_previews.mjs [filter…]    # e.g. objects, robots/digital_twin,
+//   node scripts/render_previews.mjs [filter…]    # e.g. objects, robots/aicor,
 //                                                 # objects/robocasa/apple; default: all
 //   node scripts/vendor.mjs && python3 scripts/thumbnails.py
 //

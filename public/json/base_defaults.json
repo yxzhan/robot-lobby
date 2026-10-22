@@ -1,5 +1,5 @@
 {
-  "digital_twin/garmi/garmi.xml": {
+  "aicor/garmi/garmi.xml": {
     "kind": "wheels",
     "base": "base_free",
     "wheels": [

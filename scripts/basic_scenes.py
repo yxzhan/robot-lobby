@@ -22,7 +22,7 @@ scripts/vendor.mjs). Environments, in environments/custom:
 All are static geoms centred on the origin, on the floor (z = 0), but for
 the soccer ball.
 
-Objects, in objects/digital_twin: box_<color> (5 cm cube) and ball_<color>
+Objects, in objects/aicor: box_<color> (5 cm cube) and ball_<color>
 (5 cm across), red, green and blue, 100 g, on a free joint resting on the
 floor, with more friction than MuJoCo's default (sliding 1.5 instead of 1;
 torsional on the box, so it does not twist out of a gripper; rolling on the
@@ -42,7 +42,7 @@ import numpy as np
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 OUT = ROOT / 'mjcf_assets' / 'environments' / 'custom'
-OBJECTS = ROOT / 'mjcf_assets' / 'objects' / 'digital_twin'
+OBJECTS = ROOT / 'mjcf_assets' / 'objects' / 'aicor'
 H = 2.0  # m: the maze's walls
 RAMP_H = 1.0  # m: the ramp's platform
 

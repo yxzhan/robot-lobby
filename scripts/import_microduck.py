@@ -2,15 +2,15 @@
 a clone next to package.json by default) into the model library as digital
 twins:
 
-  mjcf_assets/robots/digital_twin/microduck/microduck.xml
+  mjcf_assets/robots/custom/microduck/microduck.xml
       robot_groundcontact.xml, the model of its scene.xml and most of its
       tasks (collision geoms for the parts that touch the floor, group 3),
       with scene.xml's STAND keyframe as its own first keyframe (the viewer
       spawns a robot in it), and the meshes it uses in assets/;
-  mjcf_assets/environments/digital_twin/microduck_apartment/microduck_apartment.xml
+  mjcf_assets/environments/custom/microduck_apartment/microduck_apartment.xml
       apartment.xml: six rooms in 7 x 6 m with a staircase going down from
       the corridor (the viewer's floor at z = 0 covers its hole);
-  mjcf_assets/environments/digital_twin/microduck_vslam_room/microduck_vslam_room.xml
+  mjcf_assets/environments/custom/microduck_vslam_room/microduck_vslam_room.xml
       vslam_room.xml: an 11 x 11 m room with textured walls and pillars.
 
 Each gets an asset.json (where it came from) and a README.md with the mesh
@@ -61,7 +61,7 @@ def write_meta(out, rel, readme):
 
 
 def robot(src):
-  out = LIBRARY / 'robots' / 'digital_twin' / 'microduck'
+  out = LIBRARY / 'robots' / 'custom' / 'microduck'
   shutil.rmtree(out, ignore_errors=True)
   (out / 'assets').mkdir(parents=True)
   xml = (src / ROBOT).read_text()
@@ -85,7 +85,7 @@ def robot(src):
 
 
 def environment(src, name, file):
-  out = LIBRARY / 'environments' / 'digital_twin' / name
+  out = LIBRARY / 'environments' / 'custom' / name
   shutil.rmtree(out, ignore_errors=True)
   out.mkdir(parents=True)
   xml = (src / file).read_text()

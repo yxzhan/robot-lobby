@@ -4,7 +4,7 @@
 #   python3 scripts/urdf2mjcf.py scripts/urdf2mjcf/icub.toml iai_robots
 
 name = "icub"
-out = "robots/digital_twin/icub"
+out = "robots/aicor/icub"
 source = "https://github.com/code-iai/iai_robots/tree/ros-jazzy"
 package = "iai_icub_description"
 xacro = "robots/iCubGazeboV3_visuomanip/iCub3.urdf"

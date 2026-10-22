@@ -26,7 +26,7 @@ console.log('vendored', Object.keys(copies).length, 'files into public/vendor');
 // public/mjcf_assets (symlink; the server follows it) and indexed into
 // public/json/assets.json for the asset panel. <category> is the panel tab
 // (environments, robots, objects); <source> where the models come from
-// (digital_twin, mujoco_menagerie, robocasa, …).
+// (aicor, mujoco_menagerie, robocasa, …).
 //
 // Naming convention: model directory <name>/ holds <name>.xml (the file that
 // gets spawned) and <name>.png (its screenshot, optional; scripts/
@@ -41,11 +41,11 @@ console.log('vendored', Object.keys(copies).length, 'files into public/vendor');
 // for menagerie models, the source otherwise; "group" in an optional
 // asset.json in the model directory overrides it.
 //
-// Order (the panel keeps it): digital_twin first, then the other sources by
+// Order (the panel keeps it): aicor first, then the other sources by
 // name; menagerie models by README section, "Others" last; then by name.
 const LIBRARY = 'mjcf_assets';
 const CATEGORIES = { environments: 'environment', robots: 'robot', objects: 'object' };
-const FIRST_SOURCES = ['digital_twin'];
+const FIRST_SOURCES = ['aicor'];
 const MENAGERIE = 'mujoco_menagerie';
 
 const includedFile = (path) => readFileSync(path, 'utf8').match(/<include\s+file="([^"]+\.xml)"/)?.[1] ?? null;

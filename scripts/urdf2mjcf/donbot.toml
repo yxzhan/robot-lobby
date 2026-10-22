@@ -6,7 +6,7 @@
 #   python3 scripts/urdf2mjcf.py scripts/urdf2mjcf/donbot.toml iai_robots <split_boxy_urdf packages>
 
 name = "donbot"
-out = "robots/digital_twin/donbot"
+out = "robots/aicor/donbot"
 source = "https://github.com/code-iai/iai_robots/tree/ros-jazzy"
 package = "iai_donbot_description"
 xacro = "robots/iai_donbot.urdf.xacro"

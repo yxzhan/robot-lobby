@@ -5,7 +5,7 @@
 #   python3 scripts/urdf2mjcf.py scripts/urdf2mjcf/daisy.toml iai_robots [dir with wpg_300_120_description]
 
 name = "daisy"
-out = "robots/digital_twin/daisy"
+out = "robots/aicor/daisy"
 source = "https://github.com/code-iai/iai_robots/tree/ros-jazzy"
 package = "iai_daisy_description"
 xacro = "robots/daisy.urdf.xacro"

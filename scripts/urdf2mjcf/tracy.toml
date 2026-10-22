@@ -7,7 +7,7 @@
 # ur_description is the installed one (ros-jazzy-ur-description).
 
 name = "tracy"
-out = "robots/digital_twin/tracy"
+out = "robots/aicor/tracy"
 source = "https://github.com/code-iai/iai_tracy/tree/ros2-jazzy"
 package = "iai_tracy_description"
 xacro = "urdf/tracy.urdf.xacro"

@@ -4,7 +4,7 @@
 #   python3 scripts/urdf2mjcf.py scripts/urdf2mjcf/hsrb.toml hsr_description
 
 name = "hsrb"
-out = "robots/digital_twin/hsrb"
+out = "robots/aicor/hsrb"
 source = "https://github.com/code-iai/hsr_description/tree/ros2-jazzy"
 package = "hsr_description"
 xacro = "robots/hsrb4s.urdf.xacro"
