@@ -22,6 +22,8 @@ import numpy as np
 PUBLIC = pathlib.Path(__file__).resolve().parent.parent / 'public'
 POLICY_ROOT = PUBLIC / 'pretrained_policies'
 OBJ = mujoco.mjtObj
+# As a plain int: numpy compares an array with a MuJoCo enum one element at a time, in Python.
+FRICTION_DOF = int(mujoco.mjtConstraint.mjCNSTR_FRICTION_DOF)
 
 # ---------------------------------------------------------------------------
 # GR00T locomotion, Unitree G1
@@ -307,17 +309,39 @@ class BamServos:
   """XL330 servos as BAM models them (see public/js/microduck.js): the firmware's
   P loop gives a duty cycle, the DC motor a torque, and the M6 friction budget
   goes into the joints' friction loss and damping, where MuJoCo's solver
-  applies it. update() runs before every physics step."""
+  applies it. update() runs before every physics step. join() makes one bank
+  of the servos of several robots, updated with the same numpy calls as one
+  robot's: those calls, not their sizes, are what a step costs."""
 
-  def __init__(self, p, model, acts, dofs):
-    self.p, self.model, self.acts, self.dofs = p, model, acts, dofs
+  def __init__(self, p, model, acts, dofs, qadr, sizes=None):
+    self.p, self.model, self.acts, self.dofs, self.qadr = p, model, acts, dofs, qadr
+    self.sizes = sizes or [len(acts)]
+    self.starts = np.cumsum([0, *self.sizes[:-1]])  # each robot's first servo
+    self.robot = np.repeat(np.arange(len(self.sizes)), self.sizes)
     self.target = np.zeros(len(acts))
-    self.prev = np.zeros(len(acts))  # last motor torques: the battery sag
+    self.prev = np.zeros(len(acts))  # last motor torques: the battery sag (per robot)
+
+  @staticmethod
+  def join(banks):
+    cat = lambda f: np.concatenate([getattr(b, f) for b in banks])
+    out = BamServos(banks[0].p, banks[0].model, cat('acts'), cat('dofs'), cat('qadr'),
+                    [n for b in banks for n in b.sizes])
+    out.target, out.prev = cat('target'), cat('prev')
+    return out
+
+  def split(self, banks):
+    """Hands the state back to the banks join() made this one of."""
+    at = 0
+    for b in banks:
+      n = len(b.acts)
+      b.target, b.prev = self.target[at:at + n].copy(), self.prev[at:at + n].copy()
+      at += n
 
   def update(self, data):
     p, d = self.p, self.dofs
     q, dq = data.qpos[self.qadr], data.qvel[d]
-    vin = max(p['vin'] - p['vin_drop_gain'] * np.abs(self.prev).sum(), p['vin_min'])
+    sag = np.add.reduceat(np.abs(self.prev), self.starts)[self.robot]
+    vin = np.maximum(p['vin'] - p['vin_drop_gain'] * sag, p['vin_min'])
     duty = (self.target - q) * p['kp'] * p['error_gain']
     if p.get('max_current'):  # the firmware's current limit, a window on the duty cycle
       center, span = p['kt'] * dq / vin, p['R'] * p['max_current'] / vin
@@ -329,7 +353,7 @@ class BamServos:
     # The load on the gearbox: bias and constraint forces without our own joint friction.
     fric = np.zeros(self.model.nv)
     n = data.nefc
-    rows = data.efc_type[:n] == mujoco.mjtConstraint.mjCNSTR_FRICTION_DOF
+    rows = data.efc_type[:n] == FRICTION_DOF
     np.add.at(fric, data.efc_id[:n][rows], data.efc_force[:n][rows])
     ext = -data.qfrc_bias[d] + data.qfrc_constraint[d] - fric[d]
     mot = data.qfrc_actuator[d]  # applied on the last step
@@ -341,6 +365,42 @@ class BamServos:
     loss += s * np.where(drive, p['load_friction_external_quad'] * ext ** 2, p['load_friction_motor_quad'] * mot ** 2)
     self.model.dof_frictionloss[d] = loss
     self.model.dof_damping[d] = p['friction_viscous']
+
+
+class Substeps:
+  """The controllers' substep() before every physics step of one
+  World.advance: the Microducks' servos of one spec as one bank. done() hands
+  the banks' state back to the controllers."""
+
+  def __init__(self, controllers):
+    self.others = [c for c in controllers if hasattr(c, 'substep') and not isinstance(c, MicroduckController)]
+    self.ducks = [c for c in controllers if isinstance(c, MicroduckController)]
+    groups = {}
+    for c in self.ducks:
+      groups.setdefault(id(c.spec['bam']), []).append(c)
+    self.banks, self.slots = [], []  # slots: (controller, its bank, its servos there)
+    for g in groups.values():
+      bank = BamServos.join([c.servos for c in g])
+      self.banks.append((bank, g))
+      at = 0
+      for c in g:
+        n = len(c.servos.acts)
+        self.slots.append((c, bank, slice(at, at + n)))
+        at += n
+
+  def step(self, data):
+    for c in self.others:
+      c.substep(data)  # software servos
+    for c, bank, at in self.slots:
+      t = c.due(data)
+      if t is not None:
+        bank.target[at] = t
+    for bank, _ in self.banks:
+      bank.update(data)
+
+  def done(self):
+    for bank, g in self.banks:
+      bank.split([c.servos for c in g])
 
 
 class MicroduckController:
@@ -400,8 +460,7 @@ class MicroduckController:
     model.dof_armature[d] = b['armature']
     model.dof_solref[d] = b['solref_friction']
     model.dof_solimp[d] = b['solimp_friction']
-    self.servos = BamServos(b, model, acts, d)
-    self.servos.qadr = self.qadr
+    self.servos = BamServos(b, model, acts, d, self.qadr)
     self.servos.target = self.default.copy()
 
   def unbind(self):
@@ -421,9 +480,17 @@ class MicroduckController:
     data.qpos[self.qadr] = self.default
     self.servos.target = self.default.copy()
 
-  def substep(self, data):
+  def due(self, data):
+    """The servo targets whose delay is up by now, if any."""
+    t = None
     while self.pending and data.time >= self.pending[0][0] - 1e-9:
-      self.servos.target = self.pending.pop(0)[1]
+      t = self.pending.pop(0)[1]
+    return t
+
+  def substep(self, data):  # one robot alone (Substeps does them all)
+    t = self.due(data)
+    if t is not None:
+      self.servos.target = t
     self.servos.update(data)
 
   def observe(self, data):

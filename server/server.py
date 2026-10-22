@@ -900,6 +900,7 @@ class World:
     t0 = time.perf_counter()
     reached, failed = [], []
     controllers = [c for r in self.robots for c in r.controllers()]
+    substeps = POL.Substeps(controllers)
     while d.time < target and time.perf_counter() - t0 < STEP_BUDGET:
       if controllers and d.time >= self.next_control - 1e-9:
         for r in self.robots:
@@ -912,14 +913,16 @@ class World:
           except Exception as err:  # a broken controller stops alone
             failed.append((c, err))
             controllers.remove(c)
+        if failed:
+          substeps.done()
+          substeps = POL.Substeps(controllers)
         self.next_control += IK.CONTROL_DT
       if self.perturbs or self.perturbed:  # once more after the last one let go: clears its force
         self.apply_perturbs()
         self.perturbed = bool(self.perturbs)
-      for c in controllers:
-        if hasattr(c, 'substep'):
-          c.substep(d)  # software servos
+      substeps.step(d)  # software servos
       mujoco.mj_step(m, d)
+    substeps.done()
     return reached, failed
 
   async def run(self):
