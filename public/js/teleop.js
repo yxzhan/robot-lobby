@@ -17,9 +17,10 @@
 // go on arriving (arrive). In network mode a robot's goal is the server's
 // (server/goal.py), one for every browser: changes go there and come back
 // to everyone (fromServer). Setups are saved per robot file.
-// ROS (ros.js): any robot can also have a rosbridge connection of its own,
-// switched on with its ROS chip: it publishes the robot's joint states and
-// TF and takes joint commands and cmd_vel; a fresh cmd_vel drives the robot
+// ROS (ros.js): anything spawned (environments and objects too, listed
+// with no controllers) can also have a rosbridge connection of its own,
+// switched on with its ROS chip: it publishes the joint states and TF and
+// takes joint commands and cmd_vel; a fresh cmd_vel drives the robot
 // before the goal or the keys do.
 
 import { dragPose, markerScale, pickMarker, startDrag } from './marker.js';
@@ -207,7 +208,7 @@ export class TeleopPanel {
     this.app = app;
     this.el = root;
     this.body = root.querySelector('.body');
-    this.active = null;      // the driven robot
+    this.active = null;      // the driven robot (or an environment or object: its ROS only)
     this.known = new Set();  // controllable robots seen so far; a new one gets selected
     this.input = new KeyboardInput();
     this.ros = new Map();    // robot prefix -> RosLink (ros.js)
@@ -296,28 +297,33 @@ export class TeleopPanel {
     return (this.app.robots ?? []).filter((r) => r.use);
   }
 
+  // Everything spawned: the panel lists it all for its ROS.
+  spawned() {
+    return this.app.robots ?? [];
+  }
+
   // Called for every new world (App.setWorld).
   build() {
-    const robots = this.controllable();
+    const robots = this.controllable(), all = this.spawned();
     const added = robots.filter((r) => !this.known.has(r));
     this.known = new Set(robots);
     // ROS links follow their robot into the new world (by prefix: in
     // network mode every scene brings new robot objects); a removed robot's closes.
     for (const [prefix, link] of this.ros) {
-      const r = robots.find((x) => x.prefix === prefix);
+      const r = all.find((x) => x.prefix === prefix);
       if (r) link.robot = r;
       else { link.setOn(false); this.ros.delete(prefix); }
     }
     if (added.length) this.active = added.at(-1);
-    else if (!robots.includes(this.active)) this.active = robots.at(-1) ?? null;
+    else if (!all.includes(this.active)) this.active = all.find((r) => r.prefix === this.active?.prefix) ?? robots.at(-1) ?? null;
     this.dragging = this.hover = null;
     this.render();
   }
 
-  // Drives `robot` (e.g. double-clicked) if it is controllable; anything
-  // else (null, the floor, an object) releases control.
+  // Drives `robot` (e.g. double-clicked); an environment or object (just
+  // its ROS) or nothing (the floor) releases control.
   drive(robot) {
-    const next = robot?.use ? robot : null;
+    const next = robot ?? null;
     if (next === this.active) { this.render(); return; }  // the selected body may matter (IK chain editor)
     this.active = next;
     this.render();
@@ -523,7 +529,7 @@ export class TeleopPanel {
   // ---- panel ----
 
   render() {
-    const robots = this.controllable();
+    const robots = this.spawned();
     this.body.replaceChildren();
     this.readout = null;
     this.errs = [];
@@ -544,9 +550,10 @@ export class TeleopPanel {
     ));
     const r = this.active;
     if (!r) return;
-    // Controllers: any of them on, or none (e.g. GR00T off to pose a G1 by hand).
+    // Controllers: any of them on, or none (e.g. GR00T off to pose a G1 by
+    // hand); environments and objects have none, just ROS.
     const chips = el('div', { className: 'chips' });
-    for (const [kind, label, title] of CONTROLLERS) {
+    for (const [kind, label, title] of r.use ? CONTROLLERS : []) {
       const box = el('input', { type: 'checkbox', checked: !!r.use[kind] });
       box.onchange = () => {
         box.disabled = true;
@@ -571,7 +578,7 @@ export class TeleopPanel {
     const locos = locomotion(r);
     // Input: for walking robots keyboard, goal marker or gamepad; for the rest
     // with IK chains the gamepad (its grippers).
-    if (locos.length || (r.use.ik && r.ik?.chains.length)) {
+    if (locos.length || (r.use?.ik && r.ik?.chains.length)) {
       const mode = locos.length ? this.mode : 'gamepad';
       field('Input', this.select(locos.length ? INPUTS : INPUTS.filter(([m]) => m === 'gamepad'), mode, (v) => {
         this.mode = v;
@@ -606,9 +613,9 @@ export class TeleopPanel {
       this.readout = locos.length ? el('div', { className: 'readout' }) : null;
       if (this.readout) this.body.append(this.readout);
     }
-    if (r.use.policy || r.errors?.policy) this.renderPolicy(r);
-    if (r.use.base && r.base) this.renderBase(r.base);
-    if (r.use.ik && r.ik) this.renderIk(r.ik);
+    if (r.use?.policy || r.errors?.policy) this.renderPolicy(r);
+    if (r.use?.base && r.base) this.renderBase(r.base);
+    if (r.use?.ik && r.ik) this.renderIk(r.ik);
     this.rosView = null;
     if (link?.on) this.renderRos(link);
   }
@@ -632,6 +639,10 @@ export class TeleopPanel {
     url.onkeydown = (e) => { if (e.key === 'Enter') { apply(); url.blur(); } };
     row('Bridge', 'rosbridge_server\'s WebSocket (host:port, or a ws:// / wss:// URL)', url,
       this.button('↻', 'Connect again', () => link.connect()));
+    const prefix = el('input', { type: 'text', value: link.prefix, placeholder: `${link.robot.prefix.slice(0, -1)} (robot id)`, spellcheck: false });
+    prefix.onchange = () => { link.prefix = prefix.value.trim(); link.sync(); };
+    prefix.onkeydown = (e) => { if (e.key === 'Enter') prefix.blur(); };
+    row('Prefix', 'Before every topic not starting with / (r1/joint_states, r1/<camera>/…) and every TF frame (r1/base_link): empty, the robot\'s id; / for none', prefix);
     const state = el('span', { className: 'ros-state' });
     box.append(el('div', { className: 'bar' }, state));
     const topic = (k, label, title, enabled = true) => {
@@ -646,16 +657,13 @@ export class TeleopPanel {
     topic('jointStates', 'Joints', 'sensor_msgs/JointState: the robot\'s joint positions (and velocities in local mode)');
     topic('tf', 'TF', 'tf2_msgs/TFMessage: every body in its parent\'s frame, the root in "world"');
     {
-      // Cameras: the namespace of their topics (the robot's id unless set), and JPEG or raw.
+      // Cameras: JPEG or raw.
       const c = s.camera;
       const on = el('input', { type: 'checkbox', checked: c.on });
-      const ns = el('input', { type: 'text', value: c.topic, placeholder: `${link.robot.prefix.slice(0, -1)} (robot id)`, title: 'Namespace of the camera topics: empty, the robot\'s id; / for none', spellcheck: false });
       on.onchange = () => { c.on = on.checked; changed(); };
-      ns.onchange = () => { c.topic = ns.value.trim(); changed(); };
-      ns.onkeydown = (e) => { if (e.key === 'Enter') ns.blur(); };
       const format = this.select([['jpeg', 'JPEG'], ['raw', 'raw']], c.format, (v) => { c.format = v; changed(); });
-      row('Cameras', 'The cameras ticked in the Cameras panel, each frame: <namespace>/<camera>/image_raw/compressed (sensor_msgs/CompressedImage, JPEG) '
-        + 'or …/image_raw (sensor_msgs/Image, rgb8), and …/camera_info; with TF, <camera>_optical_frame in its link\'s frame', on, ns, format);
+      row('Cameras', 'The cameras ticked in the Cameras panel, each frame: <camera>/image_raw/compressed (sensor_msgs/CompressedImage, JPEG) '
+        + 'or …/image_raw (sensor_msgs/Image, rgb8), and …/camera_info; with TF, <camera>_optical_frame in its link\'s frame', on, format);
     }
     box.append(el('div', { className: 'sub', textContent: 'Subscribe' }));
     topic('jointCommand', 'Joint cmd', 'sensor_msgs/JointState: position targets for the actuators on those joints');
@@ -673,7 +681,7 @@ export class TeleopPanel {
     box.append(counts, el('div', { className: 'hint', textContent:
       'Joint commands set the actuators\' targets; a running policy or IK writes over the joints it drives. ' +
       'Cameras publish while ticked in the Cameras panel, at their own rate. ' +
-      'Topics are per robot connection, so robots on one bridge need topics of their own.' }));
+      'The prefix keeps robots on one bridge apart; set it to / for plain names (one robot with robot_state_publisher).' }));
     this.rosView = { link, state, counts };
     link.onChange = () => this.showRos();
     this.showRos();

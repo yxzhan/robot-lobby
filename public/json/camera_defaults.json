@@ -23,5 +23,12 @@
     "cameras": [
       { "name": "front_camera", "link": "body", "follow": "link", "pos": [0.4, 0, 0], "rpy": [0, 20, 0], "fovy": 70, "width": 256, "height": 256, "hz": 10 }
     ]
+  },
+  "environments/custom/microduck_football/microduck_football.xml": {
+    "cameras": [
+      { "name": "corner_cam", "link": "pitch", "follow": "link", "pos": [2.3, 1.6, 1], "rpy": [0, 35, -135], "fovy": 60, "width": 480, "height": 360, "hz": 10 },
+      { "name": "top_cam", "link": "pitch", "follow": "link", "pos": [0, 0, 3], "rpy": [90, 90, 0], "fovy": 60, "width": 480, "height": 360, "hz": 10 },
+      { "name": "side_cam", "link": "pitch", "follow": "link", "pos": [0, -1.71, 1], "rpy": [0, 35, 90], "fovy": 60, "width": 480, "height": 360, "hz": 10 }
+    ]
   }
 }

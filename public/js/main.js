@@ -1862,10 +1862,7 @@ try {
   const robots = [];  // spawned, in attach order: {label, visual, prefix, pos, yaw, entities, bodyOffset, policy, base, ik, use}
   let nextId = 1, busy = false;
 
-  const hint = () => {
-    const walk = robots.some((r) => r.use) ? ' · drive it from the Teleop panel' : '';
-    return `${robots.length} spawned · drag an asset onto the floor` + walk;
-  };
+  const hint = () => `${robots.length} spawned`;
 
   // Which controllers a robot uses ({policy: a POLICIES id or '', base, ik}),
   // saved per robot file from the Teleop panel. Defaults: the policy made

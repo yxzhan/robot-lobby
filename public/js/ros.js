@@ -13,17 +13,21 @@
 //               robot's walking policy or base, as the keys would; a twist
 //               older than TWIST_TIMEOUT counts as zero).
 //   publishes   the robot's cameras switched on in the Cameras panel
-//               (cameras.js), each frame they render (<ns>: the robot's
-//               id, r1, unless set): <ns>/<camera>/
+//               (cameras.js), each frame they render: <camera>/
 //               image_raw/compressed (sensor_msgs/CompressedImage, JPEG) or
-//               <ns>/<camera>/image_raw (sensor_msgs/Image, rgb8), and
-//               <ns>/<camera>/camera_info (sensor_msgs/CameraInfo: a pinhole
+//               <camera>/image_raw (sensor_msgs/Image, rgb8), and
+//               <camera>/camera_info (sensor_msgs/CameraInfo: a pinhole
 //               of the camera's vertical field of view, square pixels, no
 //               distortion); with TF on, each camera's <camera>_optical_frame
 //               (z forward, x right, y down) in its link's frame.
+// One prefix per robot (the robot's id, r1, unless set; / for none) goes
+// before every name, so robots of one model on one bridge do not overwrite
+// each other: the topics (r1/joint_states, r1/wrist_cam/image_raw/compressed;
+// absolute ones, /tf, as they are) and the TF frames (r1/base_link; the
+// roots in "world"). Joint names in the messages stay plain.
 // Stamps are wall time, ROS 2 style ({sec, nanosec}). Settings are kept per
-// robot file in this browser; the connection itself is switched on in the
-// panel each time.
+// robot file in this browser, the prefix per robot (it names one robot, not
+// its model); the connection itself is switched on in the panel each time.
 
 const STORE = 'robot-lobby/ros';
 const TWIST_TIMEOUT = 0.5;   // s
@@ -35,8 +39,8 @@ export const ROS_DEFAULTS = {
   jointStates: { on: true, topic: 'joint_states' },  // what robot_state_publisher and RViz listen to
   tf: { on: true, topic: '/tf' },
   jointCommand: { on: true, topic: 'joint_command' },
-  cmdVel: { on: true, topic: '/cmd_vel' },
-  camera: { on: true, topic: '', format: 'jpeg', quality: 80 },  // topic: the namespace of the camera topics ('': the robot's id, r1; '/': none)
+  cmdVel: { on: true, topic: 'cmd_vel' },
+  camera: { on: true, format: 'jpeg', quality: 80 },
 };
 const MAX_BUFFERED = 8e6;  // bytes waiting in the WebSocket: camera frames are dropped above
 
@@ -52,7 +56,8 @@ function loadSettings(key) {
   try {
     const saved = JSON.parse(localStorage.getItem(STORE) ?? '{}')[key];
     if (saved?.jointStates?.topic === 'joint_state') saved.jointStates.topic = 'joint_states';  // the old default
-    if (saved?.camera?.topic === 'camera/image_raw') delete saved.camera;  // the old placeholder
+    if (saved?.camera) delete saved.camera.topic;  // the old camera namespace: the prefix now
+    if (saved?.cmdVel?.topic === '/cmd_vel') saved.cmdVel.topic = 'cmd_vel';  // the old default: every robot on one topic
     if (saved) return { ...structuredClone(ROS_DEFAULTS), ...saved };
   } catch { /* no storage */ }
   return structuredClone(ROS_DEFAULTS);
@@ -112,6 +117,7 @@ export class RosLink {
     this.robot = robot;
     this.key = robot.key ?? robot.label;
     this.settings = loadSettings(this.key);
+    this.prefix = '';            // before every name ('': the robot's id; '/': none)
     this.on = false;
     this.ws = null;
     this.status = 'off';        // off | connecting | connected | error
@@ -183,6 +189,16 @@ export class RosLink {
     this.status = status;
   }
 
+  // The prefix of this robot's names, without slashes ('' for none).
+  ns() {
+    const p = this.prefix.trim();
+    return p === '/' ? '' : (p || this.robot.prefix).replace(/^\/+|\/+$/g, '');
+  }
+
+  // A topic under the prefix (an absolute one as it is), a frame under it.
+  topicName(topic, ns = this.ns()) { return ns && topic && !topic.startsWith('/') ? `${ns}/${topic}` : topic; }
+  frameName(frame, ns = this.ns()) { return ns ? `${ns}/${frame}` : frame; }
+
   send(msg) {
     if (this.ws?.readyState !== WebSocket.OPEN) return;
     this.ws.send(JSON.stringify(msg));
@@ -192,8 +208,9 @@ export class RosLink {
   // connecting and after every change in the panel.
   sync() {
     if (this.status !== 'connected') return;
+    const ns = this.synced = this.ns();
     for (const k of [...PUBLISHED, ...SUBSCRIBED]) {
-      const want = this.settings[k].on ? this.settings[k].topic.trim() : '';
+      const want = this.settings[k].on ? this.topicName(this.settings[k].topic.trim(), ns) : '';
       const have = this.topics[k] ?? '';
       if (want === have) continue;
       const pub = PUBLISHED.includes(k);
@@ -249,6 +266,7 @@ export class RosLink {
     const { model, data } = this.app;
     if (!model || !data || this.status !== 'connected') return;
     const t = this.tables(), header = (frame_id = '') => ({ stamp: stamp(), frame_id });
+    const ns = this.synced, frame = (b) => t.frame.has(b) ? this.frameName(t.frame.get(b), ns) : 'world';
     if (this.topics.jointStates) {
       const net = !!this.app.net;
       this.send({ op: 'publish', topic: this.topics.jointStates, msg: {
@@ -265,12 +283,12 @@ export class RosLink {
         const parent = model.body_parentid[b];
         const { translation: [x, y, z], rotation } = relative(data, parent, b);
         return {
-          header: header(t.frame.get(parent) ?? 'world'),
-          child_frame_id: t.frame.get(b),
+          header: header(frame(parent)),
+          child_frame_id: frame(b),
           transform: { translation: { x, y, z }, rotation },
         };
       });
-      if (this.settings.camera.on) transforms.push(...this.cameraFrames(t, header));
+      if (this.settings.camera.on) transforms.push(...this.cameraFrames(frame, header));
       this.send({ op: 'publish', topic: this.topics.tf, msg: { transforms } });
       this.sent++;
     }
@@ -279,8 +297,8 @@ export class RosLink {
   // ---- cameras ----
 
   // TF of the robot's cameras: <camera>_optical_frame in its link's frame
-  // (the world's for the robot's own frame).
-  cameraFrames(t, header) {
+  // (the world's for the robot's own frame); `frame(b)` names body b's.
+  cameraFrames(frame, header) {
     const cams = this.app.cameras, d = this.app.data;
     if (!cams) return [];
     return cams.list().filter((c) => c.robot.prefix === this.robot.prefix).map((c) => {
@@ -292,8 +310,8 @@ export class RosLink {
       const [x, y, z] = [0, 1, 2].map((k) => Rp[k] * dp[0] + Rp[3 + k] * dp[1] + Rp[6 + k] * dp[2]);  // Rpᵀ·dp
       const rel = [0, 1, 2].flatMap((r) => [0, 1, 2].map((k) => Rp[r] * Ro[k] + Rp[3 + r] * Ro[3 + k] + Rp[6 + r] * Ro[6 + k]));  // Rpᵀ·Ro
       return {
-        header: header(b >= 0 ? t.frame.get(b) ?? 'world' : 'world'),
-        child_frame_id: `${c.cam.name}_optical_frame`,
+        header: header(b >= 0 ? frame(b) : 'world'),
+        child_frame_id: this.frameName(`${c.cam.name}_optical_frame`, this.synced),
         transform: { translation: { x, y, z }, rotation: matQuat(rel) },
       };
     });
@@ -312,8 +330,8 @@ export class RosLink {
     const cs = this.settings.camera;
     if (this.status !== 'connected' || !cs.on || c.robot.prefix !== this.robot.prefix || this.encoding.has(c.key)) return;
     if (this.ws.bufferedAmount > MAX_BUFFERED) { this.dropped++; return; }
-    const ns = (cs.topic.trim() || this.robot.prefix).replace(/\/+$/, ''), base = ns ? `${ns}/${c.cam.name}` : c.cam.name;
-    const { width: w, height: h } = c, fovy = c.cam.fovy, header = { stamp: stamp(c.stamp), frame_id: `${c.cam.name}_optical_frame` };
+    const base = this.topicName(c.cam.name, this.synced);
+    const { width: w, height: h } = c, fovy = c.cam.fovy, header = { stamp: stamp(c.stamp), frame_id: this.frameName(`${c.cam.name}_optical_frame`, this.synced) };
     const fy = (h / 2) / Math.tan(fovy * Math.PI / 360), cx = w / 2, cy = h / 2;
     const info = {
       header, height: h, width: w, distortion_model: 'plumb_bob', d: [0, 0, 0, 0, 0],
