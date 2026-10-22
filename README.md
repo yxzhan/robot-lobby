@@ -1,6 +1,7 @@
+
 # Robot Lobby
 
-An unofficial multiplayer MuJoCo sandbox in the browser: spawn robots,
+An multiplayer MuJoCo sandbox in the browser: spawn robots,
 drive them, pull them around, in one physics world shared by everyone
 connected (a Python server, e.g. on Binder), or alone with the physics in
 the page.
@@ -8,7 +9,11 @@ the page.
 **Live demo:** https://yxzhan.github.io/robot-lobby/ (front end only: the
 physics runs in your browser, with part of the model library).
 
-<!-- Demo video goes here -->
+
+
+https://github.com/user-attachments/assets/242248f9-c4d9-415c-8fe0-4d691a56f08c
+
+
 
 Physics from the official MuJoCo WASM bindings
 (`@mujoco/mujoco`), rendering with Filament.js (WebGL2, PBR, sun shadows, SSAO).
