@@ -240,7 +240,9 @@ function geomUVs(model, g, shape, matid) {
   const [ru, rv] = model.mat_texrepeat.subarray(2 * matid, 2 * matid + 2);
   const n = shape.pos.length / 3, uv = new Float32Array(2 * n);
   if (shape.uv) {
-    for (let i = 0; i < n; i++) { uv[2 * i] = shape.uv[2 * i] * ru; uv[2 * i + 1] = shape.uv[2 * i + 1] * rv; }
+    // MuJoCo's v counts from the image's first (top) row; Filament's
+    // materials flip v (matc's flipUV), so flip it back.
+    for (let i = 0; i < n; i++) { uv[2 * i] = shape.uv[2 * i] * ru; uv[2 * i + 1] = 1 - shape.uv[2 * i + 1] * rv; }
     return uv;
   }
   let su = ru, sv = rv;

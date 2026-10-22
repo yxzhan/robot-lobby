@@ -33,7 +33,8 @@ Image files never reach MuJoCo: the `@mujoco/mujoco` WASM heap is capped at
 loader rewrites each plain `<texture type="2d" file=…>` into a 1×1 builtin of
 the same name, and the renderer decodes the image itself with
 `createImageBitmap` and swaps it in when ready. Builtin, cube and
-flipped/grid textures still come from `tex_data`. Meshes use their `mesh_texcoord`s; primitives
+flipped/grid textures still come from `tex_data`. Meshes use their `mesh_texcoord`s (v
+flipped: MuJoCo counts it from the image's top row, Filament's materials flip it); primitives
 (e.g. a textured table box, the groundplane) get an object-space planar
 projection per face. `texrepeat`/`texuniform` are baked into the UVs. Planes
 without any material get the built-in checker; otherwise the material color.

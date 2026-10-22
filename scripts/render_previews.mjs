@@ -13,7 +13,8 @@
 //
 // Options (env): CHROME=/path/to/chrome (default: Playwright's headless
 // shell in ~/.cache/ms-playwright), URL=http://127.0.0.1:4000/, FORCE=1 to
-// re-render assets that already have a screenshot.
+// re-render assets that already have a screenshot, GPU=1 to render on the
+// GPU (Vulkan; several times faster than the default SwiftShader).
 import { spawn } from 'node:child_process';
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
@@ -57,7 +58,9 @@ const port = 9400 + Math.floor(Math.random() * 500);
 const profile = mkdtempSync(join(tmpdir(), 'render-previews-'));
 const chrome = spawn(findChrome(), [
   `--remote-debugging-port=${port}`, `--user-data-dir=${profile}`, '--no-sandbox', '--disable-dev-shm-usage',
-  '--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--window-size=1280,800', 'about:blank',
+  ...(process.env.GPU ? ['--use-angle=vulkan', '--enable-features=Vulkan', '--ignore-gpu-blocklist']
+                      : ['--use-angle=swiftshader', '--enable-unsafe-swiftshader']),
+  '--window-size=1280,800', 'about:blank',
 ], { stdio: 'ignore' });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let targets;
