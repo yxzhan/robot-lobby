@@ -18,3 +18,5 @@ __pycache__/
 **.tar.gz
 **.rviz
 tmp/
+# notes kept out of the repository
+TODOS.md
