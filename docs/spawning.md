@@ -11,14 +11,15 @@ dragging, a marker on the floor shows the spawn point and heading (the model's
 +x, which starts out along the world +x axis); the mouse wheel or Q/E turns it in
 15° steps, Shift+wheel or R/F raises or lowers it in 5 cm steps (a pole
 shows the height; it is kept for the next drag), and Esc cancels. The drag
-label shows the spawn position and heading. The toolbar (top left) runs the
+label shows the spawn position and heading. The toolbar (top middle) runs the
 simulation: Clear removes every spawned item (the Stage panel's ✕ one of
 them), Reset puts every robot back in its spawn pose. In a shared world, **Full restart**
 (after a confirmation, for everyone) has the server read the model files
 again and start anew: a fresh MjData at time 0, every robot at its spawn
 point with fresh controllers (the same ones switched on), so edits to the
-MJCF files take effect without restarting the server. The toggles at the top right show or hide the
-Assets, Stage and Teleop panels.
+MJCF files take effect without restarting the server. The toggles above the
+left column show or hide the Assets, Stage and World panels (in it), those at
+the top right Teleop and the other panels of the right column.
 
 On a touch screen (phone, tablet): one finger orbits the camera, two pinch
 to zoom and move together to pan; double tap selects a body, press and hold

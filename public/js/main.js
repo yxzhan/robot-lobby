@@ -2366,8 +2366,7 @@ try {
 
   async function saveStage() {
     if (!robots.length) { status.textContent = 'nothing spawned to save'; return; }
-    const when = new Date().toLocaleString([], { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-    const name = prompt('Name of the stage:', `${robots.map((r) => r.label).slice(0, 3).join(', ')}${robots.length > 3 ? ', …' : ''} · ${when}`);
+    const name = prompt('Name of the stage:', `${robots.map((r) => r.label).slice(0, 3).join(', ')}${robots.length > 3 ? ', …' : ''}`);
     if (name == null) return;
     const shot = await app.capture(256);
     const common = { name: name.trim() || 'Stage', view: viewOf(app.orbit), cameras: cameraSetups(), thumbnail: shot && await blobToDataUrl(shot) };
@@ -2512,7 +2511,7 @@ try {
   function applyMeta(msg) {
     app.physics = { ...msg.physics, geom: app.physics.geom };
     app.paused = msg.paused;
-    pauseButton.textContent = app.paused ? 'Resume' : 'Pause';
+    showPaused();
     for (const it of msg.items ?? []) {
       const r = robots.find((x) => x.netId === it.id);
       if (r) [r.pos, r.yaw] = [it.pos, it.yaw];
@@ -2647,11 +2646,12 @@ try {
       return !busy;
     },
   });
-  // Panel toggles (top right), apart from the simulation controls.
+  // Panel toggles (left column's above it, the others top right), apart
+  // from the simulation controls.
   // On a phone they start hidden and show one at a time (index.html's
   // narrow layout puts each across the width).
   const narrow = matchMedia('(max-width: 700px)');
-  const toggles = [...document.querySelectorAll('#views button')].map((b) => [b, document.getElementById(b.dataset.panel)]);
+  const toggles = [...document.querySelectorAll('.views button')].map((b) => [b, document.getElementById(b.dataset.panel)]);
   const showPanel = (panel, on) => {
     panel.hidden = !on;
     toggles.find(([, p]) => p === panel)[0].setAttribute('aria-pressed', String(on));
@@ -2784,11 +2784,17 @@ try {
     if (performance.now() - lastTouchEnd < 700) return;
     selectAt(e.clientX, e.clientY);
   });
+  // The toolbar's buttons have an icon and a .label (index.html).
+  const setLabel = (button, text) => { button.querySelector('.label').textContent = text; };
   const pauseButton = document.getElementById('pause');
-  pauseButton.onclick = (e) => {
+  function showPaused() {  // Pause (amber) or, while paused, Resume (green)
+    pauseButton.toggleAttribute('data-paused', !!app.paused);
+    setLabel(pauseButton, app.paused ? 'Resume' : 'Pause');
+  }
+  pauseButton.onclick = () => {
     if (app.net) { app.net.send('pause', { paused: !app.paused }); return; }
     app.paused = !app.paused;
-    e.target.textContent = app.paused ? 'Resume' : 'Pause';
+    showPaused();
     if (!app.paused && app.data) app.resync();
   };
   document.getElementById('reset').onclick = () => app.model && app.reset();
@@ -2809,8 +2815,8 @@ try {
       if (app.xr) { app.xr.session.end(); return; }
       try {
         const session = await app.enterVR(id === 'ar');
-        button.textContent = `Exit ${name}`;
-        session.addEventListener('end', () => { button.textContent = `Enter ${name}`; });
+        setLabel(button, `Exit ${name}`);
+        session.addEventListener('end', () => setLabel(button, `Enter ${name}`));
       } catch (err) {
         status.textContent = `${name} failed: ${err.message ?? err}`;
         console.error(err);

@@ -32,10 +32,11 @@ No bundler — `public/` is a static site.
 - **Driving:** the **Teleop** panel drives the newest or double-clicked
   robot: WASD walk, QE turn, or drag the goal marker on the floor; a
   gamepad works too. Robot arms have IK markers to drag.
-- **Toolbar** (top left): Pause, Reset (every robot back to its spawn pose),
+- **Toolbar** (top middle): Pause, Reset (every robot back to its spawn pose),
   Clear (remove everything), Enter VR / AR where the browser supports it.
-- **Panels** (top right): **Stage** (what is spawned: poses, joints; save,
-  load, download and share stages), **World** (physics, floor, lighting), **Cameras** (the robots'
+- **Panels**, left: **Assets** (the model library), **Stage** (what is
+  spawned: poses, joints; save, load, download and share stages), **World**
+  (physics, floor, lighting); right: **Teleop**, **Cameras** (the robots'
   cameras), **Render** (quality vs. GPU load), **Share** (open the page on
   another device).
 - **Touch screens:** one finger orbits, two pinch and pan; double tap

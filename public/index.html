@@ -7,18 +7,55 @@
   <style>
     html, body { margin: 0; height: 100%; overflow: hidden; background: #1b1d22; font: 13px system-ui, sans-serif; }
     canvas { display: block; width: 100%; height: 100%; touch-action: none; }
-    #ui { position: absolute; top: 12px; left: 12px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
-          min-width: 300px; box-sizing: border-box;
-          color: #ddd; background: rgba(0,0,0,.45); padding: 6px 10px; border-radius: 6px; }
+    /* The toolbar, top middle: centred in the room the two groups of panel
+       toggles leave on both sides (360 px each), as wide as its buttons,
+       300 px at least while there is room. */
+    #ui { position: absolute; top: 12px; left: 360px; right: 360px; margin: 0 auto; width: fit-content; z-index: 2;
+          display: flex; flex-wrap: wrap; justify-content: center; gap: 4px; align-items: center; box-sizing: border-box;
+          min-width: min(300px, calc(100% - 720px));
+          color: #ddd; background: rgba(0,0,0,.45); padding: 4px; border-radius: 8px; --c: #8a94a6; }
     /* The status on its own line under the buttons, as wide as they are (or
-       the Assets panel): its text never widens the toolbar into the panel
-       toggles; too long, it ends in … (the whole text is its tooltip). */
-    #status { flex: 1 1 100%; contain: inline-size; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    #ui button, #ui select { cursor: pointer; background: #333; color: #eee; border: 1px solid #555;
-          border-radius: 4px; padding: 3px 8px; font: inherit; white-space: nowrap; }
-    #assets { position: absolute; top: 84px; left: 12px; width: 300px; max-height: calc(100% - 96px - 104px);
-              display: flex; flex-direction: column; gap: 6px; box-sizing: border-box;
-              color: #ddd; background: rgba(0,0,0,.6); padding: 8px; border-radius: 6px; }
+       the toolbar's least width): its text never widens the toolbar into the
+       panel toggles; too long, it ends in … (the whole text is its tooltip). */
+    #status { flex: 1 1 100%; contain: inline-size; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+              font-size: 12px; color: #aaa; text-align: center; padding: 1px 6px 2px; }
+    /* Toolbar buttons: an icon and a label, each tinted with its colour
+       (--c): pause amber, resume green, reset blue, clear red, full restart
+       violet, VR / AR teal (--c set on each, the toolbar's grey else). */
+    #ui button { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font: inherit;
+                 white-space: nowrap; color: #f0f0f0; padding: 4px 10px 4px 8px; border-radius: 6px;
+                 background: color-mix(in srgb, var(--c) 18%, rgba(20,22,27,.85));
+                 border: 1px solid color-mix(in srgb, var(--c) 45%, transparent);
+                 transition: background .15s, border-color .15s; }
+    #ui button:hover { background: color-mix(in srgb, var(--c) 34%, rgba(20,22,27,.85)); border-color: var(--c); }
+    #ui button:active { background: color-mix(in srgb, var(--c) 48%, rgba(20,22,27,.85)); }
+    #ui button[hidden] { display: none; }
+    #ui button svg { width: 15px; height: 15px; flex: none; color: var(--c); fill: none; stroke: currentColor;
+                     stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+    #ui button svg.solid { fill: currentColor; stroke: none; }
+    #pause { --c: #f0b44c; }
+    #pause[data-paused] { --c: #5fd08a; }
+    #pause .i-play, #pause[data-paused] .i-pause { display: none; }
+    #pause[data-paused] .i-play { display: block; }
+    #reset { --c: #5ea8f0; }
+    #clear { --c: #f06a6a; }
+    #restart { --c: #b48cf0; }
+    #vr, #ar { --c: #46c8c0; }
+    /* Left column, under its toggles, down to the bottom (over the axes
+       gizmo): Assets, Stage and World, each shrinking (and scrolling) to
+       fit. Its height is fixed (it lets clicks through) so that Assets can
+       fill it. */
+    #left { position: absolute; top: 60px; left: 12px; width: 300px; height: calc(100% - 72px); z-index: 1;
+            display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
+    #left > * { pointer-events: auto; box-sizing: border-box; color: #ddd; background: rgba(0,0,0,.6);
+                padding: 8px 10px; border-radius: 6px; }
+    #left > [hidden] { display: none; }
+    #assets { display: flex; flex-direction: column; gap: 6px; min-height: 0; flex: 0 1 auto; }
+    #left > #assets { padding: 8px; }
+    /* The column's height shared out evenly, but none taller than its
+       content: a short panel (a folded Stage) takes what it needs, the
+       others split the rest and scroll. */
+    #left > :is(#assets, #stage, #world) { flex: 1 1 0; min-height: 0; max-height: max-content; }
     #assets[hidden] { display: none; }
     #assets .tabs { display: flex; gap: 2px; }
     #assets .tabs button { flex: 1; cursor: pointer; background: #2a2c31; color: #bbb; border: 1px solid #444;
@@ -63,18 +100,23 @@
                   background: rgba(40,40,40,.85); border: 1px solid #666; padding: 3px 8px; border-radius: 4px; }
     .drag-ghost.placing { background: rgba(30,110,150,.9); border-color: #5ac; }
     .drag-ghost .readout { font-size: 11px; opacity: .85; font-variant-numeric: tabular-nums; white-space: pre; }
-    #views { position: absolute; top: 12px; right: 12px; display: flex; padding: 3px; gap: 3px;
+    /* Panel toggles: those of the left column's panels above it, the
+       others top right. On a phone both groups share one row (#toggles). */
+    #toggles { display: contents; }
+    .views { position: absolute; display: flex; padding: 3px; gap: 3px;
              background: rgba(0,0,0,.45); border-radius: 8px; }
-    #views button { display: flex; align-items: center; gap: 6px; cursor: pointer; font: inherit;
+    #views-left { top: 12px; left: 12px; }
+    #views { top: 12px; right: 12px; }
+    .views button { display: flex; align-items: center; gap: 6px; cursor: pointer; font: inherit;
                     color: #aaa; background: transparent; border: 1px solid transparent; border-radius: 5px;
                     padding: 4px 10px; transition: background .15s, color .15s; }
-    #views button::before { content: ''; width: 7px; height: 7px; border-radius: 50%;
+    .views button::before { content: ''; width: 7px; height: 7px; border-radius: 50%;
                             background: #555; transition: background .15s, box-shadow .15s; }
-    #views button:hover { color: #eee; background: rgba(255,255,255,.08); }
-    #views button[hidden] { display: none; }
-    #views button[aria-pressed=true] { color: #fff; background: #3d5a73; border-color: #5a85a8; }
-    #views button[aria-pressed=true]::before { background: #7fd1ff; box-shadow: 0 0 6px #7fd1ff; }
-    /* Right column: Stage on top (scrolls), Teleop below it. */
+    .views button:hover { color: #eee; background: rgba(255,255,255,.08); }
+    .views button[hidden] { display: none; }
+    .views button[aria-pressed=true] { color: #fff; background: #3d5a73; border-color: #5a85a8; }
+    .views button[aria-pressed=true]::before { background: #7fd1ff; box-shadow: 0 0 6px #7fd1ff; }
+    /* Right column: Teleop, Cameras, Render, Share, Server. */
     #side { position: absolute; top: 60px; right: 12px; width: 320px; max-height: calc(100% - 72px); z-index: 1;
             display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
     #side > * { pointer-events: auto; box-sizing: border-box; color: #ddd; background: rgba(0,0,0,.6);
@@ -282,17 +324,20 @@
        under it, one panel at a time (main.js), across the width but
        for Assets, which keeps its desktop size. */
     @media (max-width: 700px) {
-      #ui { top: 8px; left: 8px; right: 8px; min-width: 0; gap: 4px; padding: 5px 6px; }
-      #ui button { padding: 5px 9px; }
+      #ui { top: 8px; left: 8px; right: 8px; width: auto; min-width: 0; gap: 4px; padding: 5px 6px; }
+      #ui button { padding: 6px 11px; }
+      #ui button .label { display: none; }  /* icons only: one row (their titles name them) */
       #status { font-size: 11px; color: #bbb; }
       /* The toggles scroll sideways when they do not fit (no scrollbar: the
          cut-off last one shows there is more). */
-      #views { top: 72px; left: 8px; right: auto; max-width: calc(100% - 16px); box-sizing: border-box;
-               overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; }
-      #views::-webkit-scrollbar { display: none; }
-      #views button { flex: none; padding: 5px 8px; }
-      #assets, #side { top: 112px; left: 8px; right: 8px; width: auto; max-height: calc(100% - 112px - 12px); }
-      #assets { right: auto; width: min(300px, calc(100% - 16px)); }  /* as on desktop: two columns */
+      #toggles { display: flex; gap: 6px; position: absolute; top: 72px; left: 8px; right: 8px;
+                 overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; }
+      #toggles::-webkit-scrollbar { display: none; }
+      #toggles .views { position: static; flex: none; }
+      .views button { flex: none; padding: 5px 8px; }
+      #left, #side { top: 112px; left: 8px; right: 8px; width: auto; max-height: calc(100% - 112px - 12px); }
+      #left { height: calc(100% - 112px - 12px); }
+      #left > #assets { align-self: flex-start; width: min(300px, 100%); }  /* as on desktop: two columns */
       #assets input[type=search], #teleop select, #world select, #world input, #render select, #teleop input[type=number], #teleop .ros input[type=text] { font-size: 16px; }  /* no zoom on focus (iOS) */
       #gizmo { width: 64px; height: 64px; left: 8px; bottom: 8px; }
       #sticks { left: 12px; right: 12px; bottom: 84px; }
@@ -303,31 +348,35 @@
 <body>
   <canvas id="canvas"></canvas>
   <div id="ui">
-    <button id="pause">Pause</button>
-    <button id="reset" title="Every robot back to its spawn pose">Reset</button>
-    <button id="clear" title="Remove all robots">Clear</button>
-    <button id="restart" hidden title="Shared world: the server reads the model files again and starts the simulation anew (time 0, every robot at its spawn point, controllers fresh), for everyone">Full restart</button>
-    <button id="vr" hidden>Enter VR</button>
-    <button id="ar" hidden title="Passthrough: the robots in your room (Quest 3)">Enter AR</button>
+    <button id="pause" title="Pause or resume the simulation"><svg class="i-pause solid" viewBox="0 0 24 24"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg><svg class="i-play solid" viewBox="0 0 24 24"><path d="M8 5.5v13a1 1 0 0 0 1.5.86l10.5-6.5a1 1 0 0 0 0-1.72L9.5 4.64A1 1 0 0 0 8 5.5z"/></svg><span class="label">Pause</span></button>
+    <button id="reset" title="Reset: every robot back to its spawn pose"><svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 2.64-6.36L3 8.3"/><path d="M3 3v5.3h5.3"/></svg><span class="label">Reset</span></button>
+    <button id="clear" title="Clear: remove all robots"><svg viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M10 11v6M14 11v6"/><path d="M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12"/><path d="M9 7V4.5A1.5 1.5 0 0 1 10.5 3h3A1.5 1.5 0 0 1 15 4.5V7"/></svg><span class="label">Clear</span></button>
+    <button id="restart" hidden title="Full restart of the shared world: the server reads the model files again and starts the simulation anew (time 0, every robot at its spawn point, controllers fresh), for everyone"><svg viewBox="0 0 24 24"><path d="M12 3v8"/><path d="M6.3 6.8a8 8 0 1 0 11.4 0"/></svg><span class="label">Full restart</span></button>
+    <button id="vr" hidden title="Enter VR"><svg viewBox="0 0 24 24"><path d="M4 7h16a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1h-5l-3-3-3 3H4a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1z"/><circle cx="8" cy="11.5" r="1.5"/><circle cx="16" cy="11.5" r="1.5"/></svg><span class="label">Enter VR</span></button>
+    <button id="ar" hidden title="Enter AR: the robots in your room (passthrough, Quest 3)"><svg viewBox="0 0 24 24"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M4 7.5l8 4.5 8-4.5M12 12v9"/></svg><span class="label">Enter AR</span></button>
     <span id="status">loading…</span>
   </div>
-  <div id="views" role="group" aria-label="Panels">
+  <div id="toggles">
+  <div id="views-left" class="views" role="group" aria-label="Left panels">
     <button data-panel="assets" title="Show or hide the asset library">Assets</button>
     <button data-panel="stage" title="Spawned robots: joints, controls, reset, remove">Stage</button>
     <button data-panel="world" title="World physics: gravity, medium, default geom properties">World</button>
+  </div>
+  <div id="views" class="views" role="group" aria-label="Right panels">
     <button data-panel="teleop" title="Teleoperate a robot: controller and input">Teleop</button>
     <button data-panel="cameras" title="The robots' cameras: picture-in-picture windows, looking through one">Cameras</button>
     <button data-panel="render" title="Rendering quality: resolution, anti-aliasing, occlusion, shadows, textures">Render</button>
     <button data-panel="share" title="Open this page on another device: a short code or a QR code">Share</button>
     <button data-panel="server" hidden title="Where the world runs: in this browser, or on a server shared with others (Binder)">Server</button>
   </div>
+  </div>
+  <div id="left">
   <div id="assets">
     <div class="tabs"></div>
     <input type="search" placeholder="Filter…">
     <ul></ul>
     <div class="hint">Drag an item onto the floor to spawn it. While dragging: mouse wheel or Q/E turns it, Shift+wheel or R/F raises/lowers it, Esc cancels.</div>
   </div>
-  <div id="side">
   <div id="stage">
     <div class="stage-bar">
       <button class="save" title="Save what is spawned, its joints and controllers, the cameras and the view as a new stage">Save stage</button>
@@ -349,6 +398,8 @@
     <h3>World</h3>
     <div class="body"></div>
   </div>
+  </div>
+  <div id="side">
   <div id="teleop">
     <h3>Teleop</h3>
     <div class="body"></div>

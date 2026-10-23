@@ -89,7 +89,7 @@ const ev = async (expression) => {
 try {
   await send('Page.navigate', { url });
   for (let i = 0; i < 200 && !(await ev(`!!window.spawnAsset && !!window.app?.model`).catch(() => false)); i++) await sleep(300);
-  await ev(`for (const id of ['ui', 'views', 'assets', 'side', 'gizmo', 'stats']) document.getElementById(id).style.display = 'none'`);
+  await ev(`for (const id of ['ui', 'toggles', 'left', 'side', 'gizmo', 'stats']) document.getElementById(id).style.display = 'none'`);
   for (const [i, a] of todo.entries()) {
     await ev(`clearAssets()`);
     await ev(`spawnAsset(${JSON.stringify(a.rel)})`);
