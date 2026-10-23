@@ -1,4 +1,4 @@
-// The World panel: global physics options and default geom properties
+// The Physics panel: global physics options and default geom properties
 // (physics.js). Options apply as soon as a field changes; default geom
 // properties change masses, so they wait for Apply (a rebuild). How the
 // floor and the lighting look is the Render panel's (render.js).

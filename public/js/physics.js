@@ -1,4 +1,4 @@
-// World physics settings (the World panel), for this page only (not saved):
+// Physics settings (the Physics panel), for this page only (not saved):
 //
 // - Global options (MuJoCo <option>): gravity, wind, magnetic field, medium
 //   density and viscosity (both 0: no fluid forces, so wind does nothing),
@@ -8,7 +8,7 @@
 //   costs more step time; friction is softer this way, though, and held
 //   things can creep (a Panda lets a 100 g box slide out of its fingers in
 //   seconds; elliptic with impratio 10 holds it, swinging, within 2 mm),
-//   so grasping may want those back in the World panel. They go into
+//   so grasping may want those back in the Physics panel. They go into
 //   the world spec at every rebuild (world.js) and are also set on the live
 //   model, so a change needs no rebuild.
 // - Default geom properties: density, mass and friction for every geom that
@@ -47,7 +47,7 @@ export const PHYSICS_DEFAULTS = Object.freeze({
   geom: { density: 1000, mass: null, friction: [1, 0.005, 0.0001] },
 });
 
-// The World panel's settings for this page: the defaults at every load,
+// The Physics panel's settings for this page: the defaults at every load,
 // not kept in the browser.
 export function loadPhysics() {
   return structuredClone(PHYSICS_DEFAULTS);

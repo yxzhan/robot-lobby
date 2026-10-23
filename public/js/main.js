@@ -1426,7 +1426,7 @@ class App {
     }
   }
 
-  // Sim time follows wall time at the World panel's speed from now on:
+  // Sim time follows wall time at the Physics panel's speed from now on:
   // target(t) = (t - simStart) · speed.
   resync() {
     this.simStart = performance.now() - (this.data?.time ?? 0) * 1000 / (this.physics?.speed || 1);
@@ -1812,7 +1812,7 @@ try {
     onForget: () => { setStartStage(null); refreshStages(); status.textContent = `the next page load starts from an empty floor · ${hint()}`; },
   });
   app.teleop = new TeleopPanel(app, document.getElementById('teleop'));
-  app.physics = loadPhysics();  // World panel settings (physics.js)
+  app.physics = loadPhysics();  // Physics panel settings (physics.js)
   app.world = new WorldPanel(app, document.getElementById('world'));
   app.renderPanel = new RenderPanel(app, document.getElementById('render'));
   app.cameras = new Cameras(app);
@@ -1889,7 +1889,7 @@ try {
     return visuals.get(rel);
   }
 
-  // The World panel's default geom properties, written into every model's
+  // The Physics panel's default geom properties, written into every model's
   // root default class before it is compiled (physics.js).
   const editDocs = (docs) => injectGeomDefaults(docs, geomOverrides(app.physics));
 
@@ -2197,7 +2197,7 @@ try {
     }
   }
 
-  // New World panel settings: global options go straight into the live
+  // New Physics panel settings: global options go straight into the live
   // model; changed default geom properties recompile every model's masses
   // and rebuild the world (state kept). Resolves to false if busy.
   app.setPhysics = async (next) => {
@@ -2406,9 +2406,9 @@ try {
   // Load: the stage replaces what is spawned (for everyone, in network mode).
   async function openStage(e, ask = true) {
     if (busy) { status.textContent = 'busy, try again in a moment'; return; }
-    // Always asked first (not for a linked stage, asked about already): the current scene goes.
-    const scene = robots.length ? `the ${robots.length} spawned model${robots.length > 1 ? 's' : ''} and their state` : 'the current scene';
-    if (ask && !confirm(`Load the stage "${e.name}"?\n\nThis clears ${scene}${app.net ? ' for everyone on this server' : ''}, then loads the stage.`)) return;
+    // Asked first when something is spawned (not for a linked stage, asked about already): it goes.
+    const scene = `the ${robots.length} spawned model${robots.length > 1 ? 's' : ''} and their state`;
+    if (ask && robots.length && !confirm(`Load the stage "${e.name}"?\n\nThis clears ${scene}${app.net ? ' for everyone on this server' : ''}, then loads the stage.`)) return;
     let bundle;
     try {
       bundle = await e.store.get(e.id);
@@ -2751,7 +2751,7 @@ try {
   const selectAt = async (x, y) => {
     const hit = await app.pickBody(x, y);  // a promise in network mode
     app.perturb.select(hit);
-    // The camera turns about the selection, and follows it if the World
+    // The camera turns about the selection, and follows it if the Render
     // panel says so.
     if (app.follow) app.trackSelection();
     else {

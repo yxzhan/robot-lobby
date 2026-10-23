@@ -61,7 +61,7 @@ the browser: trained policies (policies.py, GR00T on onnxruntime), mobile
 bases (base.py), IK (ik.py) and the goal marker (goal.py), ports of
 groot.js, base.js, ik.js and goal.js; a goal is one per robot, for every
 browser. Setups
-saved from the panel go to server/saved/{ik,base}.json. Not yet: the World
+saved from the panel go to server/saved/{ik,base}.json. Not yet: the Physics
 panel's default geom properties.
 
 Stages (public/js/stage.js) are folders under mjcf_assets/saved_stage/,
@@ -173,7 +173,7 @@ def apply_options(model, physics):
 
 
 def checked_physics(physics, old):
-  """World panel settings from a page or a stage: known keys only (the rest
+  """Physics panel settings from a page or a stage: known keys only (the rest
   as they were), in range."""
   new = {k: physics.get(k, v) for k, v in old.items()}
   new['timestep'] = min(0.05, max(1e-4, float(new['timestep'])))

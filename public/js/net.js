@@ -40,7 +40,7 @@ export class NetClient {
     this.replies = new Map();  // rid -> {resolve, reject}
     this.nextRid = 1;
     this.rtt = null;           // ms, smoothed
-    this.simRate = 1;          // sim seconds per wall second between states (the World panel's speed, or slower)
+    this.simRate = 1;          // sim seconds per wall second between states (the Physics panel's speed, or slower)
     this.interval = 1 / 30;    // s between states as they arrive, smoothed
     this.jitter = 0.01;        // s, smoothed deviation from that
     this.delay = 0.1;          // s, the view's current lag behind the newest state

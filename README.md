@@ -35,8 +35,8 @@ No bundler — `public/` is a static site.
 - **Toolbar** (top middle): Pause, Reset (every robot back to its spawn pose),
   Clear (remove everything), Enter VR / AR where the browser supports it.
 - **Panels**, left: **Assets** (the model library), **Stage** (what is
-  spawned: poses, joints; save, load, download and share stages), **World**
-  (physics); right: **Teleop**, **Cameras** (the robots' cameras),
+  spawned: poses, joints; save, load, download and share stages),
+  **Physics**; right: **Teleop**, **Cameras** (the robots' cameras),
   **Render** (quality vs. GPU load, floor, lighting, camera follow),
   **Share** (open the page on another device).
 - **Touch screens:** one finger orbits, two pinch and pan; double tap
@@ -73,7 +73,7 @@ The model library is `mjcf_assets/` next to `package.json`
 
 - [Spawning](docs/spawning.md) — the asset library, thumbnails, how the
   world is rebuilt on every spawn, memory
-- [World physics](docs/world.md) — the World panel: options, timestep,
+- [Physics](docs/world.md) — the Physics panel: options, timestep,
   floor, lighting, sleep
 - [Teleop](docs/teleop.md) — driving, the goal marker, gamepads, scripted goals
 - [Policies](docs/policies.md) — GR00T (G1), Playground (Spot, Go2), Microduck

@@ -42,7 +42,7 @@
     #restart { --c: #b48cf0; }
     #vr, #ar { --c: #46c8c0; }
     /* Left column, under its toggles, down to the bottom (over the axes
-       gizmo): Assets, Stage and World, each shrinking (and scrolling) to
+       gizmo): Assets, Stage and Physics (#world), each shrinking (and scrolling) to
        fit. Its height is fixed (it lets clicks through) so that Assets can
        fill it. */
     #left { position: absolute; top: 60px; left: 12px; width: 300px; height: calc(100% - 72px); z-index: 1;
@@ -58,8 +58,9 @@
     #left > :is(#assets, #stage, #world) { flex: 1 1 0; min-height: 0; max-height: max-content; }
     #assets[hidden] { display: none; }
     #assets .tabs { display: flex; gap: 2px; }
-    #assets .tabs button { flex: 1; cursor: pointer; background: #2a2c31; color: #bbb; border: 1px solid #444;
-                           border-radius: 4px; padding: 4px 2px; font: inherit; font-size: 12px; white-space: nowrap; }
+    #assets .tabs button { flex: 1 1 auto; min-width: 0; cursor: pointer; background: #2a2c31; color: #bbb; border: 1px solid #444;
+                           border-radius: 4px; padding: 4px 2px; font: inherit; font-size: 12px; white-space: nowrap;
+                           overflow: hidden; text-overflow: ellipsis; }
     #assets .tabs .count { color: #999; font-size: 11px; }
     #assets .tabs button.active { background: #3d5a73; color: #fff; border-color: #5a85a8; }
     #assets input[type=search] { background: #222; color: #eee; border: 1px solid #555; border-radius: 4px;
@@ -370,7 +371,7 @@
   <div id="views-left" class="views" role="group" aria-label="Left panels">
     <button data-panel="assets" title="Show or hide the asset library">Assets</button>
     <button data-panel="stage" title="Spawned robots: joints, controls, reset, remove">Stage</button>
-    <button data-panel="world" title="World physics: gravity, medium, default geom properties">World</button>
+    <button data-panel="world" title="Physics: gravity, medium, contacts, timestep, speed, default geom properties">Physics</button>
   </div>
   <div id="views" class="views" role="group" aria-label="Right panels">
     <button data-panel="teleop" title="Teleoperate a robot: controller and input">Teleop</button>
@@ -405,7 +406,7 @@
     <div class="hint empty">Nothing spawned yet: drag an asset onto the floor.</div>
   </div>
   <div id="world" hidden>
-    <h3>World</h3>
+    <h3>Physics</h3>
     <div class="body"></div>
   </div>
   </div>

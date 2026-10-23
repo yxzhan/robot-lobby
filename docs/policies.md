@@ -13,7 +13,7 @@ directory; shared, loaded on first use; onnxruntime-web is there as
 `bind` / `unbind` / `owns` / `pose` / `reset` / async `step`, plus `cmd` /
 `drive` for a locomotion policy driven by the keys, and an optional
 `substep(data)` run before every physics step (actuator models).
-An entry's optional `physics` names World settings it needs (e.g.
+An entry's optional `physics` names Physics settings it needs (e.g.
 `{cone: 'elliptic', impratio: 100}`): the Policy section shows them when
 the world differs, with a button that applies them. The panel's Policy
 section picks the model; a hand or quadruped policy is one more entry.

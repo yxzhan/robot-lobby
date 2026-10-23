@@ -1,6 +1,6 @@
 // The asset panel: the models of the library index (public/json/assets.json,
 // written by scripts/vendor.mjs from mjcf_assets/) under the tabs recent /
-// environments / robots / objects, with a name filter; within a tab, models
+// scenes (mjcf_assets/environments/) / robots / objects, with a name filter; within a tab, models
 // are listed under foldable group headers (their source, or menagerie's
 // README sections), in the index's order.
 // Recent (the default tab) lists the last MAX_RECENT models spawned from the
@@ -18,7 +18,7 @@
 
 import { dataUrl } from './endpoint.js';
 
-export const CATEGORIES = [['environment', 'Environments'], ['robot', 'Robots'], ['object', 'Objects']];
+export const CATEGORIES = [['environment', 'Scenes'], ['robot', 'Robots'], ['object', 'Objects']];
 const TABS = [['recent', 'Recent'], ...CATEGORIES];
 const RECENT_STORE = 'mujoco-filament/recent';
 const MAX_RECENT = 30;

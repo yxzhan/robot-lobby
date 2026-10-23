@@ -724,13 +724,13 @@ export class TeleopPanel {
     }
     const row = el('div', { className: 'field' }, el('span', { textContent: 'Model' }), el('div', { className: 'ctl' }, models));
     box.append(row);
-    // World settings the policy needs (its physics), if they differ.
+    // Physics settings the policy needs, if they differ.
     const ph = this.app.physics, want = p?.physics ?? {};
     const off = Object.keys(want).filter((k) => JSON.stringify(ph[k]) !== JSON.stringify(want[k]));
     if (r.use.policy && off.length) {
       const text = off.map((k) => `${k} ${want[k]}`).join(', ');
       box.append(el('div', { className: 'bar' },
-        el('span', { className: 'note warn', textContent: `Needs ${text} (World panel)` }),
+        el('span', { className: 'note warn', textContent: `Needs ${text} (Physics panel)` }),
         this.button('Apply', `Set ${text} for the whole world`, () => {
           this.app.setPhysics({ ...structuredClone(ph), ...structuredClone(want) }).then(() => this.render());
         })));

@@ -25,7 +25,7 @@ which it loads no MuJoCo at all:
   (`forwardKinematics`, MuJoCo's `mj_kinematics`, matching it to 1e-15).
 - **Requests.** Spawn, Clear / ✕, Reset, Pause, the Stage panel's
   poses and sliders, Shift+drag, double-click picking (the server casts the
-  ray) and the World panel's options go to the server, which applies them
+  ray) and the Physics panel's options go to the server, which applies them
   and tells every browser. Robots are attached in the same order on both
   sides, so bodies, joints and actuators are numbered the same.
 - **Controllers on the server.** Policies (`server/policies.py`: GR00T
@@ -72,7 +72,7 @@ which it loads no MuJoCo at all:
   G1s walking under GR00T keep real time (eight before). More worlds are
   more servers, e.g. one per Binder pod.
 
-Not yet in network mode: the World panel's default geom properties. The scene lives as long as
+Not yet in network mode: the Physics panel's default geom properties. The scene lives as long as
 the server process. Local mode keeps everything in the browser as before.
 
 `?local` in the URL keeps the page fully local (WASM physics) even when the

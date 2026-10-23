@@ -1,7 +1,7 @@
 # Spawning robots
 
 The scene starts as an empty floor (`BASE_XML` in `public/js/world.js`). The
-Assets panel lists every model under three tabs — Environments, Robots,
+Assets panel lists every model under three tabs — Scenes (`environments/`), Robots,
 Objects (`public/js/assets.js`) — after a **Recent** tab (the default): the
 last 30 models spawned from the panel, newest first, kept in the browser's
 localStorage; a browser without that list starts from `public/json/recent.json`
@@ -18,7 +18,7 @@ them), Reset puts every robot back in its spawn pose. In a shared world, **Full 
 again and start anew: a fresh MjData at time 0, every robot at its spawn
 point with fresh controllers (the same ones switched on), so edits to the
 MJCF files take effect without restarting the server. The toggles above the
-left column show or hide the Assets, Stage and World panels (in it), those at
+left column show or hide the Assets, Stage and Physics panels (in it), those at
 the top right Teleop and the other panels of the right column.
 
 On a touch screen (phone, tablet): one finger orbits the camera, two pinch
@@ -46,7 +46,7 @@ bodies carried along.
 what is spawned as a new stage: each item's spawn pose, joint positions,
 actuator controls and mocap bodies (by name, so a changed model loads what
 still matches), the controllers switched on with their IK and base setups,
-the camera setups and which cameras are on, the World panel's physics, the
+the camera setups and which cameras are on, the Physics panel's physics, the
 view, and a 256×256 picture of it. A stage is a folder named by a random id
 (the name is inside, so names may repeat): `stage.json`, `thumbnail.jpg`,
 `ik.json`, `base.json`, `cameras.json` (keyed like `ik_defaults.json`,
@@ -119,7 +119,7 @@ its own first keyframe (qpos + ctrl, free joints shifted to the click point)
 or `qpos0`. Compile time grows with the number of robots (~3 s per spawn
 with a dozen menagerie robots). Physics `<option>`s come from `BASE_XML`: a
 robot's own (e.g. the quadrupeds' elliptic cones / `impratio`) is dropped
-with an "Attach conflict" warning in the console; set them in the World
+with an "Attach conflict" warning in the console; set them in the Physics
 panel (a policy that needs them offers to).
 
 ## Memory: physics-only world, render data per robot file
