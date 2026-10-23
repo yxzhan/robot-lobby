@@ -89,8 +89,9 @@ Picking uses `mj_ray` on the physics world, so it hits collision geoms.
   `node scripts/vendor.mjs` after adding models.
 - **Thumbnails** — `python3 scripts/thumbnails.py` (after `vendor.mjs`)
   compresses each model's screenshot (`<name>.jpg`) into
-  `public/thumbs/<category>/<source>/<model>.webp` (≤ 320×240; the 4K
-  menagerie renders go from ~84 MB to ~0.4 MB). The originals are untouched;
+  `mjcf_assets/thumbs/<category>/<source>/<model>.webp` (≤ 320×240; the 4K
+  menagerie renders go from ~84 MB to ~0.4 MB), in the library so that they
+  go wherever it goes (a Binder session's volume keeps them). The originals are untouched;
   models without a screenshot show their initials. A `<name>.jpg` added after
   the index was written is picked up too, and models with no image at all
   are listed at the end.

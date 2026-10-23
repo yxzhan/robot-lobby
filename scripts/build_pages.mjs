@@ -11,7 +11,7 @@
 //
 //   node scripts/fetch_assets.mjs               # public/mjcf_assets, if not there
 //   node scripts/vendor.mjs                     # public/vendor, the indexes
-//   python3 scripts/thumbnails.py               # public/thumbs
+//   python3 scripts/thumbnails.py               # mjcf_assets/thumbs
 //   node scripts/build_pages.mjs [--out dist] [--binder gh/<owner>/<repo>/<ref>] [--hub https://mybinder.org]
 //   node scripts/build_pages.mjs --push origin    # and publish it as branch gh-pages
 //
@@ -26,7 +26,7 @@
 // branch.
 import { execFileSync } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 
 const MAX_FILE = 100e6, MAX_SITE = 1e9;
 
@@ -45,16 +45,15 @@ for (const f of ['public/mjcf_assets', 'public/json/assets.json', 'public/json/p
 rmSync(out, { recursive: true, force: true });
 mkdirSync(out, { recursive: true });
 
-// The page: public/ but for the library, its indexes and the thumbnails,
-// which follow below.
-const LIBRARY = ['mjcf_assets', 'pretrained_policies', 'thumbs', 'json/assets.json', 'json/policies.json', 'json/recent.json', 'json/deploy.json'];
+// The page: public/ but for the library and its indexes, which follow below.
+const LIBRARY = ['mjcf_assets', 'pretrained_policies', 'json/assets.json', 'json/policies.json', 'json/recent.json', 'json/deploy.json'];
 cpSync('public', out, {
   recursive: true, dereference: true,
   filter: (src) => !LIBRARY.includes(src.slice('public/'.length)) && !src.split('/').some((p) => p.startsWith('.mjcf_assets-')),
 });
 
-// The models: all of public/mjcf_assets, its index, the recent list's models
-// that are there, and their thumbnails.
+// The models: all of public/mjcf_assets (the thumbnails in mjcf_assets/thumbs
+// too), its index and the recent list's models that are there.
 cpSync('public/mjcf_assets', join(out, 'mjcf_assets'), {
   recursive: true, dereference: true,
   filter: (src) => !src.split('/').includes('.git'),
@@ -64,14 +63,7 @@ writeFileSync(join(out, 'json', 'assets.json'), JSON.stringify(assets, null, 1))
 const rels = new Set(assets.map((m) => `${m.dir}/${m.main}`));
 const recent = JSON.parse(readFileSync('public/json/recent.json', 'utf8')).filter((r) => rels.has(r));
 writeFileSync(join(out, 'json', 'recent.json'), JSON.stringify(recent, null, 1));
-let thumbs = 0;
-for (const m of assets) {
-  const t = `thumbs/${m.category}/${m.source}/${m.name}.webp`;  // thumbPath in public/js/assets.js
-  if (!existsSync(join('public', t))) continue;
-  mkdirSync(dirname(join(out, t)), { recursive: true });
-  cpSync(join('public', t), join(out, t));
-  thumbs++;
-}
+const thumbs = assets.filter((m) => existsSync(join(out, `mjcf_assets/thumbs/${m.category}/${m.source}/${m.name}.webp`))).length;  // thumbPath
 
 // The policies.
 const installed = JSON.parse(readFileSync('public/json/policies.json', 'utf8'));

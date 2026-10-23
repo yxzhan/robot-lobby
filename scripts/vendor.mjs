@@ -47,6 +47,7 @@ console.log('vendored', Object.keys(copies).length, 'files into public/vendor');
 const LIBRARY = 'mjcf_assets';
 const CATEGORIES = { environments: 'environment', robots: 'robot', objects: 'object' };
 const STAGES = 'saved_stage';  // mjcf_assets/saved_stage/: saved stages, not models (indexStages)
+const THUMBS = 'thumbs';       // mjcf_assets/thumbs/: the panel's thumbnails (scripts/thumbnails.py)
 const FIRST_SOURCES = ['aicor'];
 const MENAGERIE = 'mujoco_menagerie';
 
@@ -183,7 +184,7 @@ function indexLibrary() {
   const models = [];
   for (const catDir of subdirs(LIBRARY)) {
     const category = CATEGORIES[catDir];
-    if (catDir === STAGES) continue;  // saved stages (indexStages)
+    if (catDir === STAGES || catDir === THUMBS) continue;  // saved stages (indexStages), thumbnails
     if (!category) { console.warn(`skipping ${LIBRARY}/${catDir}: not one of ${Object.keys(CATEGORIES)}`); continue; }
     for (const source of subdirs(`${LIBRARY}/${catDir}`)) {
       const sourceDir = `${LIBRARY}/${catDir}/${source}`;

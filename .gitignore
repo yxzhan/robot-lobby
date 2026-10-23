@@ -7,7 +7,6 @@ public/json/policies.json
 public/mjcf_assets
 public/json/assets.json
 public/json/stages.json
-public/thumbs/
 # the GitHub Pages site, scripts/build_pages.mjs
 dist/
 # model library / policies checked out next to package.json

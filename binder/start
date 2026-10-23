@@ -1,11 +1,14 @@
 #!/bin/bash
 # Runs as the pod starts, before Jupyter: indexes the mounted model library
 # (public/mjcf_assets, see postBuild) and the policies for the page's asset
-# panel, and makes the thumbnails, a few seconds. A missing library leaves
-# the panel empty but does not stop the session.
+# panel. The thumbnails live in the library (mjcf_assets/thumbs, kept on the
+# volume), so they are made only when there are none yet; after models are
+# added, `python3 scripts/thumbnails.py` updates them (binder/sync_assets.py
+# copies them along and runs it).
+# A missing library leaves the panel empty but does not stop the session.
 (
   cd "${REPO_DIR:-$HOME}" &&
   node scripts/vendor.mjs > /tmp/index.log 2>&1 &&
-  python3 scripts/thumbnails.py >> /tmp/index.log 2>&1
+  if [ ! -d public/mjcf_assets/thumbs ]; then python3 scripts/thumbnails.py >> /tmp/index.log 2>&1; fi
 ) || echo "indexing the model library failed, see /tmp/index.log"
 exec "$@"

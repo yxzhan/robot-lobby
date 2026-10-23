@@ -1,7 +1,9 @@
 """Compresses each asset's screenshot into a small WebP thumbnail for the
-asset panel: public/thumbs/<category>/<source>/<model>.webp (thumbPath in
+asset panel: mjcf_assets/thumbs/<category>/<source>/<model>.webp (thumbPath in
 public/js/assets.js), at most WIDTH x HEIGHT, aspect kept. The originals are
-not touched.
+not touched. They live in the library, so they go wherever it goes (a
+Binder session's shared volume keeps them: binder/start makes them only if
+there are none).
 
 Reads the library index written by scripts/vendor.mjs (public/json/assets.json,
 whose `screenshot` names the image in the model's `dir`), so run that first.
@@ -18,6 +20,7 @@ import pathlib
 from PIL import Image
 
 PUBLIC = pathlib.Path(__file__).resolve().parent.parent / 'public'
+THUMBS = PUBLIC / 'mjcf_assets' / 'thumbs'  # through the library's link
 WIDTH, HEIGHT = 320, 240  # 2x the panel's card size
 QUALITY = 80
 
@@ -37,7 +40,7 @@ def main():
       missing.append(f"{model['category']}/{model['source']}/{model['name']}")
       continue
     src = PUBLIC / model['dir'] / shot
-    dst = PUBLIC / 'thumbs' / model['category'] / model['source'] / f"{model['name']}.webp"
+    dst = THUMBS / model['category'] / model['source'] / f"{model['name']}.webp"
     if not src.exists():
       print(f'missing {src}')
       continue
@@ -51,7 +54,7 @@ def main():
     total_in += src.stat().st_size
     total_out += dst.stat().st_size
   print(f'{made} thumbnails written; screenshots {total_in / 2**20:.1f} MB -> '
-        f'thumbnails {total_out / 2**20:.2f} MB in {PUBLIC / "thumbs"}')
+        f'thumbnails {total_out / 2**20:.2f} MB in {THUMBS}')
   if missing:
     print(f'{len(missing)} without a screenshot: {", ".join(missing)}')
 

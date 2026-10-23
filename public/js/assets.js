@@ -60,7 +60,7 @@ export async function loadAssets(index = 'json/assets.json') {
 }
 
 // Where scripts/thumbnails.py puts a model's thumbnail (same rule there).
-export const thumbPath = (m) => `thumbs/${m.category}/${m.source}/${m.name}.webp`;
+export const thumbPath = (m) => `mjcf_assets/thumbs/${m.category}/${m.source}/${m.name}.webp`;  // scripts/thumbnails.py
 
 const STEP = Math.PI / 12, HEIGHT_STEP = 0.05, MAX_HEIGHT = 5;
 

@@ -59,8 +59,12 @@ hub's own default: `https://<binderhub>/v2/gh/<owner>/robot-lobby/<branch>?urlpa
 `start` runs as the pod starts, when the volume is there: it indexes the
 library and the policies (`scripts/vendor.mjs`, which indexes through
 `public/mjcf_assets` when there is no `mjcf_assets/` next to
-`package.json`) and makes the thumbnails, a few seconds; the log is
-`/tmp/index.log`.
+`package.json`), and makes the thumbnails (`mjcf_assets/thumbs`, kept on
+the volume) only when there are none yet; the log is `/tmp/index.log`.
+`binder_build.ipynb` launches a session from a script, copies the local
+library into it (`sync_assets.py`: only what is new or changed, through the
+Jupyter Contents API and the session's terminal; the thumbnails go with
+it), then indexes it again there.
 
 **Joining.** The Server panel is hidden for now (its button in
 `index.html` has `hidden`). *Start a server on Binder* there calls
