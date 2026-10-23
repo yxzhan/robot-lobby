@@ -29,8 +29,9 @@ console.log('vendored', Object.keys(copies).length, 'files into public/vendor');
 // (aicor, mujoco_menagerie, robocasa, …).
 //
 // Naming convention: model directory <name>/ holds <name>.xml (the file that
-// gets spawned) and <name>.png (its screenshot, optional; scripts/
-// thumbnails.py makes the panel thumbnail from it). Directories without
+// gets spawned) and <name>.jpg (its screenshot, optional, 500 px wide; a
+// <name>.png also does; scripts/thumbnails.py makes the panel thumbnail
+// from it). Directories without
 // <name>.xml are skipped with a warning. The one exception is upstream
 // mujoco_menagerie, which keeps its own file names and is indexed from its
 // README's model table instead (menagerieModels).
@@ -152,13 +153,13 @@ function menagerieModels(sourceDir) {
 const subdirs = (dir) => readdirSync(dir, { withFileTypes: true })
   .filter((d) => d.isDirectory() && !d.name.startsWith('.')).map((d) => d.name);
 
-// Models following the naming convention: <name>/<name>.xml (+ <name>.png).
+// Models following the naming convention: <name>/<name>.xml (+ <name>.jpg).
 function conventionModels(sourceDir, source) {
   const models = [];
   for (const name of subdirs(sourceDir)) {
     const dir = `${sourceDir}/${name}`;
     if (!existsSync(`${dir}/${name}.xml`)) { console.warn(`skipping ${dir}: no ${name}.xml`); continue; }
-    const screenshot = existsSync(`${dir}/${name}.png`) ? `${name}.png` : undefined;
+    const screenshot = [`${name}.jpg`, `${name}.png`].find((f) => existsSync(`${dir}/${f}`));
     models.push({ name, dir, main: `${name}.xml`, group: source, rank: 0, screenshot });
   }
   return models;

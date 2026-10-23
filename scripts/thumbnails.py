@@ -5,8 +5,8 @@ not touched.
 
 Reads the library index written by scripts/vendor.mjs (public/json/assets.json,
 whose `screenshot` names the image in the model's `dir`), so run that first.
-A model the index has no screenshot for still gets one from `<dir>/<name>.png`
-(the naming convention) if that image was added after indexing; models with
+A model the index has no screenshot for still gets one from `<dir>/<name>.jpg`
+(or .png, the naming convention) if that image was added after indexing; models with
 no image at all are listed. Thumbnails newer than their screenshot are kept.
 
     python3 scripts/thumbnails.py
@@ -30,8 +30,9 @@ def main():
     raise SystemExit(f'no {index}: run node scripts/vendor.mjs first')
   for model in json.loads(index.read_text()):
     shot = model.get('screenshot')
-    if not shot and (PUBLIC / model['dir'] / f"{model['name']}.png").exists():
-      shot = f"{model['name']}.png"  # added after the index was written
+    if not shot:  # added after the index was written
+      shot = next((f for f in (f"{model['name']}.jpg", f"{model['name']}.png")
+                   if (PUBLIC / model['dir'] / f).exists()), None)
     if not shot:
       missing.append(f"{model['category']}/{model['source']}/{model['name']}")
       continue

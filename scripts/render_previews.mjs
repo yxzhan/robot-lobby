@@ -1,4 +1,4 @@
-// Renders <name>/<name>.png (the naming convention in scripts/vendor.mjs)
+// Renders <name>/<name>.jpg (the naming convention in scripts/vendor.mjs)
 // for every asset (of the given categories or <category>/<source>es of
 // mjcf_assets/) that has no screenshot yet, with the viewer itself in
 // headless Chrome: each asset is spawned alone, framed by its collision
@@ -52,7 +52,7 @@ for (const m of JSON.parse(readFileSync(index, 'utf8'))) {
   const where = m.dir.split('/').slice(1).join('/');
   const group = `${m.dir.split('/').slice(1, 3).join('/')}/${m.group}`;
   if (filters.length && !filters.some((f) => [where, group].some((w) => w === f || w.startsWith(`${f}/`)))) continue;
-  todo.push({ name: m.name, rel: `${m.dir}/${m.main}`, out: join(m.dir, `${m.name}.png`) });
+  todo.push({ name: m.name, rel: `${m.dir}/${m.main}`, out: join(m.dir, `${m.name}.jpg`) });
 }
 console.log(`${todo.length} assets to render`);
 if (!todo.length) process.exit(0);
@@ -150,7 +150,8 @@ try {
       }
     })()`);
     await sleep(1500);
-    const shot = await send('Page.captureScreenshot', { format: 'png', clip: { x: 280, y: 40, width: 720, height: 720, scale: 1 } });
+    // 720 px of the page, saved 500 px wide.
+    const shot = await send('Page.captureScreenshot', { format: 'jpeg', quality: 85, clip: { x: 280, y: 40, width: 720, height: 720, scale: 500 / 720 } });
     writeFileSync(a.out, Buffer.from(shot.result.data, 'base64'));
     await ev(`app.paused = false`);
     console.log(`[${i + 1}/${todo.length}] ${a.out}`);

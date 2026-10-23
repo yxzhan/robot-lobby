@@ -14,7 +14,7 @@ twins:
       vslam_room.xml: an 11 x 11 m room with textured walls and pillars.
 
 Each gets an asset.json (where it came from) and a README.md with the mesh
-license (CC BY-NC-SA 4.0, Pollen Robotics). Screenshots (<name>.png) come
+license (CC BY-NC-SA 4.0, Pollen Robotics). Screenshots (<name>.jpg) come
 from scripts/render_previews.mjs.
 
     python3 scripts/import_microduck.py [/path/to/microduck_rl]

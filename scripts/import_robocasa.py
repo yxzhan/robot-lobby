@@ -15,7 +15,7 @@ convention of scripts/vendor.mjs), a copy of model.xml with:
     density, 1000 kg/m^3, which made a banana 0.71 kg instead of 0.15 and a
     basket 32 kg instead of 2.6,
 and an asset.json recording where it came from.
-A screenshot (<name>.png) already in robocasa/<name>/ is kept; missing ones
+A screenshot (<name>.jpg) already in robocasa/<name>/ is kept; missing ones
 come from scripts/render_previews.mjs.
 
     python3 scripts/import_robocasa.py [/path/to/robocasa]
@@ -77,15 +77,15 @@ def main():
     cat = name.rsplit('_', 1)[0]
     inst = objects / cat / name
     dst = OUT / name
-    shot = dst / f'{name}.png'
-    png = shot.read_bytes() if shot.exists() else None
+    shot = dst / f'{name}.jpg'
+    jpg = shot.read_bytes() if shot.exists() else None
     if dst.exists():
       shutil.rmtree(dst)
     shutil.copytree(inst, dst)
     convert(dst / 'model.xml', name).write(dst / f'{name}.xml', encoding='unicode')
     (dst / 'model.xml').unlink()
-    if png:
-      shot.write_bytes(png)
+    if jpg:
+      shot.write_bytes(jpg)
     (dst / 'asset.json').write_text(json.dumps({
         'source': f'robocasa objaverse/{cat}/{name}',
     }, indent=1) + '\n')

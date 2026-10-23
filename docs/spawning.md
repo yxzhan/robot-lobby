@@ -50,7 +50,7 @@ Picking uses `mj_ray` on the physics world, so it hits collision geoms.
   (`environments`, `robots`, `objects`) is the panel tab, the source
   (`aicor`, `mujoco_menagerie`, `robocasa`, …) where the models come
   from. Naming convention: a model directory `<name>/` holds `<name>.xml`,
-  the file that gets spawned, and optionally `<name>.png`, its screenshot;
+  the file that gets spawned, and optionally `<name>.jpg`, its screenshot (500 px wide; a `.png` also does);
   directories without `<name>.xml` are skipped with a warning. Upstream
   `mujoco_menagerie` keeps its own names, so it is indexed from its README's
   "Menagerie Models" table: one model per row, spawning the model file the
@@ -70,10 +70,10 @@ Picking uses `mj_ray` on the physics world, so it hits collision geoms.
   the model directory overrides the group. Re-run
   `node scripts/vendor.mjs` after adding models.
 - **Thumbnails** — `python3 scripts/thumbnails.py` (after `vendor.mjs`)
-  compresses each model's screenshot (`<name>.png`) into
+  compresses each model's screenshot (`<name>.jpg`) into
   `public/thumbs/<category>/<source>/<model>.webp` (≤ 320×240; the 4K
   menagerie renders go from ~84 MB to ~0.4 MB). The originals are untouched;
-  models without a screenshot show their initials. A `<name>.png` added after
+  models without a screenshot show their initials. A `<name>.jpg` added after
   the index was written is picked up too, and models with no image at all
   are listed at the end.
 - **Objects from RoboCasa** — `python3 scripts/import_robocasa.py
@@ -84,7 +84,7 @@ Picking uses `mj_ray` on the physics world, so it hits collision geoms.
   to group 3. Models without a screenshot get one from
   `node scripts/render_previews.mjs [category[/source[/name or group]]…]`,
   which spawns each alone in headless Chrome (needs the page served, e.g.
-  `npm start`) and writes `<name>.png` next to it.
+  `npm start`) and writes `<name>.jpg` (500 px wide) next to it.
 - **Loading** — Spawning fetches only the files it
   references — the `<include>` tree, then the mesh/texture/hfield/skin files
   resolved via `<compiler meshdir/texturedir/assetdir>` — into MuJoCo's
