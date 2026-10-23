@@ -35,11 +35,12 @@ import { ServerPanel } from './serverpanel.js';
 import { SharePanel } from './share.js';
 import { MARKER } from './marker.js';
 import { XrControls } from './xr.js';
-import { Cameras, CamerasPanel, modelCameras } from './cameras.js';
+import { Cameras, CamerasPanel, cameraKey, modelCameras } from './cameras.js';
 import { CHAIN_COLORS } from './teleop.js';
 import Stats from '../vendor/stats/Stats.js';
 import { NET_MUJOCO, NetClient, loadRender, worldData, worldModel } from './net.js';
-import { dataUrl, problem, server } from './endpoint.js';
+import { dataUrl, problem, server, shareUrl } from './endpoint.js';
+import { BrowserStages, LibraryStages, STAGE_VERSION, ServerStages, StageList, applyState, blobToDataUrl, captureState, downloadBundle, newId, pickBundle, setView, viewOf } from './stage.js';
 import { RemoteBase, RemoteIk, RemotePolicy } from './remote.js';
 
 // Filament.init() replaces the global with the loaded module, so re-read it after init.
@@ -806,6 +807,7 @@ class App {
     this.setOriginMarker(true);
 
     this.orbit = new OrbitCamera(canvas, [0, 0, 0.4], 4);
+    this.captures = [];  // pictures of the main view to take after the next frame (capture)
     // Whether the camera follows the selection (the World panel's switch,
     // saved in this browser), else turns to it once.
     try { this.follow = localStorage.getItem(FOLLOW) === '1'; } catch { this.follow = false; }
@@ -1514,6 +1516,7 @@ class App {
       this.engine.execute();
     }
     this.cameras?.render();
+    if (this.captures.length && !xrFrame) this.takeCaptures();
     this.stats?.end();
     if (xrFrame) this.xrLoop(this.xr);
     else requestAnimationFrame(() => this.frame());
@@ -1526,6 +1529,35 @@ class App {
   }
 
   // ---- WebXR (the controllers: xr.js) ---------------------------------------
+
+  // The main view as a size x size JPEG (its middle square, the world
+  // without the viewer's markers), or null if none could be taken within
+  // 2 s. Rendered after the next window frame (Cameras.snapshot).
+  capture(size = 256) {
+    const shot = new Promise((resolve) => this.captures.push({ size, resolve, tries: 10 }));
+    return Promise.race([shot, new Promise((resolve) => setTimeout(() => resolve(null), 2000))]);
+  }
+
+  takeCaptures() {
+    const look = this.cameras.lookPose();
+    const aim = (camera) => {
+      if (look) camera.setModelMatrix(look.matrix);
+      else camera.lookAt(this.orbit.eye(), this.orbit.center, [0, 0, 1]);
+      camera.setProjectionFov(look?.fovy ?? 45, 1, 0.01, 200, Filament.Camera$Fov.VERTICAL);
+    };
+    for (const shot of [...this.captures]) {
+      const pixels = this.cameras.snapshot(shot.size, aim);
+      if (!pixels && --shot.tries > 0) continue;  // Filament skipped the frame: again after the next one
+      this.captures.splice(this.captures.indexOf(shot), 1);
+      if (!pixels) { shot.resolve(null); continue; }
+      const n = shot.size, row = 4 * n, c = Object.assign(document.createElement('canvas'), { width: n, height: n });
+      const ctx = c.getContext('2d'), image = ctx.createImageData(n, n), out = image.data;
+      for (let y = 0; y < n; y++) out.set(pixels.subarray((n - 1 - y) * row, (n - y) * row), y * row);  // GL reads bottom up
+      for (let i = 3; i < out.length; i += 4) out[i] = 255;
+      ctx.putImageData(image, 0, 0);
+      c.toBlob(shot.resolve, 'image/jpeg', 0.85);
+    }
+  }
 
   // The session's layer, at xrSettings.scale of the headset's default size
   // (at most its native one). Filament multisamples (viewQuality) and
@@ -1772,7 +1804,8 @@ try {
     onRemove: (robot) => respawn(robots.filter((r) => r !== robot)),
     onMove: (robot, pos, yaw) => moveFixed(robot, pos, yaw),
     onSave: () => saveStage(),
-    onForget: () => forgetStage(),
+    onImport: () => importStage(),
+    onForget: () => { setStartStage(null); refreshStages(); status.textContent = `the next page load starts from an empty floor · ${hint()}`; },
   });
   app.teleop = new TeleopPanel(app, document.getElementById('teleop'));
   app.physics = loadPhysics();  // World panel settings (physics.js)
@@ -2084,18 +2117,27 @@ try {
     }
   }
 
-  // A new robot (not in the world yet) for asset file `rel`.
-  async function makeRobot(rel, label, pos, yaw, progress, prefix = `r${nextId++}/`) {
+  // The key of a robot file (its path under mjcf_assets/robots/), or
+  // undefined for an environment or object.
+  const robotKey = (rel) => rel.match(/(?:^|\/)mjcf_assets\/robots\/(.+)$/)?.[1];
+
+  // A new robot (not in the world yet) for asset file `rel`. `preset` (a
+  // stage's): {use, ik, base}, the controllers switched on and their setups,
+  // instead of this browser's.
+  async function makeRobot(rel, label, pos, yaw, progress, prefix = `r${nextId++}/`, preset = {}) {
     const visual = await withPhysics(await robotVisual(rel, label, progress), progress);
     const robot = { label, visual, prefix, pos, yaw };
     // Every robot gets the controllers of the Teleop panel, each switched
     // on or off (robot.use): a trained policy (policy.js), a mobile base and
     // IK chains, each saved, built in or found in the model.
-    const key = rel.match(/(?:^|\/)mjcf_assets\/robots\/(.+)$/)?.[1];
+    const key = robotKey(rel);
     if (!key || app.net) return robot;  // network mode: no controllers (yet)
-    Object.assign(robot, { key, use: loadUse(key), errors: {} });
+    Object.assign(robot, { key, use: { ...loadUse(key), ...preset.use }, errors: {} });
     robot.base = new BaseController(key, robot.prefix);
     robot.ik = new IkController(key, robot.prefix);
+    for (const kind of ['base', 'ik']) {
+      if (preset[kind]) Object.assign(robot[kind], { config: structuredClone(preset[kind]), saved: false });
+    }
     await makePolicy(robot, progress);
     return robot;
   }
@@ -2227,49 +2269,228 @@ try {
     return true;
   }
 
-  // The saved stage: what is spawned, where and heading where (no joint
-  // state), in this browser's localStorage. Loaded on the next page load.
-  const STAGE_KEY = 'mujoco-filament/stage';
-  const savedStage = () => {
-    try { return JSON.parse(localStorage.getItem(STAGE_KEY)); } catch { return null; }
+  // Stages (stage.js): saved on the server in network mode, in this
+  // browser in local mode (where the library's can be loaded too), and
+  // loaded, downloaded, imported and linked to alike. In local mode the
+  // stage last saved or loaded is loaded again at the next page load
+  // (Forget: an empty floor). ?stage=<id> opens a stage.
+  const START_KEY = 'mujoco-filament/stage-start';  // localStorage: the stage loaded at start
+  const OLD_STAGE_KEY = 'mujoco-filament/stage';    // localStorage: the one stage of before (migrated)
+  const browserStages = new BrowserStages();
+  const stores = server ? [new ServerStages()] : [browserStages, new LibraryStages()];
+  const startStage = () => {
+    try { return localStorage.getItem(START_KEY); } catch { return null; }
   };
-  function saveStage() {
-    const stage = {
-      saved: new Date().toISOString(),
-      items: robots.map((r) => ({ rel: r.visual.rel, label: r.label, pos: r.pos.map((v) => +v.toFixed(4)), yaw: +r.yaw.toFixed(4) })),
+  const setStartStage = (id) => {
+    try { if (id) localStorage.setItem(START_KEY, id); else localStorage.removeItem(START_KEY); } catch { /* no storage */ }
+  };
+  const stageLink = (id) => {
+    const u = new URL(shareUrl());
+    u.hash = '';
+    u.searchParams.set('stage', id);
+    return u.href;
+  };
+  const stageList = new StageList(document.querySelector('#stage .stages'), {
+    load: (e) => openStage(e),
+    download: async (e) => {
+      try { downloadBundle(await e.store.get(e.id)); } catch (err) { status.textContent = `could not download the stage: ${err.message ?? err}`; }
+    },
+    link: (e) => (e.where === 'library' ? stageLink(e.id) : null),  // in this browser only it opens nowhere else; the server's: not yet
+    remove: async (e) => {
+      if (!confirm(`Delete the stage "${e.name}"${e.where === 'server' ? ' from the server, for everyone' : ''}?`)) return;
+      try {
+        await e.store.remove(e.id);
+        if (startStage() === e.id) setStartStage(null);
+      } catch (err) {
+        status.textContent = `could not delete the stage: ${err.message ?? err}`;
+      }
+      refreshStages();
+    },
+  });
+  async function refreshStages() {
+    const lists = await Promise.all(stores.map((s) => s.list().catch((err) => { console.warn(`stages (${s.where}):`, err); return []; })));
+    const entries = lists.flat().sort((a, b) => String(b.saved ?? '').localeCompare(String(a.saved ?? '')));
+    stageList.start = server ? null : startStage();
+    stageList.show(entries);
+    app.panel.showStart(server ? undefined : entries.find((e) => e.id === stageList.start)?.name ?? null);
+    return entries;
+  }
+  async function findStage(id) {
+    for (const store of stores) {
+      const e = (await store.list().catch(() => [])).find((x) => x.id === id);
+      if (e) return e;
+    }
+    return null;
+  }
+
+  // What only the page knows of a stage, in both modes: the camera setups in
+  // use (not automatic ones), which cameras are on, the view.
+  const camerasOn = (r) => [...app.cameras.on.keys()].filter((k) => k.startsWith(r.prefix)).map((k) => k.slice(r.prefix.length));
+  function cameraSetups() {
+    const out = {};
+    for (const r of robots) {
+      const cfg = app.cameras.configs.get(r.visual.rel);
+      if (cfg && (cfg.source !== 'automatic' || cfg.edited)) out[cameraKey(r.visual.rel)] = { cameras: cfg.cameras };
+    }
+    return out;
+  }
+  function useCameraSetups(items, setups = {}) {
+    for (const rel of new Set(items.map((it) => it.rel))) {
+      const cams = setups[cameraKey(rel)]?.cameras;
+      if (Array.isArray(cams)) app.cameras.configs.set(rel, { cameras: cams.map((c) => app.cameras.complete(c)), source: 'stage', edited: false });
+    }
+  }
+
+  // Local mode: the world as a stage bundle.
+  function localBundle({ name, view, cameras, thumbnail }) {
+    const { mujoco, model, data } = app, layout = stateLayout(robots);
+    const ik = {}, base = {};
+    const items = robots.map((r) => {
+      const it = { rel: r.visual.rel, label: r.label, pos: r.pos.map((v) => +v.toFixed(4)), yaw: +r.yaw.toFixed(4) };
+      if (r.use) {
+        it.use = { ...r.use };
+        if (r.ik?.config && !r.ik.config.auto) ik[r.key] = r.ik.config;
+        if (r.base?.config && !r.base.config.auto) base[r.key] = r.base.config;
+      }
+      const on = camerasOn(r);
+      if (on.length) it.cameras = on;
+      it.state = captureState(mujoco, model, data, r, layout.get(r));
+      return it;
+    });
+    return {
+      stage: { version: STAGE_VERSION, id: newId(), name, saved: new Date().toISOString(), items, physics: app.physics, view },
+      files: { 'ik.json': ik, 'base.json': base, 'cameras.json': cameras },
+      thumbnail,
     };
+  }
+
+  async function saveStage() {
+    if (!robots.length) { status.textContent = 'nothing spawned to save'; return; }
+    const when = new Date().toLocaleString([], { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+    const name = prompt('Name of the stage:', `${robots.map((r) => r.label).slice(0, 3).join(', ')}${robots.length > 3 ? ', …' : ''} · ${when}`);
+    if (name == null) return;
+    const shot = await app.capture(256);
+    const common = { name: name.trim() || 'Stage', view: viewOf(app.orbit), cameras: cameraSetups(), thumbnail: shot && await blobToDataUrl(shot) };
     try {
-      localStorage.setItem(STAGE_KEY, JSON.stringify(stage));
-      status.textContent = `stage saved (${stage.items.length} items) · ${hint()}`;
+      if (app.net) {
+        await stores[0].save({ ...common, on: Object.fromEntries(robots.map((r) => [r.netId, camerasOn(r)])) });
+      } else {
+        const bundle = localBundle(common);
+        await browserStages.put(bundle);
+        setStartStage(bundle.stage.id);
+      }
+      status.textContent = `stage "${common.name}" saved (${robots.length} items) · ${hint()}`;
     } catch (err) {
       status.textContent = `could not save the stage: ${err.message ?? err}`;
     }
-    app.panel.showSaved(stage);
+    refreshStages();
   }
-  function forgetStage() {
-    try { localStorage.removeItem(STAGE_KEY); } catch {}
-    app.panel.showSaved(null);
-    status.textContent = `saved stage forgotten · ${hint()}`;
+
+  async function importStage() {
+    let bundle;
+    try {
+      bundle = await pickBundle();
+      if (!bundle) return;
+      bundle.stage.id ??= newId();
+      await (app.net ? stores[0] : browserStages).put(bundle);
+      status.textContent = `stage "${bundle.stage.name}" imported · ${hint()}`;
+    } catch (err) {
+      status.textContent = `could not import the stage: ${err.message ?? err}`;
+    }
+    refreshStages();
   }
-  // Spawns every item of a saved stage, in one compile. Items whose files
-  // fail to load are skipped (and reported).
-  async function loadStage(stage) {
-    const items = stage?.items ?? [];
-    if (!items.length) return;
+
+  // Load: the stage replaces what is spawned (for everyone, in network mode).
+  async function openStage(e, ask = true) {
+    if (busy) { status.textContent = 'busy, try again in a moment'; return; }
+    if (ask && robots.length && !confirm(`Replace the ${robots.length} spawned model${robots.length > 1 ? 's' : ''} with the stage "${e.name}"${app.net ? ', for everyone on this server' : ''}?`)) return;
+    let bundle;
+    try {
+      bundle = await e.store.get(e.id);
+    } catch (err) {
+      status.textContent = `could not read the stage: ${err.message ?? err}`;
+      return;
+    }
+    if (app.net) {
+      useCameraSetups(bundle.stage.items, bundle.files?.['cameras.json']);
+      afterScene = (list) => {
+        bundle.stage.items.forEach((it, i) => { for (const name of it.cameras ?? []) if (list[i]) app.cameras.switchOn(list[i].prefix + name); });
+        setView(app.orbit, bundle.stage.view);
+      };
+      app.net.send('stage_load', { id: e.id });
+      status.textContent = `loading the stage "${e.name}" on the server…`;
+      return;
+    }
+    busy = true;
+    try {
+      await loadStage(bundle);
+      setStartStage(e.id);
+    } catch (err) {
+      status.textContent = `could not load the stage: ${err.message ?? err}`;
+      console.error(err);
+    } finally {
+      busy = false;
+      setBusy(null);
+    }
+    refreshStages();
+  }
+
+  // Local mode: replaces what is spawned with a stage's items, in one
+  // compile, then puts each in its saved state (which Reset goes back to).
+  // Items whose files fail to load are skipped (and reported).
+  async function loadStage({ stage, files = {} }) {
+    const items = stage.items ?? [];
     const progress = (msg) => { status.textContent = msg; setBusy(msg); };
+    if (stage.physics) {
+      app.physics = { ...app.physics, ...stage.physics };
+      app.world?.render();
+    }
+    useCameraSetups(items, files['cameras.json']);
     const added = [], failed = [];
     for (const [i, it] of items.entries()) {
       progress(`loading stage ${i + 1}/${items.length}: ${it.label}…`);
       try {
-        added.push(await makeRobot(it.rel, it.label, it.pos, it.yaw, progress));
+        const key = robotKey(it.rel);
+        const preset = { use: it.use, ik: files['ik.json']?.[key], base: files['base.json']?.[key] };
+        const r = await makeRobot(it.rel, it.label ?? it.rel, it.pos, it.yaw ?? 0, progress, undefined, preset);
+        added.push(Object.assign(r, { stageItem: it }));
       } catch (err) {
         console.error(`stage item ${it.rel}:`, err);
         failed.push(it.label);
       }
     }
-    await rebuild([...robots, ...added], added, progress);
-    robots.push(...added);
-    status.textContent = (failed.length ? `stage loaded, skipped ${failed.join(', ')} · ` : 'stage loaded · ') + hint();
+    const removed = [...robots];
+    await rebuild(added, added, progress);
+    for (const r of removed) app.removeEntities(r.entities);
+    robots.splice(0, robots.length, ...added);
+    dropUnused();
+    const { mujoco, model, data } = app, layout = stateLayout(robots);
+    let skipped = 0;
+    for (const r of robots) {
+      const at = layout.get(r), { nq, nu } = r.visual.dims;
+      skipped += applyState(mujoco, model, data, r, at, r.stageItem.state);
+      r.initial = { qpos: data.qpos.slice(at.qpos, at.qpos + nq), ctrl: data.ctrl.slice(at.ctrl, at.ctrl + nu) };
+      for (const c of [r.policy, r.base, r.ik]) c?.reset();
+      for (const name of r.stageItem.cameras ?? []) app.cameras.switchOn(r.prefix + name);
+      delete r.stageItem;
+    }
+    mujoco.mj_forward(model, data);
+    app.syncTransforms();
+    app.teleop?.clearGoals(robots);
+    setView(app.orbit, stage.view);
+    if (skipped) console.warn(`stage "${stage.name}": ${skipped} saved joints, actuators or mocap bodies not found`);
+    status.textContent = `stage "${stage.name}" loaded${failed.length ? `, skipped ${failed.join(', ')}` : ''} · ${hint()}`;
+  }
+
+  // The one stage of before (no name, no state): into this browser's list.
+  async function migrateOldStage() {
+    let old = null;
+    try { old = JSON.parse(localStorage.getItem(OLD_STAGE_KEY)); } catch { /* none */ }
+    if (!Array.isArray(old?.items)) return;
+    const id = newId();
+    await browserStages.put({ stage: { version: STAGE_VERSION, id, name: 'Saved stage', saved: old.saved, items: old.items }, files: {}, thumbnail: null });
+    try { localStorage.removeItem(OLD_STAGE_KEY); } catch { /* no storage */ }
+    if (!startStage()) setStartStage(id);
   }
 
   // Network mode: a robot's controllers as the server runs them (the
@@ -2302,6 +2523,7 @@ try {
   // Network mode: render data per model file (net.js loadRender), shared by
   // its copies like robotVisual's.
   const netVisuals = new Map();
+  let afterScene = null;  // (list): what this page does once the stage it asked the server for is in
   function netVisual(rel, label, progress) {
     if (!netVisuals.has(rel)) {
       const pending = (async () => {
@@ -2358,6 +2580,7 @@ try {
       app.netVersion = msg.version;
       for (const r of list) { applyRobot(r, r.pendingItem); delete r.pendingItem; }
       app.teleop.build();
+      if (afterScene && msg.stage) { afterScene(list); afterScene = null; }  // a stage this page loaded
       status.textContent = `${hint()} · shared world (server)`;
     } catch (err) {
       status.textContent = `could not show the server's world: ${err.message ?? err}`;
@@ -2659,23 +2882,40 @@ try {
     await app.net.opened;
     console.log(`network mode: ${server.info.server}, MuJoCo ${server.info.mujoco}, at ${server.base}`);
     app.world.render();
-    app.panel.showSaved(savedStage());
+    await refreshStages();
+    // A link to a stage: load it for everyone, if this page's user agrees.
+    const asked = new URLSearchParams(location.search).get('stage');
+    if (asked) {
+      const e = await findStage(asked);
+      if (!e) status.textContent = `no stage ${asked} on this server`;
+      else if (confirm(`Load the stage "${e.name}" for everyone on this server?`)) openStage(e, false);
+      const u = new URL(location.href);
+      u.searchParams.delete('stage');
+      history.replaceState(null, '', u);  // not again on reload
+    }
   } else {
     await rebuild([]);
     status.textContent = problem ? `${problem}: running locally (Server panel)` : hint();
-    const stage = savedStage();
-    app.panel.showSaved(stage);
-    if (stage?.items?.length) {
+    await migrateOldStage().catch((err) => console.warn('old stage:', err));
+    // A linked stage, else the one loaded at start.
+    const asked = new URLSearchParams(location.search).get('stage'), id = asked ?? startStage();
+    const e = id && await findStage(id);
+    if (id && !e) {
+      if (asked) status.textContent = `no stage ${asked} here`;
+      else setStartStage(null);
+    }
+    if (e) {
       busy = true;
       try {
-        await loadStage(stage);
+        await loadStage(await e.store.get(e.id));
       } catch (err) {
-        status.textContent = `could not load the saved stage: ${err.message ?? err}`;
+        status.textContent = `could not load the stage: ${err.message ?? err}`;
         console.error(err);
       } finally {
         busy = false;
       }
     }
+    await refreshStages();
     setBusy(null);
   }
   app.frame();

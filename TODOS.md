@@ -32,7 +32,8 @@ Ideas to scope later; no plan yet.
 - **Several policies at once, switched automatically**: more than one policy enabled per
   robot, with automatic switching between them.
 - **Stages**: save, share and export a stage, the same way in online (server) and
-  offline (browser-only) mode.
+  offline (browser-only) mode. Done as JSON (docs/spawning.md); open: an MJCF
+  export (zip with the meshes), stages that use assets other people lack.
 - **Benchmark scenes**: scenes from mainstream benchmarks, e.g. LIBERO.
 - **Tasks and challenges**: a task challenge system and a task creation system, with
   success conditions. Focus on multiplayer tasks, both competitive and cooperative.

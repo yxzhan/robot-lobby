@@ -46,6 +46,11 @@ which it loads no MuJoCo at all:
   the markers move. Chain edits, Save (to `server/saved/ik.json`, for
   everyone) and Defaults are requests too. `public/json/ik_defaults.json` holds the
   built-in setups for both sides.
+- **Stages.** Saved on the server for everyone, in
+  `mjcf_assets/saved_stage/<id>/` (see spawning.md): the server writes the
+  world's items, state and controller setups, the page adds the name,
+  picture, view and camera setups (`/api/stages`). Loading one replaces
+  the world for everyone (`stage_load`); `?stage=<id>` asks first.
 - **Network meter.** Bottom right, next to the frame meter: round trip
   (ping, includes the page's own frame time), states per second, download
   rate, and how far the view trails the newest state: one state interval

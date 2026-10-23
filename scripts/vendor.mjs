@@ -46,6 +46,7 @@ console.log('vendored', Object.keys(copies).length, 'files into public/vendor');
 // name; menagerie models by README section, "Others" last; then by name.
 const LIBRARY = 'mjcf_assets';
 const CATEGORIES = { environments: 'environment', robots: 'robot', objects: 'object' };
+const STAGES = 'saved_stage';  // mjcf_assets/saved_stage/: saved stages, not models (indexStages)
 const FIRST_SOURCES = ['aicor'];
 const MENAGERIE = 'mujoco_menagerie';
 
@@ -182,6 +183,7 @@ function indexLibrary() {
   const models = [];
   for (const catDir of subdirs(LIBRARY)) {
     const category = CATEGORIES[catDir];
+    if (catDir === STAGES) continue;  // saved stages (indexStages)
     if (!category) { console.warn(`skipping ${LIBRARY}/${catDir}: not one of ${Object.keys(CATEGORIES)}`); continue; }
     for (const source of subdirs(`${LIBRARY}/${catDir}`)) {
       const sourceDir = `${LIBRARY}/${catDir}/${source}`;
@@ -205,6 +207,25 @@ function indexLibrary() {
   const count = {};
   for (const m of models) count[`${m.category}/${m.source}`] = (count[`${m.category}/${m.source}`] ?? 0) + 1;
   console.log('indexed', models.length, `models of ${LIBRARY}/ into public/json/assets.json:`, count);
+  indexStages();
+}
+
+// Saved stages (public/js/stage.js): mjcf_assets/saved_stage/<id>/stage.json,
+// listed in public/json/stages.json ([{id, name, saved, count}], newest
+// first) for local mode, which cannot list a folder (the server lists it
+// itself).
+function indexStages() {
+  const dir = existsSync(LIBRARY) ? `${LIBRARY}/${STAGES}` : `public/${LIBRARY}/${STAGES}`;
+  const stages = [];
+  for (const id of existsSync(dir) ? subdirs(dir) : []) {
+    try {
+      const s = JSON.parse(readFileSync(`${dir}/${id}/stage.json`, 'utf8'));
+      stages.push({ id, name: s.name ?? '', saved: s.saved ?? null, count: s.items?.length ?? 0 });
+    } catch { /* not a stage */ }
+  }
+  stages.sort((a, b) => String(b.saved ?? '').localeCompare(String(a.saved ?? '')));
+  writeFileSync('public/json/stages.json', JSON.stringify(stages, null, 1));
+  console.log('indexed', stages.length, `stages of ${dir}/ into public/json/stages.json`);
 }
 indexLibrary();
 

@@ -531,6 +531,50 @@ export class Cameras {
     return true;
   }
 
+  // One picture of the world, size x size, from a camera `aim(camera)`
+  // places (App.capture: the window's view, for a stage's thumbnail):
+  // rendered like a camera's frame, read at once. Its pixels (bottom row
+  // first), or null if Filament skipped the frame.
+  snapshot(size, aim) {
+    const { app } = this, F = Filament, gl = this.gl();
+    const entity = F.EntityManager.get().create(), camera = app.engine.createCamera(entity), view = app.engine.createView();
+    view.setCamera(camera);
+    view.setScene(app.scene);
+    view.setVisibleLayers(0xff, 0x1);  // the world only
+    view.setViewport([0, 0, size, size]);
+    app.viewQuality(view);
+    aim(camera);
+    const rb = gl.createRenderbuffer();
+    gl.bindRenderbuffer(gl.RENDERBUFFER, rb);
+    gl.renderbufferStorage(gl.RENDERBUFFER, gl.RGBA8, size, size);
+    gl.bindRenderbuffer(gl.RENDERBUFFER, null);
+    const fb = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+    gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.RENDERBUFFER, rb);
+    app.offscreen = fb;  // as capture(c)
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    const drawn = app.renderer.beginFrame(app.swapChain);
+    if (drawn) {
+      app.renderer.renderView(view);
+      app.renderer.endFrame();
+    }
+    app.engine.execute();
+    let pixels = null;
+    if (drawn) {
+      pixels = new Uint8Array(4 * size * size);
+      gl.bindFramebuffer(gl.READ_FRAMEBUFFER, fb);
+      gl.readPixels(0, 0, size, size, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+    }
+    app.offscreen = null;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    app.engine.destroyView(view);
+    app.engine.destroyCameraComponent(entity);
+    F.EntityManager.get().destroy(entity);
+    gl.deleteFramebuffer(fb);
+    gl.deleteRenderbuffer(rb);
+    return pixels;
+  }
+
   // Into its window: rows flipped (GL reads bottom up), opaque.
   show(c) {
     const { width: w, height: h, pixels, image } = c, row = 4 * w, out = image.data;

@@ -39,10 +39,27 @@ and roll / pitch / yaw (deg) of its root. On a free joint that is its
 qpos, set at once with no rebuild (Reset and a saved stage then use the new
 pose); a fixed base (an arm, an environment) is placed by its attach frame,
 heading only, so the world is rebuilt with its state kept and its mocap
-bodies carried along. Save stage remembers what is spawned, with
-its spawn position and heading (not its joint state), in the browser's
-localStorage; the next page load spawns it all again in one compile (Forget
-starts from an empty floor again).
+bodies carried along.
+
+**Stages** (`public/js/stage.js`): Save stage asks for a name and saves
+what is spawned as a new stage: each item's spawn pose, joint positions,
+actuator controls and mocap bodies (by name, so a changed model loads what
+still matches), the controllers switched on with their IK and base setups,
+the camera setups and which cameras are on, the World panel's physics, the
+view, and a 256×256 picture of it. A stage is a folder named by a random id
+(the name is inside, so names may repeat): `stage.json`, `thumbnail.jpg`,
+`ik.json`, `base.json`, `cameras.json` (keyed like `ik_defaults.json`,
+`base_defaults.json`, `camera_defaults.json`). On a server it is
+`mjcf_assets/saved_stage/<id>/`, for everyone; in local mode an IndexedDB
+record of the same files in this browser. The **Saved stages** list loads
+one (it replaces what is spawned, in one compile, each item in its saved
+state, which Reset then goes back to; in a shared world for everyone),
+downloads it as one `.stage.json` file, which **Import** takes in either
+mode, copies a link to it (`?stage=<id>`; for now only for the library's
+stages, below) or deletes it (not a server's stage, for now). Local mode also lists the stages under
+`mjcf_assets/saved_stage/` (read-only; `scripts/vendor.mjs` indexes them
+into `public/json/stages.json`), and loads the stage last saved or loaded
+at the next page load (Forget starts from an empty floor again).
 Picking uses `mj_ray` on the physics world, so it hits collision geoms.
 
 - **Asset list** — the model library is `mjcf_assets/` next to

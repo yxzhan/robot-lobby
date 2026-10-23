@@ -34,8 +34,8 @@ No bundler — `public/` is a static site.
   gamepad works too. Robot arms have IK markers to drag.
 - **Toolbar** (top left): Pause, Reset (every robot back to its spawn pose),
   Clear (remove everything), Enter VR / AR where the browser supports it.
-- **Panels** (top right): **Stage** (what is spawned: poses, joints, save
-  the stage), **World** (physics, floor, lighting), **Cameras** (the robots'
+- **Panels** (top right): **Stage** (what is spawned: poses, joints; save,
+  load, download and share stages), **World** (physics, floor, lighting), **Cameras** (the robots'
   cameras), **Render** (quality vs. GPU load), **Share** (open the page on
   another device).
 - **Touch screens:** one finger orbits, two pinch and pan; double tap

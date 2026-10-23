@@ -124,17 +124,19 @@ export class Perturb {
 // buttons, a slider per hinge/slide joint (qpos) and per actuator (ctrl).
 // Rebuilt for every world, refreshed ~10 times a second for the expanded
 // robots. `onRemove(robot)` removes a robot (the page rebuilds the world);
-// the Save / Forget buttons call `onSave()` / `onForget()`. Each robot's
+// the Save / Import / Forget buttons call `onSave()` / `onImport()` /
+// `onForget()` (the saved stages' list is stage.js's StageList). Each robot's
 // Pose section places it: on a free joint at once (App.placeFree), a fixed
 // base through `onMove(robot, pos, yaw)` (a rebuild).
 export class StagePanel {
-  constructor(app, el, { onRemove = () => {}, onSave = () => {}, onForget = () => {}, onMove = async () => false } = {}) {
+  constructor(app, el, { onRemove = () => {}, onSave = () => {}, onImport = () => {}, onForget = () => {}, onMove = async () => false } = {}) {
     this.app = app;
     this.el = el;
     this.onRemove = onRemove;
     this.onMove = onMove;
     this.poses = [];        // {inputs, read(), sub} per robot's Pose section
     el.querySelector('.save').onclick = onSave;
+    el.querySelector('.import').onclick = onImport;
     el.querySelector('.forget').onclick = onForget;
     this.savedEl = el.querySelector('.saved');
     this.empty = el.querySelector('.empty');
@@ -271,18 +273,14 @@ export class StagePanel {
     return sub;
   }
 
-  // Shows when the stage was saved (`stage`: {saved, items}, or null).
-  showSaved(stage) {
+  // Shows the name of the stage loaded at the next page load (null: none;
+  // undefined: network mode, where the server keeps its world).
+  showStart(name) {
     const forget = this.el.querySelector('.forget');
-    forget.disabled = !stage;
-    if (!stage) {
-      this.savedEl.textContent = 'not saved';
-      return;
-    }
-    const t = new Date(stage.saved);
-    const when = t.toLocaleString([], { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-    this.savedEl.textContent = `saved ${stage.items.length} · ${when}`;
-    this.savedEl.title = 'Loaded on the next page load';
+    forget.hidden = name === undefined;
+    forget.disabled = !name;
+    this.savedEl.textContent = name === undefined ? '' : name ? `at start: ${name}` : 'empty at start';
+    this.savedEl.title = name ? 'Loaded on the next page load (the stage last saved or loaded)' : '';
   }
 
   row(robot, item) {

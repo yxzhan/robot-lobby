@@ -26,9 +26,12 @@ Protocol (client -> server, JSON {op, ...}; `rid` asks for a reply):
   frame)   ik_reset_target {chain or null}   ik_gripper {chain, amount?}
   (amount: 0 open … 1 closed; none: toggle)   ik_save   ik_defaults
   base_config {config}   base_save   base_defaults
+  stage_load {id}   the saved stage replaces the world (for everyone)
 Server -> client:
-  {type: 'scene', version, items, physics, paused, world}   the world (`world`:
-                              names, joint and actuator tables for the panels)
+  {type: 'scene', version, items, physics, paused, world, stage?}   the world
+                              (`world`: names, joint and actuator tables for
+                              the panels; `stage`: the id of the stage just
+                              loaded)
   {type: 'meta', items, physics, paused}             same world, new settings
   {type: 'robot', item}                     a robot's controllers changed
                               (item.use, item.errors, item.ik / base / policy:
@@ -57,9 +60,18 @@ groot.js, base.js, ik.js and goal.js; a goal is one per robot, for every
 browser. Setups
 saved from the panel go to server/saved/{ik,base}.json. Not yet: the World
 panel's default geom properties.
+
+Stages (public/js/stage.js) are folders under mjcf_assets/saved_stage/,
+named by a random id: stage.json, thumbnail.jpg, ik.json, base.json,
+cameras.json. GET /api/stages lists them, GET /api/stages/<id> reads one as
+a bundle, POST /api/stages saves the world as a new one (the page sends its
+name, thumbnail, view and cameras), POST /api/stages/import writes a bundle,
+DELETE /api/stages/<id> deletes one; the stage_load request loads one.
 """
 
 import asyncio
+import base64
+import copy
 import gzip
 import hashlib
 import json
@@ -70,6 +82,7 @@ import re
 import sys
 import time
 import traceback
+import uuid
 import warnings
 
 import mujoco
@@ -154,6 +167,16 @@ def apply_options(model, physics):
     o.__setattr__(k, physics[k])
   o.density, o.viscosity, o.impratio = physics['density'], physics['viscosity'], physics['impratio']
   o.cone = max(0, CONES.index(physics['cone']) if physics['cone'] in CONES else 0)
+
+
+def checked_physics(physics, old):
+  """World panel settings from a page or a stage: known keys only (the rest
+  as they were), in range."""
+  new = {k: physics.get(k, v) for k, v in old.items()}
+  new['timestep'] = min(0.05, max(1e-4, float(new['timestep'])))
+  new['speed'] = max(0.0, float(new['speed']))
+  new['stateHz'] = min(120, max(1, int(new['stateHz'])))
+  return new
 
 
 def asset_path(rel):
@@ -402,6 +425,134 @@ def compile_world(robots, physics):
 
 
 # ---------------------------------------------------------------------------
+# Stages (public/js/stage.js): folders under mjcf_assets/saved_stage/.
+
+STAGE_VERSION = 1
+STAGE_FILES = ('ik.json', 'base.json', 'cameras.json')
+STAGE_ID = re.compile(r'^[A-Za-z0-9_-]{1,64}$')
+QPOS_SIZE = {0: 7, 1: 4}  # free, ball joints; slide and hinge have one
+THUMB_PREFIX = 'data:image/jpeg;base64,'
+
+
+def stages_dir():
+  return (PUBLIC / 'mjcf_assets').resolve() / 'saved_stage'
+
+
+def stage_path(sid):
+  if not isinstance(sid, str) or not STAGE_ID.match(sid):
+    raise ValueError(f'bad stage id {sid!r}')
+  return stages_dir() / sid
+
+
+def robot_tables(m, r, at):
+  """A robot's joints [(name, qposadr, size)], actuators [(name, id)] and
+  mocap bodies [(name, mocap id)], names without its prefix ('#k': its k-th
+  one, unnamed), as stage.js robotTables."""
+  def local(obj, i, k):
+    n = mujoco.mj_id2name(m, obj, i) or ''
+    return n[len(r.prefix):] if n.startswith(r.prefix) else n or f'#{k}'
+  q0, nq = at['qpos'], r.dims['nq']
+  js = [j for j in range(m.njnt) if q0 <= m.jnt_qposadr[j] < q0 + nq]
+  joints = [(local(mujoco.mjtObj.mjOBJ_JOINT, j, j - js[0]), int(m.jnt_qposadr[j]), QPOS_SIZE.get(int(m.jnt_type[j]), 1))
+            for j in js]
+  u0 = at['ctrl']
+  ctrls = [(local(mujoco.mjtObj.mjOBJ_ACTUATOR, a, a - u0), a) for a in range(u0, u0 + r.dims['nu'])]
+  b0 = r.body_offset
+  mocaps = [(local(mujoco.mjtObj.mjOBJ_BODY, b, b - b0), int(m.body_mocapid[b]))
+            for b in range(b0, b0 + r.info['nbody'] - 1) if m.body_mocapid[b] >= 0]
+  return joints, ctrls, mocaps
+
+
+def capture_state(m, d, r, at):
+  joints, ctrls, mocaps = robot_tables(m, r, at)
+  rnd = lambda v: round(float(v), 6)
+  return {'qpos': {n: rnd(d.qpos[adr]) if k == 1 else [rnd(v) for v in d.qpos[adr:adr + k]] for n, adr, k in joints},
+          'ctrl': {n: rnd(d.ctrl[a]) for n, a in ctrls},
+          'mocap': {n: {'pos': [rnd(v) for v in d.mocap_pos[i]], 'quat': [rnd(v) for v in d.mocap_quat[i]]} for n, i in mocaps}}
+
+
+def apply_state(m, d, r, at, state):
+  """An item's saved state into `d` (unknown names skipped), at rest."""
+  joints, ctrls, mocaps = robot_tables(m, r, at)
+  J = {n: (adr, k) for n, adr, k in joints}
+  for n, v in (state.get('qpos') or {}).items():
+    vals = v if isinstance(v, list) else [v]
+    if n in J and len(vals) == J[n][1]:
+      d.qpos[J[n][0]:J[n][0] + J[n][1]] = vals
+  C = dict(ctrls)
+  for n, v in (state.get('ctrl') or {}).items():
+    if n in C:
+      d.ctrl[C[n]] = v
+  M = dict(mocaps)
+  for n, v in (state.get('mocap') or {}).items():
+    if n in M:
+      d.mocap_pos[M[n]], d.mocap_quat[M[n]] = v['pos'], v['quat']
+  d.qvel[at['qvel']:at['qvel'] + r.dims['nv']] = 0
+  d.act[at['act']:at['act'] + r.dims['na']] = 0
+
+
+def stage_summary(stage, folder):
+  return {'id': folder.name, 'name': stage.get('name', ''), 'saved': stage.get('saved'),
+          'count': len(stage.get('items', [])), 'thumb': (folder / 'thumbnail.jpg').is_file()}
+
+
+def list_stages():
+  out = []
+  root = stages_dir()
+  for folder in sorted(root.iterdir()) if root.is_dir() else []:
+    try:
+      out.append(stage_summary(json.loads((folder / 'stage.json').read_text()), folder))
+    except (OSError, ValueError):
+      continue
+  return sorted(out, key=lambda s: s['saved'] or '', reverse=True)
+
+
+def read_stage(sid):
+  folder = stage_path(sid)
+  stage = json.loads((folder / 'stage.json').read_text())
+  stage['id'] = sid
+  files = {}
+  for f in STAGE_FILES:
+    try:
+      files[f] = json.loads((folder / f).read_text())
+    except (OSError, ValueError):
+      files[f] = {}
+  thumb = folder / 'thumbnail.jpg'
+  return {'stage': stage, 'files': files,
+          'thumbnail': THUMB_PREFIX + base64.b64encode(thumb.read_bytes()).decode() if thumb.is_file() else None}
+
+
+def write_stage(bundle):
+  """Writes a bundle as a stage folder (its id kept if it is a good one, else
+  a new one); returns its summary."""
+  stage = dict(bundle['stage'])
+  items = stage.get('items')
+  if not isinstance(items, list) or any(not isinstance(it.get('rel'), str) or not isinstance(it.get('pos'), list) for it in items):
+    raise ValueError('not a stage: items need rel and pos')
+  if not (isinstance(stage.get('id'), str) and STAGE_ID.match(stage['id'])):
+    stage['id'] = str(uuid.uuid4())
+  folder = stage_path(stage['id'])
+  folder.mkdir(parents=True, exist_ok=True)
+  (folder / 'stage.json').write_text(json.dumps(stage, indent=1))
+  files = bundle.get('files') or {}
+  for f in STAGE_FILES:
+    (folder / f).write_text(json.dumps(files.get(f) or {}, indent=1))
+  thumb = bundle.get('thumbnail')
+  if isinstance(thumb, str) and thumb.startswith(THUMB_PREFIX):
+    (folder / 'thumbnail.jpg').write_bytes(base64.b64decode(thumb[len(THUMB_PREFIX):]))
+  return stage_summary(stage, folder)
+
+
+def delete_stage(sid):
+  folder = stage_path(sid)
+  if not (folder / 'stage.json').is_file():
+    raise ValueError(f'no stage {sid}')
+  for f in folder.iterdir():
+    f.unlink()
+  folder.rmdir()
+
+
+# ---------------------------------------------------------------------------
 
 class World:
   def __init__(self):
@@ -424,6 +575,88 @@ class World:
     self.dirty = True
 
   # -- scene changes (compiled off the event loop, stepping goes on) --------
+
+  # -- stages ----------------------------------------------------------------
+
+  def stage_bundle(self, extra):
+    """The world as a new stage bundle (stage.js), with what only the page
+    knows from `extra`: name, thumbnail, view, cameras (setups), on (robot id
+    -> its switched-on cameras)."""
+    layout, ik, base, items = state_layout(self.robots), {}, {}, []
+    on = extra.get('on') or {}
+    for r in self.robots:
+      it = {'rel': r.rel, 'label': r.label, 'pos': [round(v, 4) for v in r.pos], 'yaw': round(r.yaw, 4)}
+      if r.key:
+        it['use'] = dict(r.use)
+        for kind, out in (('ik', ik), ('base', base)):
+          cfg = getattr(r, kind).config
+          if cfg and not cfg.get('auto'):
+            out[r.key] = cfg
+      if on.get(str(r.id)):
+        it['cameras'] = list(on[str(r.id)])
+      it['state'] = capture_state(self.model, self.data, r, layout[r.id])
+      items.append(it)
+    stage = {'version': STAGE_VERSION, 'id': str(uuid.uuid4()), 'name': str(extra.get('name') or 'Stage'),
+             'saved': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()), 'items': items,
+             'physics': dict(self.physics), 'view': extra.get('view')}
+    return {'stage': stage, 'files': {'ik.json': ik, 'base.json': base, 'cameras.json': extra.get('cameras') or {}},
+            'thumbnail': extra.get('thumbnail')}
+
+  async def load_stage(self, bundle):
+    """A stage replaces the world: its items spawned anew (numbered on from
+    the last id; its controllers switched on and set up as saved) in a new
+    MjData from time 0, each in its saved state, which Reset goes back to.
+    Items whose model is gone are left out. Every page is told (scene with
+    `stage`, then a reset)."""
+    stage, files = bundle['stage'], bundle.get('files') or {}
+    async with self.lock:
+      first = self.next_id
+      physics = checked_physics(stage.get('physics') or {}, self.physics)
+
+      def make():
+        robots, kept = [], []
+        for it in stage.get('items', []):
+          try:
+            model_info(it['rel'])
+          except Exception as err:
+            print(f'stage {stage.get("name")}: skipping {it.get("rel")}: {err}')
+            continue
+          r = Robot(first + len(robots), it['rel'], it.get('label') or it['rel'], it['pos'], it.get('yaw', 0))
+          if r.key:
+            if it.get('use'):
+              r.use.update({k: v for k, v in it['use'].items() if k in ('policy', 'base', 'ik')})
+              r.make_policy()
+            for kind in ('ik', 'base'):
+              cfg = (files.get(f'{kind}.json') or {}).get(r.key)
+              if cfg:
+                c = getattr(r, kind)
+                c.config, c.saved = copy.deepcopy(cfg), False
+          robots.append(r)
+          kept.append(it)
+        return robots, kept, compile_world(robots, physics)
+
+      robots, kept, model = await asyncio.to_thread(make)
+      async with self.stepping:
+        for r in self.robots:
+          if r.policy is not None:
+            r.policy.unbind()
+        self.physics = physics
+        self.next_id = first + len(robots)
+        self.data, self.robots = None, []  # nothing carries over
+        self.swap(model, robots, robots)
+        layout, d = state_layout(robots), self.data
+        for r, it in zip(robots, kept):
+          at = layout[r.id]
+          apply_state(model, d, r, at, it.get('state') or {})
+          r.initial = {'qpos': d.qpos[at['qpos']:at['qpos'] + r.dims['nq']].copy(),
+                       'ctrl': d.ctrl[at['ctrl']:at['ctrl'] + r.dims['nu']].copy()}
+          for c in (r.policy, r.base, r.ik):
+            if c:
+              c.reset()
+        mujoco.mj_forward(model, d)
+        self.sim_start = time.monotonic()
+        await self.broadcast_scene(stage=stage.get('id'))
+        await self.send_all(json.dumps({'type': 'reset', 'id': None}))
 
   async def set_scene(self, robots, fresh=(), after=None):
     async with self.lock:
@@ -546,7 +779,7 @@ class World:
   async def handle(self, ws, msg):
     # These may rebuild the world: they take the stepping lock themselves,
     # around everything but compiling, so stepping goes on meanwhile.
-    if msg['op'] in ('spawn', 'remove', 'physics', 'move', 'restart'):
+    if msg['op'] in ('spawn', 'remove', 'physics', 'move', 'restart', 'stage_load'):
       return await self.handle_op(ws, msg)
     async with self.stepping:
       return await self.handle_op(ws, msg)
@@ -561,6 +794,8 @@ class World:
       await self.set_scene([*self.robots, r], [r])
     elif op == 'restart':
       await self.restart()
+    elif op == 'stage_load':
+      await self.load_stage(await asyncio.to_thread(read_stage, msg['id']))
     elif op == 'remove':
       ids = set(msg['ids'])
       await self.set_scene([r for r in self.robots if r.id not in ids])
@@ -601,11 +836,7 @@ class World:
       self.resync()
       await self.broadcast_meta()
     elif op == 'physics':
-      new = {k: msg['physics'].get(k, v) for k, v in PHYSICS_DEFAULTS.items()}
-      new['timestep'] = min(0.05, max(1e-4, float(new['timestep'])))
-      new['speed'] = max(0.0, float(new['speed']))
-      new['stateHz'] = min(120, max(1, int(new['stateHz'])))
-      old, self.physics = self.physics, new
+      old, self.physics = self.physics, checked_physics(msg['physics'], PHYSICS_DEFAULTS)
       if old['speed'] != new['speed'] and self.data is not None:
         self.resync()
       if bool(old.get('sleep')) != bool(self.physics['sleep']):
@@ -981,9 +1212,12 @@ class World:
                     'actuator': names(mujoco.mjtObj.mjOBJ_ACTUATOR, m.nu)}
     return out
 
-  def scene_msg(self):
-    return {'type': 'scene', 'version': self.version, 'items': [r.item() for r in self.robots],
-            'physics': self.physics, 'paused': self.paused, 'world': self.world_tables()}
+  def scene_msg(self, stage=None):
+    msg = {'type': 'scene', 'version': self.version, 'items': [r.item() for r in self.robots],
+           'physics': self.physics, 'paused': self.paused, 'world': self.world_tables()}
+    if stage:
+      msg['stage'] = stage
+    return msg
 
   # -- the HTTP API (scripts) -----------------------------------------------
 
@@ -1025,8 +1259,8 @@ class World:
         del r.cmd_at[kind]
       await self.send_all(json.dumps({'type': 'goal', 'id': r.id, 'goal': r.goal}))
 
-  async def broadcast_scene(self):
-    await self.send_all(json.dumps(self.scene_msg()))
+  async def broadcast_scene(self, stage=None):
+    await self.send_all(json.dumps(self.scene_msg(stage)))
     await self.send_all(self.state_bytes())
 
   async def broadcast_meta(self):
@@ -1098,7 +1332,7 @@ async def cors(request, handler):
   origin = request.headers.get('Origin')
   if request.method == 'OPTIONS' and origin:  # preflight (a POST with JSON)
     resp = web.Response(status=204, headers={
-      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+      'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
       'Access-Control-Allow-Headers': request.headers.get('Access-Control-Request-Headers', 'Content-Type'),
       'Access-Control-Max-Age': '600'})
   else:
@@ -1159,6 +1393,43 @@ async def api_goal(request):
   return web.json_response([world.robot_info(r) for r in robots])
 
 
+async def api_stages(_request):
+  """[{id, name, saved, count, thumb}], newest first."""
+  return web.json_response(await asyncio.to_thread(list_stages))
+
+
+async def api_stage(request):
+  """A stage as a bundle (GET), or deleted (DELETE)."""
+  sid = request.match_info['id']
+  try:
+    if request.method == 'DELETE':
+      await asyncio.to_thread(delete_stage, sid)
+      return web.json_response({'id': sid})
+    return web.json_response(await asyncio.to_thread(read_stage, sid))
+  except (ValueError, OSError) as err:
+    raise web.HTTPNotFound(text=str(err))
+
+
+async def api_save_stage(request):
+  """Saves the world as a new stage; the JSON body has what only the page
+  knows: {name, thumbnail (a JPEG data URL), view, cameras, on}."""
+  try:
+    extra = await request.json()
+    async with world.stepping:
+      bundle = world.stage_bundle(extra)
+    return web.json_response(await asyncio.to_thread(write_stage, bundle))
+  except (ValueError, KeyError, TypeError) as err:
+    raise web.HTTPBadRequest(text=str(err))
+
+
+async def api_import_stage(request):
+  """Writes a stage bundle (a downloaded stage file)."""
+  try:
+    return web.json_response(await asyncio.to_thread(write_stage, await request.json()))
+  except (ValueError, KeyError, TypeError) as err:
+    raise web.HTTPBadRequest(text=str(err))
+
+
 async def server_json(_request):
   return web.json_response({'server': 'mujoco-python', 'mujoco': mujoco.__version__})
 
@@ -1167,11 +1438,16 @@ async def main():
   sys.stdout.reconfigure(line_buffering=True)
   port = int(sys.argv[1]) if len(sys.argv) > 1 else 4007
   await world.set_scene([])
-  app = web.Application(middlewares=[cors, no_store])
+  app = web.Application(middlewares=[cors, no_store], client_max_size=32 << 20)  # stage bundles
   app.router.add_get('/ws', ws_handler)
   app.router.add_get('/server.json', server_json)
   app.router.add_get('/api/robots', api_robots)
   app.router.add_post('/api/goal', api_goal)
+  app.router.add_get('/api/stages', api_stages)
+  app.router.add_post('/api/stages', api_save_stage)
+  app.router.add_post('/api/stages/import', api_import_stage)
+  app.router.add_get('/api/stages/{id}', api_stage)
+  app.router.add_delete('/api/stages/{id}', api_stage)
   app.router.add_get('/render', render)
   app.router.add_get('/', index)
   app.router.add_static('/', PUBLIC, follow_symlinks=True)
