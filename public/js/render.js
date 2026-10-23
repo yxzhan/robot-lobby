@@ -17,6 +17,13 @@
 // The presets leave the resolution at the screen's: on an iPhone 15 it made
 // little difference. A browser without saved settings starts on Medium, a
 // phone or tablet (a finger for its main pointer) on Low.
+//
+// Below them: how the floor looks (floor.js), the lighting (lighting.js)
+// and whether the camera follows the selection, each saved in this browser
+// and applied as soon as a field changes.
+
+import { FLOOR_STYLES, floorDefaults } from './floor.js';
+import { LIGHTING_DEFAULTS } from './lighting.js';
 
 const STORE = 'mujoco-filament/render';
 
@@ -40,7 +47,7 @@ const FIELDS = [
   ['shadows', 'Shadows', [['off', 'off'], ['on', 'on']],
     'the sun\'s shadows: off saves drawing the whole scene a second time, into the shadow map'],
   ['reflections', 'Reflections', [['off', 'off'], ['on', 'on']],
-    'screen-space reflections: shiny surfaces (a floor with Shine, World panel) mirror what is on screen; one more pass over the image'],
+    'screen-space reflections: shiny surfaces (a floor with Shine, below) mirror what is on screen; one more pass over the image'],
   ['textures', 'Textures', [[64, '64'], [512, '512'], [1024, '1024'], [2048, '2048']],
     'longest side of image textures in GPU memory: less memory and bandwidth, blurrier surfaces'],
 ];
@@ -101,5 +108,83 @@ export class RenderPanel {
     }
     const { width: w, height: h } = this.app.canvas;
     this.body.append(el('div', { className: 'hint', textContent: `Drawing ${w}×${h} px. Lower is lighter on the GPU.` }));
+    // The rest: a label, its inputs and a unit per row.
+    const num = (value, onchange, title) => {
+      const inp = el('input', { type: 'number', step: 'any', value: value ?? '', title });
+      inp.onchange = () => {
+        if (Number.isFinite(Number(inp.value.trim())) && inp.value.trim() !== '') onchange(Number(inp.value));
+        else inp.value = value ?? '';
+      };
+      return inp;
+    };
+    const field = (label, unit, title, ...inputs) => el('div', { className: 'field', title },
+      el('span', { textContent: label }), el('div', { className: 'ctl' }, ...inputs), el('span', { className: 'unit', textContent: unit }));
+    this.floor(field, num);
+    this.lighting(field);
+    this.camera(field);
+  }
+
+  // The Camera section, last: whether the camera follows the selection
+  // (App.setFollow; saved in this browser, off by default).
+  camera(row) {
+    this.body.append(el('div', { className: 'sub', textContent: 'Camera' }));
+    const title = 'The camera keeps following the body selected with a double-click; off: it only turns to it once';
+    const box = el('input', { type: 'checkbox', checked: !!this.app.follow, title });
+    box.onchange = () => this.app.setFollow(box.checked);
+    this.body.append(row('Follow selection', '', title, box));
+  }
+
+  // The Lighting section: sliders for the sun and the ambient light, live
+  // while dragging (this page only).
+  lighting(row) {
+    const l = this.app.lighting;
+    this.body.append(el('div', { className: 'sub', textContent: 'Lighting' }));
+    const slider = (k, label, min, max, step, unit, title) => {
+      const out = el('span', { className: 'unit', textContent: `${l[k]}${unit}` });
+      const inp = el('input', { type: 'range', min, max, step, value: l[k], title });
+      inp.oninput = () => {
+        this.app.setLighting({ ...this.app.lighting, [k]: Number(inp.value) });
+        out.textContent = `${inp.value}${unit}`;
+      };
+      const f = el('div', { className: 'field', title }, el('span', { textContent: label }), el('div', { className: 'ctl' }, inp), out);
+      this.body.append(f);
+    };
+    slider('sun', 'Sun', 0, 300, 5, '%', 'brightness of the sunlight (100 %: the default)');
+    slider('azimuth', 'Azimuth', 0, 360, 1, '°', 'where the sun stands around the world: degrees from +x toward +y');
+    slider('elevation', 'Elevation', 5, 90, 1, '°', 'how high the sun stands above the horizon: low makes long shadows, 90 straight down');
+    slider('ambient', 'Ambient', 0, 300, 5, '%', 'light from all around (the sky): fills the shadows (100 %: the default)');
+    const title = 'the sunlight\'s color';
+    const color = el('input', { type: 'color', value: l.color, title });
+    color.oninput = () => this.app.setLighting({ ...this.app.lighting, color: color.value });
+    const reset = el('button', { type: 'button', textContent: 'Default', title: 'every lighting setting back to its default' });
+    reset.onclick = () => { this.app.setLighting({ ...LIGHTING_DEFAULTS }); this.render(); };
+    this.body.append(row('Sun color', '', title, color, reset));
+  }
+
+  // The Floor section: style, cell size and color (this page only).
+  floor(row, num) {
+    const f = this.app.floorSettings, set = (change) => { this.app.setFloor({ ...this.app.floorSettings, ...change }); this.render(); };
+    this.body.append(el('div', { className: 'sub', textContent: 'Floor' }));
+    const sel = el('select', { title: 'how the floor looks (not its physics)' });
+    for (const [k, s] of Object.entries(FLOOR_STYLES)) sel.append(new Option(s.label, k, false, k === f.style));
+    sel.onchange = () => { set(floorDefaults(sel.value)); };  // each style starts from its own size and color
+    this.body.append(row('Style', '', sel.title, sel));
+    if (f.style === 'none') return;
+    if (f.style !== 'plain') {
+      const what = { checker: 'one checker cell', grid: 'one grid cell', tiles: 'one tile', wood: 'one plank\'s width', concrete: 'one repeat of the pattern' }[f.style];
+      this.body.append(row('Size', 'm', what, num(f.size, (v) => { if (v > 0.01 && v <= 100) set({ size: v }); else this.render(); }, what)));
+    }
+    const title = f.style === 'checker' ? 'the light cells (the dark ones are darker)' : f.style === 'plain' ? 'the floor\'s color' : 'tints the pattern (white: as drawn)';
+    const color = el('input', { type: 'color', value: f.color, title });
+    color.oninput = () => this.app.setFloor({ ...this.app.floorSettings, color: color.value });
+    color.onchange = () => this.render();
+    const reset = el('button', { type: 'button', textContent: 'Default', title: 'this style\'s own size and color' });
+    reset.onclick = () => set(floorDefaults(f.style));
+    this.body.append(row('Color', '', title, color, reset));
+    const tip = 'glossier toward polished: reflects the sky, and the robots with Reflections on (above)';
+    const shine = el('input', { type: 'range', min: 0, max: 100, step: 5, value: f.shine ?? 0, title: tip });
+    const out = el('span', { className: 'unit', textContent: `${f.shine ?? 0}%` });
+    shine.oninput = () => { this.app.setFloor({ ...this.app.floorSettings, shine: Number(shine.value) }); out.textContent = `${shine.value}%`; };
+    this.body.append(el('div', { className: 'field', title: tip }, el('span', { textContent: 'Shine' }), el('div', { className: 'ctl' }, shine), out));
   }
 }

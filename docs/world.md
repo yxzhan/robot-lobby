@@ -2,7 +2,8 @@
 
 The World panel (`public/js/worldpanel.js`, settings in `public/js/physics.js`,
 not saved: every load starts from the defaults) sets MuJoCo's global options and default geom
-properties:
+properties (how the floor and the lighting look, and whether the camera
+follows the selection, are the Render panel's: rendering.md):
 - **Gravity, wind, magnetic field, medium density and viscosity,
   impratio, friction cone** go into the world spec's `<option>` at every rebuild and onto
   the live `model.opt`, so they act at once. Wind and fluid drag need a
@@ -25,31 +26,6 @@ properties:
 - **Sync rate** (network mode only): the server's state broadcasts per
   second, 10–60 Hz (30 by default): more is smoother and fresher, and more
   traffic for every page.
-- **Floor** (`public/js/floor.js`, saved in this browser, in network mode
-  too since it is only this page's view): how the world floor looks, not its
-  physics. Checker, grid, tiles, wood and concrete (textures drawn in code,
-  tileable, tinted by the color), plain (one color) or none. Size is one cell,
-  tile, plank width or pattern repeat; picking a style starts from its own
-  size and color. **Shine** takes the floor from its style's roughness toward
-  polished (0.05; checker starts at 100 %): it then reflects the sky, and the robots with the Render
-  panel's Reflections on. Robot cameras see the floor too.
-- **Lighting** (`public/js/lighting.js`, saved in this browser like the
-  floor): the sun's brightness, azimuth, elevation and color, and the ambient
-  (sky) light's brightness, live while a slider moves; Default resets them.
-  Shadows stay in the Render panel.
-- **Reflections**: the sky is also the scene's reflection map (IBL), its mip
-  levels prefiltered in code for each roughness, so metal and shiny surfaces
-  reflect it everywhere (VR and robot cameras included) at no extra cost.
-  Screen-space reflections (mirroring the robots on a shiny floor) are the
-  Render panel's Reflections setting, on in the High preset and off in VR;
-  only the opaque lit materials take part (`reflections : screenspace` in
-  `lit.mat` and `lit_textured.mat`).
-- **Camera** (last, saved in this browser): *Follow selection*, off by
-  default. A double-click selects a body and the camera turns to it once;
-  with this on it keeps following it (orbit, zoom and pan go on, a pan
-  offsetting the view) until the selection is cleared or changes, and holds
-  still while something is dragged through the pointer (a pulled body, an IK
-  or goal marker).
 - **Default geom density, mass and friction** apply to geoms that do not
   set them themselves or through their own default classes, as a top-level
   `<default><geom/></default>` would: density and friction are written into

@@ -1,12 +1,9 @@
 // The World panel: global physics options and default geom properties
-// (physics.js), how the floor looks (floor.js) and the lighting
-// (lighting.js). Options, the floor and the lighting
-// apply as soon as a field changes; default geom properties change masses,
-// so they wait for Apply (a rebuild).
+// (physics.js). Options apply as soon as a field changes; default geom
+// properties change masses, so they wait for Apply (a rebuild). How the
+// floor and the lighting look is the Render panel's (render.js).
 
 import { CONES, PHYSICS_DEFAULTS, SPEEDS, STATE_RATES } from './physics.js';
-import { FLOOR_STYLES, floorDefaults } from './floor.js';
-import { LIGHTING_DEFAULTS } from './lighting.js';
 
 const el = (tag, props = {}, ...children) => {
   const e = Object.assign(document.createElement(tag), props);
@@ -86,15 +83,12 @@ export class WorldPanel {
       this.body.append(row(label, unit, title, ...inputs));
     }
     this.body.append(el('div', { className: 'hint', textContent: 'Applied at once (Sleep rebuilds the world). Wind and fluid drag only act with a medium density or viscosity.' }));
-    this.floor(row, num);
-    this.lighting(row);
 
     if (this.app.net) {  // network mode: the server's options (server/server.py)
       this.body.append(el('div', { className: 'hint', textContent: 'Shared world: these are the server\'s settings, for everyone. Default geom properties are not available in server mode yet.' }));
       const reset = el('button', { type: 'button', textContent: 'Defaults', title: 'Every option back to its default' });
       reset.onclick = () => this.app.setPhysics({ ...structuredClone(PHYSICS_DEFAULTS), geom: this.app.physics.geom });
       this.body.append(el('div', { className: 'bar' }, reset));
-      this.camera(row);
       return;
     }
     this.body.append(el('div', { className: 'sub', textContent: 'Default geom' }));
@@ -124,70 +118,5 @@ export class WorldPanel {
     };
     this.body.append(el('div', { className: 'bar' }, apply, reset, status));
     if (dirty) status.textContent = 'not applied';
-    this.camera(row);
-  }
-
-  // The Camera section, last: whether the camera follows the selection
-  // (App.setFollow; saved in this browser, off by default).
-  camera(row) {
-    this.body.append(el('div', { className: 'sub', textContent: 'Camera' }));
-    const title = 'The camera keeps following the body selected with a double-click; off: it only turns to it once';
-    const box = el('input', { type: 'checkbox', checked: !!this.app.follow, title });
-    box.onchange = () => this.app.setFollow(box.checked);
-    this.body.append(row('Follow selection', '', title, box));
-  }
-
-  // The Lighting section: sliders for the sun and the ambient light, live
-  // while dragging (this page only).
-  lighting(row) {
-    const l = this.app.lighting;
-    this.body.append(el('div', { className: 'sub', textContent: 'Lighting' }));
-    const slider = (k, label, min, max, step, unit, title) => {
-      const out = el('span', { className: 'unit', textContent: `${l[k]}${unit}` });
-      const inp = el('input', { type: 'range', min, max, step, value: l[k], title });
-      inp.oninput = () => {
-        this.app.setLighting({ ...this.app.lighting, [k]: Number(inp.value) });
-        out.textContent = `${inp.value}${unit}`;
-      };
-      const f = el('div', { className: 'field', title }, el('span', { textContent: label }), el('div', { className: 'ctl' }, inp), out);
-      this.body.append(f);
-    };
-    slider('sun', 'Sun', 0, 300, 5, '%', 'brightness of the sunlight (100 %: the default)');
-    slider('azimuth', 'Azimuth', 0, 360, 1, '°', 'where the sun stands around the world: degrees from +x toward +y');
-    slider('elevation', 'Elevation', 5, 90, 1, '°', 'how high the sun stands above the horizon: low makes long shadows, 90 straight down');
-    slider('ambient', 'Ambient', 0, 300, 5, '%', 'light from all around (the sky): fills the shadows (100 %: the default)');
-    const title = 'the sunlight\'s color';
-    const color = el('input', { type: 'color', value: l.color, title });
-    color.oninput = () => this.app.setLighting({ ...this.app.lighting, color: color.value });
-    const reset = el('button', { type: 'button', textContent: 'Default', title: 'every lighting setting back to its default' });
-    reset.onclick = () => { this.app.setLighting({ ...LIGHTING_DEFAULTS }); this.render(); };
-    this.body.append(row('Sun color', '', title, color, reset));
-  }
-
-  // The Floor section: style, cell size and color (this page only).
-  floor(row, num) {
-    const f = this.app.floorSettings, set = (change) => { this.app.setFloor({ ...this.app.floorSettings, ...change }); this.render(); };
-    this.body.append(el('div', { className: 'sub', textContent: 'Floor' }));
-    const sel = el('select', { title: 'how the floor looks (not its physics)' });
-    for (const [k, s] of Object.entries(FLOOR_STYLES)) sel.append(new Option(s.label, k, false, k === f.style));
-    sel.onchange = () => { set(floorDefaults(sel.value)); };  // each style starts from its own size and color
-    this.body.append(row('Style', '', sel.title, sel));
-    if (f.style === 'none') return;
-    if (f.style !== 'plain') {
-      const what = { checker: 'one checker cell', grid: 'one grid cell', tiles: 'one tile', wood: 'one plank\'s width', concrete: 'one repeat of the pattern' }[f.style];
-      this.body.append(row('Size', 'm', what, num(f.size, (v) => { if (v > 0.01 && v <= 100) set({ size: v }); else this.render(); }, what)));
-    }
-    const title = f.style === 'checker' ? 'the light cells (the dark ones are darker)' : f.style === 'plain' ? 'the floor\'s color' : 'tints the pattern (white: as drawn)';
-    const color = el('input', { type: 'color', value: f.color, title });
-    color.oninput = () => this.app.setFloor({ ...this.app.floorSettings, color: color.value });
-    color.onchange = () => this.render();
-    const reset = el('button', { type: 'button', textContent: 'Default', title: 'this style\'s own size and color' });
-    reset.onclick = () => set(floorDefaults(f.style));
-    this.body.append(row('Color', '', title, color, reset));
-    const tip = 'glossier toward polished: reflects the sky, and the robots with Reflections on (Render panel)';
-    const shine = el('input', { type: 'range', min: 0, max: 100, step: 5, value: f.shine ?? 0, title: tip });
-    const out = el('span', { className: 'unit', textContent: `${f.shine ?? 0}%` });
-    shine.oninput = () => { this.app.setFloor({ ...this.app.floorSettings, shine: Number(shine.value) }); out.textContent = `${shine.value}%`; };
-    this.body.append(el('div', { className: 'field', title: tip }, el('span', { textContent: 'Shine' }), el('div', { className: 'ctl' }, shine), out));
   }
 }

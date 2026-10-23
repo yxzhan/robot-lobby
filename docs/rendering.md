@@ -21,6 +21,33 @@ session's layer, and renders every session frame. **Enter AR** (where
 `immersive-ar` is supported, e.g. Quest 3) is the same with passthrough:
 no sky and no world floor, so the robots stand in your room, on its floor.
 
+Below the quality settings (`public/js/render.js` too):
+
+- **Floor** (`public/js/floor.js`, saved in this browser, in network mode
+  too since it is only this page's view): how the world floor looks, not its
+  physics. Checker, grid, tiles, wood and concrete (textures drawn in code,
+  tileable, tinted by the color), plain (one color) or none. Size is one cell,
+  tile, plank width or pattern repeat; picking a style starts from its own
+  size and color. **Shine** takes the floor from its style's roughness toward
+  polished (0.05; checker starts at 100 %): it then reflects the sky, and the robots with
+  Reflections on. Robot cameras see the floor too.
+- **Lighting** (`public/js/lighting.js`, saved in this browser like the
+  floor): the sun's brightness, azimuth, elevation and color, and the ambient
+  (sky) light's brightness, live while a slider moves; Default resets them.
+- **Reflections**: the sky is also the scene's reflection map (IBL), its mip
+  levels prefiltered in code for each roughness, so metal and shiny surfaces
+  reflect it everywhere (VR and robot cameras included) at no extra cost.
+  Screen-space reflections (mirroring the robots on a shiny floor) are the
+  Reflections setting above, on in the High preset and off in VR;
+  only the opaque lit materials take part (`reflections : screenspace` in
+  `lit.mat` and `lit_textured.mat`).
+- **Camera** (last, saved in this browser): *Follow selection*, off by
+  default. A double-click selects a body and the camera turns to it once;
+  with this on it keeps following it (orbit, zoom and pan go on, a pan
+  offsetting the view) until the selection is cleared or changes, and holds
+  still while something is dragged through the pointer (a pulled body, an IK
+  or goal marker).
+
 ## Textures
 
 Geoms whose material has a 2D RGB texture (`mat_texid` role

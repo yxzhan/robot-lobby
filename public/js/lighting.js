@@ -1,4 +1,4 @@
-// The scene's lighting (the World panel's Lighting settings), saved in this
+// The scene's lighting (the Render panel's Lighting settings), saved in this
 // browser: the sun's brightness, direction and color and the ambient light's
 // brightness. Brightness is a percentage of the defaults main.js was tuned
 // at; the direction is where the sun stands: azimuth (degrees from +x

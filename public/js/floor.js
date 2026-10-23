@@ -1,4 +1,4 @@
-// The world floor's look (the World panel's Floor settings): a style, its
+// The world floor's look (the Render panel's Floor settings): a style, its
 // cell size, a color and a shine. The patterns are drawn here into a
 // tileable texture, repeated over the floor and tinted by the color; plain
 // is one color, none no floor. Shine makes it glossier, toward polished.

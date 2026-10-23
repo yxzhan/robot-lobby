@@ -255,6 +255,12 @@
     #stage > details > summary { list-style: none; }
     #stage summary .title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     #stage summary .actions { display: flex; gap: 4px; }
+    /* The robot of the selected body (inspect.js update). */
+    #stage summary .tag { display: none; flex: none; font-size: 10px; font-weight: 600; color: #0d1b26; background: #7fd1ff;
+                          border-radius: 8px; padding: 0 6px; line-height: 16px; }
+    #stage > details.selected > summary { box-shadow: inset 3px 0 #7fd1ff; background: rgba(127,209,255,.10); border-radius: 3px; }
+    #stage > details.selected > summary .title { color: #fff; }
+    #stage > details.selected > summary .tag { display: inline-block; }
     #stage summary .actions button { cursor: pointer; font: inherit; font-size: 11px; font-weight: 400;
                                      color: #ddd; background: #333; border: 1px solid #555; border-radius: 4px; padding: 1px 7px; }
     #stage summary .actions button:hover { background: #444; }

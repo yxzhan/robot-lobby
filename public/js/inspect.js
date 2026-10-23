@@ -196,7 +196,7 @@ export class StagePanel {
       const det = document.createElement('details');
       det.dataset.key = r.prefix;
       det.open = this.open.has(r.prefix);
-      det.innerHTML = '<summary><span class="title"></span><span class="actions">'
+      det.innerHTML = '<summary><span class="title"></span><span class="tag" title="The selected body is part of it">selected</span><span class="actions">'
         + '<button class="reset" title="Back to its spawn pose">Reset</button>'
         + '<button class="remove" title="Remove from the scene">✕</button></span></summary>';
       det.querySelector('.title').textContent = `${r.prefix.slice(0, -1)} · ${r.label}`;
@@ -318,6 +318,9 @@ export class StagePanel {
     this.lastUpdate = now;
     const sel = this.el.querySelector('#selected');
     if (sel) sel.textContent = this.app.perturb.name ? `${this.app.perturb.name} · ${this.massText()}` : 'none (double-click a body)';
+    // The robot the selected body belongs to: marked in the list.
+    const b = this.app.perturb.body, picked = b > 0 ? this.app.robotOfBody(b)?.prefix : null;
+    for (const d of this.el.querySelectorAll(':scope > details')) d.classList.toggle('selected', d.dataset.key === picked);
     const paused = this.app.paused;
     for (const row of this.rows) {
       const sub = row.input.closest('details');

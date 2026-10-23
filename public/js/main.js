@@ -730,10 +730,10 @@ class App {
     this.scene.setSkybox(this.skybox);
     this.indirect = Filament.IndirectLight.Builder().irradianceSh(3, sh).reflections(sky).intensity(AMBIENT).build(engine);
     this.scene.setIndirectLight(this.indirect);
-    this.setLighting(loadLighting());  // the World panel's (lighting.js)
+    this.setLighting(loadLighting());  // the Render panel's (lighting.js)
 
     // The floor of world.js's base XML (a size-0, i.e. infinite, plane), drawn
-    // 40 m x 40 m, as the World panel's Floor settings say (floor.js).
+    // 40 m x 40 m, as the Render panel's Floor settings say (floor.js).
     this.floor = null;
     this.floorTextures = new Map();  // style -> texture, made once
     this.setFloor(loadFloor());
@@ -808,7 +808,7 @@ class App {
 
     this.orbit = new OrbitCamera(canvas, [0, 0, 0.4], 4);
     this.captures = [];  // pictures of the main view to take after the next frame (capture)
-    // Whether the camera follows the selection (the World panel's switch,
+    // Whether the camera follows the selection (the Render panel's switch,
     // saved in this browser), else turns to it once.
     try { this.follow = localStorage.getItem(FOLLOW) === '1'; } catch { this.follow = false; }
     this.setSpawnMarker(null);
