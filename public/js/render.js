@@ -161,7 +161,7 @@ export class RenderPanel {
     this.body.append(row('Sun color', '', title, color, reset));
   }
 
-  // The Floor section: style, cell size and color (this page only).
+  // The Floor section: style, cell size, colors and shine (this page only).
   floor(row, num) {
     const f = this.app.floorSettings, set = (change) => { this.app.setFloor({ ...this.app.floorSettings, ...change }); this.render(); };
     this.body.append(el('div', { className: 'sub', textContent: 'Floor' }));
@@ -174,13 +174,19 @@ export class RenderPanel {
       const what = { checker: 'one checker cell', grid: 'one grid cell', tiles: 'one tile', wood: 'one plank\'s width', concrete: 'one repeat of the pattern' }[f.style];
       this.body.append(row('Size', 'm', what, num(f.size, (v) => { if (v > 0.01 && v <= 100) set({ size: v }); else this.render(); }, what)));
     }
-    const title = f.style === 'checker' ? 'the light cells (the dark ones are darker)' : f.style === 'plain' ? 'the floor\'s color' : 'tints the pattern (white: as drawn)';
-    const color = el('input', { type: 'color', value: f.color, title });
-    color.oninput = () => this.app.setFloor({ ...this.app.floorSettings, color: color.value });
-    color.onchange = () => this.render();
-    const reset = el('button', { type: 'button', textContent: 'Default', title: 'this style\'s own size and color' });
+    // Its colors side by side (the pattern's two, plain's one), then Default.
+    const pickers = f.colors.map((value, i) => {
+      const color = el('input', { type: 'color', value, title: f.colors.length > 1 ? `color ${i + 1} of the pattern` : 'the floor\'s color' });
+      color.oninput = () => {
+        const colors = [...this.app.floorSettings.colors];
+        colors[i] = color.value;
+        this.app.setFloor({ ...this.app.floorSettings, colors });
+      };
+      return color;
+    });
+    const reset = el('button', { type: 'button', textContent: 'Default', title: 'this style\'s own size, colors and shine' });
     reset.onclick = () => set(floorDefaults(f.style));
-    this.body.append(row('Color', '', title, color, reset));
+    this.body.append(row('Color', '', 'the floor\'s colors', ...pickers, reset));
     const tip = 'glossier toward polished: reflects the sky, and the robots with Reflections on (above)';
     const shine = el('input', { type: 'range', min: 0, max: 100, step: 5, value: f.shine ?? 0, title: tip });
     const out = el('span', { className: 'unit', textContent: `${f.shine ?? 0}%` });

@@ -1,31 +1,45 @@
 // The world floor's look (the Render panel's Floor settings): a style, its
-// cell size, a color and a shine. The patterns are drawn here into a
-// tileable texture, repeated over the floor and tinted by the color; plain
-// is one color, none no floor. Shine makes it glossier, toward polished.
-// Only how the floor looks: the physics floor (world.js) stays the same.
+// cell size, its two colors and a shine. The patterns are drawn here into a
+// tileable texture, repeated over the floor: each pattern is worked out once
+// as a mix between its two colors and a shade per pixel (patternOf), so a
+// new color only mixes the pixels again (floorTexture). Plain is one color,
+// none no floor. Shine makes it glossier, toward polished. Only how the
+// floor looks: the physics floor (world.js) stays the same.
 
 const STORE = 'mujoco-filament/floor';
 
 // style -> {label, size (m: one cell, tile, plank or texture repeat),
-// color (hex: checker's light cells, the tint of a texture, plain's color),
-// shine (%, default 0),
-// cells (cells one texture covers), roughness}
+// colors (hex, sRGB: the pattern's two, or plain's one), shine (%, default
+// 0), cells (cells one texture covers), roughness}
 export const FLOOR_STYLES = {
-  checker: { label: 'Checker', size: 1, color: '#737f8f', cells: 2, roughness: 0.6, shine: 100 },
-  grid: { label: 'Grid', size: 1, color: '#ffffff', cells: 1, roughness: 0.7 },
-  tiles: { label: 'Tiles', size: 0.5, color: '#ffffff', cells: 4, roughness: 0.35 },
-  wood: { label: 'Wood', size: 0.2, color: '#ffffff', cells: 4, roughness: 0.55 },
-  concrete: { label: 'Concrete', size: 2, color: '#ffffff', cells: 1, roughness: 0.85 },
-  plain: { label: 'Plain', size: 1, color: '#8c939c', roughness: 0.7 },
+  checker: { label: 'Checker', size: 1, colors: ['#737f8f', '#3f464f'], cells: 2, roughness: 0.6, shine: 100 },
+  grid: { label: 'Grid', size: 1, colors: ['#9ea6b0', '#4d545e'], cells: 1, roughness: 0.7 },
+  tiles: { label: 'Tiles', size: 0.5, colors: ['#dbd6cc', '#6b6863'], cells: 4, roughness: 0.35 },
+  wood: { label: 'Wood', size: 0.2, colors: ['#a8784d', '#734d2e'], cells: 4, roughness: 0.55 },
+  concrete: { label: 'Concrete', size: 2, colors: ['#b1aea8', '#77746e'], cells: 1, roughness: 0.85 },
+  plain: { label: 'Plain', size: 1, colors: ['#8c939c'], roughness: 0.7 },
   none: { label: 'None' },
 };
+// Before there were two colors, one tinted the pattern; its default per
+// style (white but for these), to turn a saved tint into two colors.
+const OLD_TINT = { checker: '#737f8f', plain: '#8c939c' };
 
-export const floorDefaults = (style = 'checker') => ({ style, size: FLOOR_STYLES[style].size ?? 1, color: FLOOR_STYLES[style].color ?? '#ffffff', shine: FLOOR_STYLES[style].shine ?? 0 });
+export const floorDefaults = (style = 'checker') => ({
+  style, size: FLOOR_STYLES[style].size ?? 1, colors: [...(FLOOR_STYLES[style].colors ?? [])], shine: FLOOR_STYLES[style].shine ?? 0,
+});
+
+// hex * tint / base, per channel (sRGB, near enough).
+const retint = (hex, tint, base = '#ffffff') => rgbHex(hexRgb(hex).map((v, i) => v * hexRgb(tint)[i] / (hexRgb(base)[i] || 1)));
 
 export function loadFloor() {
   try {
     const saved = JSON.parse(localStorage.getItem(STORE) ?? 'null');
-    if (saved && FLOOR_STYLES[saved.style]) return { ...floorDefaults(saved.style), ...saved };
+    if (saved && FLOOR_STYLES[saved.style]) {
+      const f = { ...floorDefaults(saved.style), ...saved };
+      if (saved.color && !saved.colors) f.colors = f.colors.map((c) => retint(c, saved.color, OLD_TINT[f.style]));  // an older tint
+      delete f.color;
+      return f;
+    }
   } catch { /* no storage */ }
   return floorDefaults();
 }
@@ -34,8 +48,9 @@ export function saveFloor(f) {
   try { localStorage.setItem(STORE, JSON.stringify(f)); } catch { /* no storage */ }
 }
 
-// '#rrggbb' -> [r, g, b] in 0..1 (sRGB)
+// '#rrggbb' -> [r, g, b] in 0..1 (sRGB), and back.
 export const hexRgb = (hex) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255);
+const rgbHex = (rgb) => '#' + rgb.map((v) => Math.round(Math.max(0, Math.min(1, v)) * 255).toString(16).padStart(2, '0')).join('');
 
 // ---------------------------------------------------------------------------
 // Textures: RGBA8 pixels, tileable (they wrap at the edges)
@@ -69,51 +84,42 @@ function fbm(s, t, p, octaves, seed) {
   return sum / norm;
 }
 
-function pixels(shade) {
-  const rgba = new Uint8Array(N * N * 4);
+// Every pixel of a pattern: t (0: the first color, 1: the second, mixed in
+// between) and k (a shade multiplying the mixed color).
+function pattern(shade) {
+  const t = new Float32Array(N * N), k = new Float32Array(N * N);
   for (let y = 0; y < N; y++) {
-    for (let x = 0; x < N; x++) {
-      const [r, g, b] = shade(x, y), k = 4 * (y * N + x);
-      rgba[k] = Math.max(0, Math.min(255, r * 255));
-      rgba[k + 1] = Math.max(0, Math.min(255, g * 255));
-      rgba[k + 2] = Math.max(0, Math.min(255, b * 255));
-      rgba[k + 3] = 255;
-    }
+    for (let x = 0; x < N; x++) [t[y * N + x], k[y * N + x]] = shade(x, y);
   }
-  return rgba;
+  return { t, k };
 }
-
-const mix = (a, b, t) => a.map((v, i) => v + (b[i] - v) * t);
-const scale = (c, k) => c.map((v) => v * k);
 
 // Distance in pixels from x to the nearest multiple of `step`.
 const edge = (x, step) => { const m = ((x % step) + step) % step; return Math.min(m, step - m); };
 
+// (x, y) -> [t, k], see pattern.
 const SHADERS = {
-  // 2 x 2 cells, light and dark (0.55 of it, as sRGB: the color's dark cells).
+  // 2 x 2 cells, light and dark.
   checker(x, y) {
-    const k = (Math.floor(x / (N / 2)) + Math.floor(y / (N / 2))) % 2 ? 1 : 0.55;
-    return [k, k, k];
+    return [(Math.floor(x / (N / 2)) + Math.floor(y / (N / 2))) % 2 ? 0 : 1, 1];
   },
 
   // One cell: a line at its border and four faint ones across it.
   grid(x, y) {
-    const base = [0.62, 0.65, 0.69], line = [0.3, 0.33, 0.37];
     const major = Math.min(edge(x, N), edge(y, N));
     const minor = Math.min(edge(x, N / 5), edge(y, N / 5));
-    const t = Math.max(major < 3 ? 1 : major < 4 ? 0.5 : 0, minor < 1 ? 0.35 : 0);
-    return mix(base, line, t);
+    return [Math.max(major < 3 ? 1 : major < 4 ? 0.5 : 0, minor < 1 ? 0.35 : 0), 1];
   },
 
   // 4 x 4 tiles, each a little different, in grout.
   tiles(x, y) {
     const step = N / 4, i = Math.floor(x / step), j = Math.floor(y / step);
     const grout = Math.min(edge(x, step), edge(y, step));
-    if (grout < 3) return [0.42, 0.41, 0.39];
-    const base = [0.86, 0.84, 0.8], k = 0.94 + 0.08 * hash(i, j, 7);
+    if (grout < 3) return [1, 1];
+    const k = 0.94 + 0.08 * hash(i, j, 7);
     const n = fbm(x / N, y / N, 16, 3, 11);
     const bevel = grout < 6 ? 0.9 + 0.1 * (grout - 3) / 3 : 1;
-    return scale(base, k * (0.95 + 0.1 * n) * bevel);
+    return [0, k * (0.95 + 0.1 * n) * bevel];
   },
 
   // 4 planks along y, their ends staggered, with grain.
@@ -123,31 +129,36 @@ const SHADERS = {
     const yy = y + off, k = Math.floor(yy / len) % 2;  // wraps with the texture
     const seam = Math.min(edge(x, step), edge(yy, len));
     const tone = 0.85 + 0.25 * hash(i, k, 5);
-    const light = [0.66, 0.47, 0.3], dark = [0.45, 0.3, 0.18];
     // Grain: lines along the plank, wavering slowly along it, finer ones between.
     const u = x / step, t = y / N;
     const warp = noise(u * 2, t * 3, 8, 21, 3) * 2.5 + noise(u * 8, t * 12, 32, 23, 12) * 0.4;
     const ring = (u * 7 + warp) % 1;
     const grain = Math.pow(Math.abs(ring * 2 - 1), 3) * 0.8 + 0.2 * noise(u * 40, t * 4, 160, 27, 4);
-    let c = scale(mix(light, dark, 0.65 * grain * grain), tone);
-    if (seam < 1.5) c = scale(c, 0.45);
-    else if (seam < 3) c = scale(c, 0.8);
-    return c;
+    return [0.65 * grain * grain, tone * (seam < 1.5 ? 0.45 : seam < 3 ? 0.8 : 1)];
   },
 
-  // Concrete: blotches, fine grain and a few dark specks.
+  // Concrete: blotches between light and dark, fine grain and a few dark specks.
   concrete(x, y) {
     const s = x / N, t = y / N;
     const n = 0.6 * fbm(s, t, 4, 5, 41) + 0.4 * fbm(s, t, 64, 2, 51);
-    const speck = hash(x, y, 61) > 0.996 ? 0.75 : 1;
-    return scale([0.58, 0.57, 0.55], (0.8 + 0.4 * n) * speck);
+    return [1 - n, hash(x, y, 61) > 0.996 ? 0.75 : 1];
   },
 };
 
-const cache = new Map();
+const patterns = new Map();
+const patternOf = (style) => {
+  if (!patterns.has(style)) patterns.set(style, pattern(SHADERS[style]));
+  return patterns.get(style);
+};
 
-// The texture of a pattern style: {w, h, rgba}, made once.
-export function floorTexture(style) {
-  if (!cache.has(style)) cache.set(style, { w: N, h: N, rgba: pixels(SHADERS[style]) });
-  return cache.get(style);
+// The texture of a pattern style in two colors (hex): {w, h, rgba}. The
+// pattern is worked out once; this only mixes the colors (a few ms).
+export function floorTexture(style, [a, b]) {
+  const { t, k } = patternOf(style), A = hexRgb(a), B = hexRgb(b);
+  const rgba = new Uint8Array(N * N * 4);
+  for (let p = 0; p < N * N; p++) {
+    for (let c = 0; c < 3; c++) rgba[4 * p + c] = Math.max(0, Math.min(255, (A[c] + (B[c] - A[c]) * t[p]) * k[p] * 255));
+    rgba[4 * p + 3] = 255;
+  }
+  return { w: N, h: N, rgba };
 }

@@ -735,7 +735,7 @@ class App {
     // The floor of world.js's base XML (a size-0, i.e. infinite, plane), drawn
     // 40 m x 40 m, as the Render panel's Floor settings say (floor.js).
     this.floor = null;
-    this.floorTextures = new Map();  // style -> texture, made once
+    this.floorTex = null;  // {key: style and colors, tex}: the pattern's texture
     this.setFloor(loadFloor());
 
     // Perturbation markers: the selection point (half transparent, so the
@@ -857,7 +857,7 @@ class App {
       engine.destroyMaterialInstance(old.mi);
       this.floor = null;
     }
-    const style = FLOOR_STYLES[f.style], color = hexRgb(f.color);
+    const style = FLOOR_STYLES[f.style];
     if (f.style === 'none') return;
     const shape = plane(20, 20);
     let mi, uv = null;
@@ -865,17 +865,21 @@ class App {
     const roughness = style.roughness + (0.05 - style.roughness) * (f.shine ?? 0) / 100;
     if (f.style === 'plain') {
       mi = this.matLit.createInstance();
-      mi.setColor4Parameter('baseColor', F.RgbaType.sRGB, [...color, 1]);
+      mi.setColor4Parameter('baseColor', F.RgbaType.sRGB, [...hexRgb(f.colors[0]), 1]);
       mi.setFloatParameter('roughness', roughness);
       mi.setFloatParameter('metallic', 0.0);
     } else {
-      if (!this.floorTextures.has(f.style)) {
-        const { w, h, rgba } = floorTexture(f.style);
-        this.floorTextures.set(f.style, uploadTexture(engine, w, h, rgba));
+      // The pattern in its two colors: drawn again when they change (the
+      // old texture's material instance is gone already).
+      const key = `${f.style} ${f.colors.join(' ')}`;
+      if (this.floorTex?.key !== key) {
+        const { w, h, rgba } = floorTexture(f.style, f.colors);
+        if (this.floorTex) engine.destroyTexture(this.floorTex.tex);
+        this.floorTex = { key, tex: uploadTexture(engine, w, h, rgba) };
       }
       mi = this.matTextured.createInstance();
-      mi.setColor4Parameter('baseColor', F.RgbaType.sRGB, [...color, 1]);
-      mi.setTextureParameter('baseColorMap', this.floorTextures.get(f.style), this.sampler);
+      mi.setColor4Parameter('baseColor', F.RgbaType.sRGB, [1, 1, 1, 1]);
+      mi.setTextureParameter('baseColorMap', this.floorTex.tex, this.sampler);
       mi.setFloatParameter('roughness', roughness);
       mi.setFloatParameter('metallic', 0.0);
       const repeat = f.size * style.cells;  // m per texture
