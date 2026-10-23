@@ -21,10 +21,10 @@
 const STORE = 'mujoco-filament/render';
 
 export const PRESETS = {
-  high: { pixelRatio: 'screen', antialiasing: 'fxaa', ao: 'high', shadows: 'on', reflections: 'on', textures: 2048 },
+  high: { pixelRatio: 'screen', antialiasing: 'msaa', ao: 'high', shadows: 'on', reflections: 'on', textures: 2048 },
   medium: { pixelRatio: 'screen', antialiasing: 'fxaa', ao: 'on', shadows: 'on', reflections: 'off', textures: 1024 },
-  low: { pixelRatio: 'screen', antialiasing: 'fxaa', ao: 'off', shadows: 'off', reflections: 'off', textures: 512 },
-  ultralow: { pixelRatio: 'screen', antialiasing: 'fxaa', ao: 'off', shadows: 'off', reflections: 'off', textures: 64 },  // Low, but textures
+  low: { pixelRatio: 'screen', antialiasing: 'none', ao: 'off', shadows: 'off', reflections: 'off', textures: 512 },
+  ultralow: { pixelRatio: 'screen', antialiasing: 'none', ao: 'off', shadows: 'off', reflections: 'off', textures: 64 },  // Low, but textures
 };
 const PRESET_NAMES = { high: 'High', medium: 'Medium', low: 'Low', ultralow: 'Ultra low' };
 const DEFAULT = matchMedia('(pointer: coarse)').matches ? 'low' : 'medium';

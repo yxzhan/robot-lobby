@@ -7,7 +7,7 @@ browser) trades drawing quality for GPU load, applied at once: **Preset**
 (High, Medium (the default; Low on a phone or tablet), Low, Ultra low; Custom once a field differs),
 **Resolution** (canvas pixels per CSS pixel, at most the screen's; the
 presets keep the screen's, which on an iPhone 15 made little difference),
-**Anti-alias** (off, FXAA, MSAA 4×), **Occlusion** (SSAO off, on at half
+**Anti-alias** (off, FXAA, MSAA 4×; High uses MSAA, Medium FXAA, Low and Ultra low none), **Occlusion** (SSAO off, on at half
 resolution, high at full), **Shadows** (the sun's, on or off: this Filament
 build binds no shadow-map options, so their size is fixed) and **Textures**
 (64, 512, 1024 or 2048 px on the longer side; a change decodes the scene's
