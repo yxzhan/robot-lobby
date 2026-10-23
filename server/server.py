@@ -837,7 +837,7 @@ class World:
       await self.broadcast_meta()
     elif op == 'physics':
       old, self.physics = self.physics, checked_physics(msg['physics'], PHYSICS_DEFAULTS)
-      if old['speed'] != new['speed'] and self.data is not None:
+      if old['speed'] != self.physics['speed'] and self.data is not None:
         self.resync()
       if bool(old.get('sleep')) != bool(self.physics['sleep']):
         await self.set_scene(list(self.robots))  # compiled in (the state carries over)

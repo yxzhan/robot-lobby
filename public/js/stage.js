@@ -258,6 +258,8 @@ export function pickBundle() {
   });
 }
 
+const SHOWN = 20;  // stages listed, the newest
+
 // The Stage panel's list of saved stages: a row each with its thumbnail,
 // name, when and how many items, and Load / Download / Link / Delete.
 // `actions`: {load(entry), download(entry), link(entry): a URL that opens
@@ -270,16 +272,18 @@ export class StageList {
     this.start = null;  // id of the stage loaded at start (local mode)
   }
 
+  // `entries` newest first: the SHOWN newest of them are listed.
   show(entries) {
     this.entries = entries;
     const list = this.el.querySelector('.stage-items');
     list.replaceChildren();
-    this.el.querySelector('.stage-count').textContent = entries.length;
+    const shown = entries.slice(0, SHOWN);
+    this.el.querySelector('.stage-count').textContent = entries.length > SHOWN ? `${SHOWN} of ${entries.length}` : entries.length;
     if (!entries.length) {
       list.append(Object.assign(document.createElement('div'), { className: 'hint', textContent: 'No saved stages yet.' }));
       return;
     }
-    for (const e of entries) {
+    for (const e of shown) {
       const row = document.createElement('div');
       row.className = 'stage-item';
       const img = document.createElement(e.thumb ? 'img' : 'div');

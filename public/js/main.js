@@ -2406,7 +2406,9 @@ try {
   // Load: the stage replaces what is spawned (for everyone, in network mode).
   async function openStage(e, ask = true) {
     if (busy) { status.textContent = 'busy, try again in a moment'; return; }
-    if (ask && robots.length && !confirm(`Replace the ${robots.length} spawned model${robots.length > 1 ? 's' : ''} with the stage "${e.name}"${app.net ? ', for everyone on this server' : ''}?`)) return;
+    // Always asked first (not for a linked stage, asked about already): the current scene goes.
+    const scene = robots.length ? `the ${robots.length} spawned model${robots.length > 1 ? 's' : ''} and their state` : 'the current scene';
+    if (ask && !confirm(`Load the stage "${e.name}"?\n\nThis clears ${scene}${app.net ? ' for everyone on this server' : ''}, then loads the stage.`)) return;
     let bundle;
     try {
       bundle = await e.store.get(e.id);
@@ -2898,7 +2900,7 @@ try {
     if (asked) {
       const e = await findStage(asked);
       if (!e) status.textContent = `no stage ${asked} on this server`;
-      else if (confirm(`Load the stage "${e.name}" for everyone on this server?`)) openStage(e, false);
+      else if (confirm(`Load the stage "${e.name}"?\n\nThis clears the current scene for everyone on this server, then loads the stage.`)) openStage(e, false);
       const u = new URL(location.href);
       u.searchParams.delete('stage');
       history.replaceState(null, '', u);  // not again on reload
