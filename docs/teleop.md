@@ -13,7 +13,9 @@ actuators their own gains back, and an automatic IK setup is found again
 around whatever the remaining controllers drive (a G1 without its policy
 gets leg chains). Keyboard: **WASD** walk / drive, **QE** turn, hold
 **R**/**F** to raise or lower a locomotion policy's base height (keys typed
-into a text field are ignored); the sections fold.
+into a text field are ignored); the sections fold. The Policy section also
+has a control for each of the policy's other commands (Microduck's head
+pose, GR00T's height; see Commands in `docs/policies.md`).
 
 The **Input** select picks the keys or a **goal marker** (the default,
 `public/js/goal.js`): an orange ring with a heading arrow, like the spawn

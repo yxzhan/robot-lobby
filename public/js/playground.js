@@ -30,11 +30,14 @@
 //     last_action  the raw action before the last one (Playground updates
 //                  it after building the observation)
 //     command      vx, vy (m/s), yaw rate (rad/s)
+//     cmd:<name>   one of its other commands (commands.js), declared in
+//                  policy.json's "commands"
 // - command_range: what it was trained to follow (the key speeds stay inside);
 //   min_command ({speed, turn}, optional): its dead band, below which it
 //   stands (drive.minSpeed / minTurn for the goal marker, goal.js).
 
 import { runBatched } from './batch.js';
+import { commandDefaults, commandVector } from './commands.js';
 
 // {ort, session, spec}. `source(name)` returns a file's URL.
 export async function loadPlaygroundPolicy(ort, source) {
@@ -65,6 +68,8 @@ export class PlaygroundController {
     this.name = name;
     this.drive = driveOf(this.spec.command_range, this.spec.min_command);
     this.cmd = [0, 0, 0];
+    this.commands = this.spec.commands ?? {};
+    this.command = commandDefaults(this.commands);
     this.reset();
   }
 
@@ -197,7 +202,8 @@ export class PlaygroundController {
     const obs = new Float32Array(s.obs.reduce((t, [, k]) => t + k, 0));
     let o = 0;
     for (const [name, size] of s.obs) {
-      const v = parts[name]?.();
+      const c = name.startsWith('cmd:') && this.commands[name.slice(4)];
+      const v = c ? commandVector(c, this.command[name.slice(4)]) : parts[name]?.();
       if (!v || v.length !== size) throw new Error(`${this.name}: cannot build observation part ${name}`);
       obs.set(v, o);
       o += size;

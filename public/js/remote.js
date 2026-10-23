@@ -17,7 +17,10 @@
 // Base and policy: the panel writes `cmd` (and a policy's `height`) every
 // frame; it goes to the server when it changes, and is repeated while not
 // zero (REPEAT_MS) since the server stops a command that is not (a closed or
-// frozen tab must not leave a robot walking).
+// frozen tab must not leave a robot walking). A policy's other commands
+// (commands.js) are settings: one `command` request per change, everyone's
+// values coming back with the status (also ignored for ECHO_MS after a
+// change here).
 
 const ECHO_MS = 600;
 const REPEAT_MS = 250;
@@ -181,19 +184,39 @@ export class RemotePolicy extends RemoteDriver {
     this.policyId = policyId;
     this.name = desc.name;
     this.drive = desc.drive;
-    if (desc.height != null) {  // a commanded base height: the panel's R/F keys
-      this.heightNow = desc.height;
+    this.commands = desc.commands ?? {};
+    this.command = structuredClone(desc.command ?? {});
+    this.changedAt = {};  // command name -> when it was set here
+    if ('height' in this.commands) {  // a commanded base height: also the panel's R/F keys, sent with cmd
       Object.defineProperty(this, 'height', {
         get: () => this.heightNow,
-        set: (v) => { this.heightNow = v; this.push(); },
+        set: (v) => { this.command.height = v; this.changedAt.height = performance.now(); this.push(); },
         enumerable: true,
       });
     }
   }
 
+  get heightNow() { return this.command.height; }
+
   update(desc) {
     this.name = desc.name;
     this.drive = desc.drive;
+    this.status(desc.command);
+  }
+
+  // commands.js setCommand: the value is already a valid one.
+  setCommand(name, value) {
+    this.command[name] = value;
+    this.changedAt[name] = performance.now();
+    this.app.net.send('command', { id: this.robot.netId, name, value });
+  }
+
+  // The server's values (status, describe), but those just changed here.
+  status(command) {
+    const now = performance.now();
+    for (const [k, v] of Object.entries(command ?? {})) {
+      if (!(now - (this.changedAt[k] ?? -Infinity) < ECHO_MS)) this.command[k] = v;
+    }
   }
 }
 

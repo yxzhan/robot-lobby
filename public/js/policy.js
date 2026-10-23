@@ -28,8 +28,12 @@
 //   async step(data, valid)  one tick every CONTROL_DT; write data.ctrl only
 //                            if valid() still holds after any await
 // Locomotion policies also take `cmd` = [vx, vy, yaw rate] with key speeds
-// `drive` ({forward, back, side, turn}) and may have a commanded `height`
-// (R/F keys); a hand or arm policy leaves those out and the keyboard skips it.
+// `drive` ({forward, back, side, turn}); a hand or arm policy leaves those
+// out and the keyboard skips it. Any other input (a head pose, a base
+// height, a gait…) is a command it declares in `commands`, with its values
+// in `command` (commands.js): the panel makes a control for each, and a
+// policy.json's observation takes one as its part cmd:<name>. A command
+// named `height` is also `height` on the controller (R/F keys).
 
 import { G1_MODELS, GrootController, loadGrootPolicy } from './groot.js';
 import { PlaygroundController, loadPlaygroundPolicy } from './playground.js';

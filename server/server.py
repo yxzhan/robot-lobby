@@ -21,6 +21,8 @@ Protocol (client -> server, JSON {op, ...}; `rid` asks for a reply):
   Teleop (robot `id`): use {kind: policy|base|ik, on (policy: its id or '')}
   cmd {kind: policy|base, cmd: [vx, vy, yaw rate], height?} (repeated while
   not zero; stops after CMD_TIMEOUT without one; a moving one drops the goal)
+  command {name, value}   one of the policy's other commands (its describe()'s
+  `commands`, public/js/commands.js), kept until changed
   goal {goal: {x, y, yaw} or null} (the robot drives there: goal.py)
   ik_config {config}   ik_target {chain, pos, rot} (in the chain's ref body
   frame)   ik_reset_target {chain or null}   ik_gripper {chain, amount?}
@@ -37,7 +39,8 @@ Server -> client:
                               (item.use, item.errors, item.ik / base / policy:
                               their describe())
   {type: 'status', robots: {id: {ik: {targets, err}, base: {measured},
-                              goal: {phase, dist, dyaw}}}}  STATUS_HZ times a second
+                              goal: {phase, dist, dyaw}, policy: {command}}}}
+                              STATUS_HZ times a second
   {type: 'goal', id, goal, arrived?}  a robot's goal changed (null: none;
                               arrived: the goal it reached, let go)
   {type: 'reset', id}            after reset (id null) / reset_robot {id}
@@ -357,6 +360,8 @@ class Robot:
       out['ik'] = self.ik.status()
     if self.use['base'] and self.base.ready:
       out['base'] = {'measured': self.base.measured}
+    if self.use['policy'] and self.policy is not None and getattr(self.policy, 'commands', None):
+      out['policy'] = {'command': self.policy.command}
     return out
 
 
@@ -858,7 +863,7 @@ class World:
       self.set_perturb(ws, msg)
     elif op == 'ray':
       return self.ray(msg['eye'], msg['dir'])
-    elif op in ('use', 'cmd', 'goal', 'ik_config', 'ik_target', 'ik_reset_target', 'ik_gripper', 'ik_save', 'ik_defaults',
+    elif op in ('use', 'cmd', 'command', 'goal', 'ik_config', 'ik_target', 'ik_reset_target', 'ik_gripper', 'ik_save', 'ik_defaults',
                 'base_config', 'base_save', 'base_defaults'):
       await self.controller_op(ws, op, self.robot(msg['id']), msg)
     else:
@@ -876,13 +881,20 @@ class World:
       c = r.policy if msg['kind'] == 'policy' else base
       if c is not None:
         c.cmd = [max(-5.0, min(5.0, float(v))) for v in msg['cmd'][:3]]
-        if msg.get('height') is not None and hasattr(c, 'height'):
-          c.height = max(0.3, min(1.2, float(msg['height'])))
+        if msg.get('height') is not None and 'height' in getattr(c, 'commands', {}):
+          c.height = POL.clamp_command(c.commands['height'], msg['height'])
         r.cmd_at[msg['kind']] = (time.monotonic(), ws)
         if r.goal and any(c.cmd):  # driven with the keys: the goal is dropped
           r.set_goal(None)
           c.cmd = [max(-5.0, min(5.0, float(v))) for v in msg['cmd'][:3]]
           await self.send_all(json.dumps({'type': 'goal', 'id': r.id, 'goal': None}))
+      return
+    elif op == 'command':  # a policy command (the panel's sliders): everyone sees it in the status
+      c = r.policy if r.use['policy'] else None
+      d = c is not None and getattr(c, 'commands', {}).get(msg['name'])
+      if not d:
+        raise ValueError(f"{r.label}: no policy command {msg['name']!r}")
+      c.command[msg['name']] = POL.clamp_command(d, msg['value'])
       return
     elif op == 'goal':
       r.set_goal(msg.get('goal'))

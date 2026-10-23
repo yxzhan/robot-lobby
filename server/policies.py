@@ -2,7 +2,9 @@
 that have a port here (same ids, so the Teleop panel's choice carries
 over), running on onnxruntime. A policy controller has the interface
 policy.js describes (bind, unbind, owns, pose, reset, step; locomotion ones
-also cmd, drive, height), with a synchronous step.
+also cmd, drive; any of them commands and command, see
+public/js/commands.js, of which command_default, clamp_command and
+command_vector here are ports), with a synchronous step.
 
 GrootController is a port of public/js/groot.js (see there for the
 observation, the two MLPs and the PD gains); PlaygroundController of
@@ -11,6 +13,7 @@ MicroduckController and BamServos of public/js/microduck.js (microduck_rl's
 policies on the BAM servo model: scripts/export_microduck.py).
 """
 
+import copy
 import json
 import math
 import pathlib
@@ -24,6 +27,90 @@ POLICY_ROOT = PUBLIC / 'pretrained_policies'
 OBJ = mujoco.mjtObj
 # As a plain int: numpy compares an array with a MuJoCo enum one element at a time, in Python.
 FRICTION_DOF = int(mujoco.mjtConstraint.mjCNSTR_FRICTION_DOF)
+
+# ---------------------------------------------------------------------------
+# Commands besides the twist (public/js/commands.js)
+
+COMMAND_TYPES = ('scalar', 'vector', 'enum', 'bool')
+
+
+def _clamp(v, r=None):
+  return min(r[1], max(r[0], v)) if r else v
+
+
+def command_default(d):
+  if 'default' in d:
+    return copy.deepcopy(d['default'])
+  t = d.get('type')
+  if t == 'scalar':
+    return _clamp(0.0, d.get('range'))
+  if t == 'vector':
+    rng = d.get('range') or [None] * len(d.get('dims', []))
+    return [_clamp(0.0, r) for r in rng]
+  if t == 'enum':
+    return (d.get('values') or [''])[0]
+  if t == 'bool':
+    return False
+  return None
+
+
+def command_defaults(defs):
+  return {k: command_default(d) for k, d in (defs or {}).items()}
+
+
+def _number(x):
+  n = float(x)
+  if not math.isfinite(n):
+    raise ValueError(f'not a number: {x}')
+  return n
+
+
+def clamp_command(d, v):
+  """`v` made a valid value of the command; ValueError if it cannot be one."""
+  t = d.get('type')
+  if t == 'scalar':
+    return _clamp(_number(v), d.get('range'))
+  if t == 'vector':
+    n = len(command_default(d))
+    if not isinstance(v, list) or len(v) != n:
+      raise ValueError(f'expected {n} numbers')
+    rng = d.get('range') or [None] * n
+    return [_clamp(_number(x), rng[i]) for i, x in enumerate(v)]
+  if t == 'enum':
+    if v not in d['values']:
+      raise ValueError(f"not one of {', '.join(map(str, d['values']))}")
+    return v
+  if t == 'bool':
+    return bool(v)
+  return v
+
+
+def command_vector(d, v):
+  """The command's part of an observation (cmd:<name>)."""
+  t = d.get('type')
+  if t == 'scalar':
+    return np.array([v], float)
+  if t == 'vector':
+    return np.asarray(v, float)
+  if t == 'enum':
+    return np.array([float(x == v) for x in d['values']])
+  if t == 'bool':
+    return np.array([float(bool(v))])
+  raise ValueError(f'a {t} command cannot be observed')
+
+
+def observation(spec, parts, commands, command):
+  """The observation spec['obs'] lists, from `parts` ({name: () -> values})
+  and the commands (cmd:<name>)."""
+  out = []
+  for name, size in spec['obs']:
+    key = name[4:] if name.startswith('cmd:') else None
+    v = command_vector(commands[key], command[key]) if key in commands else np.asarray(parts[name](), float)
+    if v.size != size:
+      raise ValueError(f'observation part {name}: {v.size} values, not {size}')
+    out.append(v.ravel())
+  return np.concatenate(out).astype(np.float32)[None]
+
 
 # ---------------------------------------------------------------------------
 # GR00T locomotion, Unitree G1
@@ -48,6 +135,10 @@ DEFAULT_ANGLES[[4, 10]] = -0.2
 ACTION_SCALE, ANG_VEL_SCALE, DOF_VEL_SCALE = 0.25, 0.25, 0.05
 CMD_SCALE = np.array([2.0, 2.0, 0.25], np.float32)
 FRAME, HISTORY = 86, 6
+GROOT_COMMANDS = {  # as groot.js
+    'height': {'type': 'scalar', 'label': 'Height', 'unit': 'm', 'range': [0.5, 1.0], 'default': 0.74,
+               'about': 'the pelvis height it holds, standing and walking (also R/F)'},
+}
 
 
 class GrootController:
@@ -57,11 +148,20 @@ class GrootController:
     self.name = 'GR00T locomotion policy'
     self.drive = {'forward': 0.5, 'back': 0.3, 'side': 0.3, 'turn': 0.6}
     self.cmd = [0.0, 0.0, 0.0]
-    self.height = 0.74
+    self.commands = GROOT_COMMANDS
+    self.command = command_defaults(GROOT_COMMANDS)
     self.model = None
     self.saved_gains = None
     self.driven = set()
     self.reset()
+
+  @property
+  def height(self):
+    return self.command['height']
+
+  @height.setter
+  def height(self, v):
+    self.command['height'] = v
 
   def reset(self):
     self.action = np.zeros(NA, np.float32)
@@ -128,7 +228,7 @@ class GrootController:
     data.ctrl[self.act[:NA]] = DEFAULT_ANGLES[:NA] + self.action * ACTION_SCALE
 
   def describe(self):
-    return {'name': self.name, 'drive': self.drive, 'height': self.height}
+    return {'name': self.name, 'drive': self.drive, 'commands': self.commands, 'command': self.command}
 
 
 def load_groot(directory):
@@ -167,6 +267,8 @@ class PlaygroundController:
     self.name = name
     self.drive = drive_of(self.spec['command_range'], self.spec.get('min_command'))
     self.cmd = [0.0, 0.0, 0.0]
+    self.commands = self.spec.get('commands', {})
+    self.command = command_defaults(self.commands)
     self.model = None
     self.saved = None
     self.driven = set()
@@ -279,7 +381,7 @@ class PlaygroundController:
         'last_action': lambda: self.prev_action,
         'command': lambda: np.asarray(self.cmd, float),
     }
-    return np.concatenate([parts[k]() for k, _ in self.spec['obs']]).astype(np.float32)[None]
+    return observation(self.spec, parts, self.commands, self.command)
 
   def step(self, data):
     s = self.spec
@@ -290,7 +392,7 @@ class PlaygroundController:
     data.ctrl[self.act[~self.torque]] = self.targets[~self.torque]
 
   def describe(self):
-    return {'name': self.name, 'drive': self.drive}
+    return {'name': self.name, 'drive': self.drive, 'commands': self.commands, 'command': self.command}
 
 
 def load_playground(directory):
@@ -413,6 +515,8 @@ class MicroduckController:
     self.name = name
     self.drive = drive_of(self.spec['command_range'], self.spec.get('min_command'))
     self.cmd = [0.0, 0.0, 0.0]
+    self.commands = self.spec.get('commands', {})
+    self.command = command_defaults(self.commands)
     self.model = None
     self.saved = None
     self.driven = set()
@@ -496,12 +600,17 @@ class MicroduckController:
   def observe(self, data):
     R = data.xmat[self.root].reshape(3, 3)
     v = self.free_v
-    cmd = np.zeros(13)
-    cmd[:3] = self.cmd
-    obs = np.concatenate([data.qvel[v + 3:v + 6], -R[2], data.qpos[self.qadr] - self.default,
-                          self.qvel, self.action, cmd]).astype(np.float32)
+    parts = {
+        'base_ang_vel': lambda: data.qvel[v + 3:v + 6],
+        'projected_gravity': lambda: -R[2],
+        'joint_pos': lambda: data.qpos[self.qadr] - self.default,
+        'joint_vel': lambda: self.qvel,
+        'last_action': lambda: self.action,
+        'command': lambda: self.cmd,
+    }
+    obs = observation(self.spec, parts, self.commands, self.command)
     self.qvel = data.qvel[self.dofs].copy()
-    return obs[None]
+    return obs
 
   def step(self, data):
     s = self.spec
@@ -509,7 +618,7 @@ class MicroduckController:
     self.pending.append((data.time + s['bam']['delay'], self.default + self.action * s['action_scale']))
 
   def describe(self):
-    return {'name': self.name, 'drive': self.drive}
+    return {'name': self.name, 'drive': self.drive, 'commands': self.commands, 'command': self.command}
 
 
 def load_microduck(directory):

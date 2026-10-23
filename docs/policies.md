@@ -11,12 +11,45 @@ name, its `dir`, the robot files it starts on for (`defaultFor`),
 directory; shared, loaded on first use; onnxruntime-web is there as
 `onnxRuntime()`) and `create(weights, prefix)` for a controller with
 `bind` / `unbind` / `owns` / `pose` / `reset` / async `step`, plus `cmd` /
-`drive` (and `height`) for a locomotion policy driven by the keys, and an
-optional `substep(data)` run before every physics step (actuator models).
+`drive` for a locomotion policy driven by the keys, and an optional
+`substep(data)` run before every physics step (actuator models).
 An entry's optional `physics` names World settings it needs (e.g.
 `{cone: 'elliptic', impratio: 100}`): the Policy section shows them when
 the world differs, with a button that applies them. The panel's Policy
 section picks the model; a hand or quadruped policy is one more entry.
+## Commands
+
+What a policy takes besides the robot's state and the drive twist (a head
+pose, a base height, a gait, …) it declares as **commands**
+(`public/js/commands.js`): `commands` on the controller, `{name: definition}`,
+with the current values in `command`. A policy that reads `policy.json`
+(Playground, Microduck) takes them from its `"commands"`, and its `obs` list
+puts one in the observation as the part `cmd:<name>`; GR00T declares its
+`height` in code. A definition has a `type`, `label`, `about` and `default`,
+and per type:
+
+| type | value | in the panel | in the observation |
+|---|---|---|---|
+| `scalar` | a number within `range` [lo, hi] | a slider | the number |
+| `vector` | numbers, one per `dims` name, each within its `range` | a slider per dimension | the numbers |
+| `enum` | one of `values` | a select | one-hot over `values` |
+| `bool` | true or false | a checkbox | 0 or 1 |
+| anything else | as given | a JSON text field | (cannot be observed) |
+
+`unit` is shown after a value (a vector can have one per dimension). The
+Teleop panel's Policy section makes the controls (double-click a slider for
+its default; **Defaults** resets them all), so a new policy needs no panel
+code. Values are clamped to their ranges wherever they are set. A command
+named `height` also follows **R**/**F** (and the gamepad's height actions).
+In network mode a change is a `command {id, name, value}` request; the
+server keeps the values (they outlast the keys' drive command) and sends
+them with the status, so every browser shows them.
+
+Microduck's are `head` (the four head joints' offsets from the default
+pose, up to each joint's reach: the walking task trains it to hold them)
+and `body` (a body pose offset trained only within ±5 mm and ±0.05 rad,
+which the walking task barely follows); GR00T's is `height` (0.5-1 m).
+
 `public/js/torchscript.js` reads the tensors of a TorchScript `.pt` (a zip
 of raw storages) in the browser, so small exported MLPs/RNNs need no
 conversion.
@@ -83,7 +116,8 @@ robot's position actuators into motors on bind, computes the servo torques
 and writes the friction budget into the joints before every physics step,
 delays the targets by the training's command delay, and builds mjlab's 61-D
 observation (trunk angular velocity and gravity, joint positions and
-velocities, last action, command). In the viewer's world it walks without
+velocities, last action, the drive command, and the head and body pose
+commands, see Commands above). In the viewer's world it walks without
 falling at ~2/3 of the commanded speed forward and back, turns at the
 commanded rate, but sidesteps slowly (0.2 m/s → 0.05); standing still it
 does not start below ~0.2 m/s or ~0.6 rad/s (`min_command`, so the goal

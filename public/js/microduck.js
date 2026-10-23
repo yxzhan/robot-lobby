@@ -5,11 +5,14 @@
 //
 // - joints / actuators, default_pose, action_scale: the 14 servos in action
 //   order; target = default + action * scale (no clipping, as in training);
-// - obs: mjlab's actor observation, 61 values: the root body's angular
-//   velocity and the gravity direction in its frame, q - default, qdot one
-//   control tick old (joint_vel_lag: training delays it by one step), the
-//   last action, then the command block [vx, vy, yaw rate, head pose (4),
-//   body pose (6)], the poses left at zero (their nominal);
+// - obs: mjlab's actor observation, 61 values, its parts in order: the root
+//   body's angular velocity (base_ang_vel) and the gravity direction in its
+//   frame (projected_gravity), q - default (joint_pos), qdot one control
+//   tick old (joint_vel: training delays it by one step), the last action,
+//   then the command block: the twist (command: vx, vy, yaw rate) and the
+//   commands of policy.json's "commands" (cmd:head, the head joints' offsets
+//   from the default pose; cmd:body, a body pose offset, which the walking
+//   task barely follows), set in the Teleop panel (commands.js);
 // - command_range, min_command: what the policy was trained to follow, and
 //   its dead band (it stands for less);
 // - bam: the XL330 servo model the policy was trained with (BAM M6,
@@ -28,6 +31,7 @@
 // server/policies.py (MicroduckController, BamServos) is the same in Python.
 
 import { runBatched } from './batch.js';
+import { commandDefaults, commandVector } from './commands.js';
 
 const FRICTION_DOF = 3;  // mjCNSTR_FRICTION_DOF
 
@@ -61,6 +65,8 @@ export class MicroduckController {
     this.name = name;
     this.drive = driveOf(this.spec.command_range, this.spec.min_command);
     this.cmd = [0, 0, 0];
+    this.commands = this.spec.commands ?? {};
+    this.command = commandDefaults(this.commands);
     this.reset();
   }
 
@@ -179,15 +185,25 @@ export class MicroduckController {
 
   // The policy input from `data` (synchronous); keeps qdot for the next tick.
   observe(data) {
-    const { qpos, qvel, xmat } = data, n = this.qadr.length, s = this.spec;
+    const { qpos, qvel, xmat } = data, s = this.spec;
     const R = xmat.subarray(9 * this.root, 9 * this.root + 9), v = this.freeV;
-    const obs = new Float32Array(61);
-    obs.set(qvel.subarray(v + 3, v + 6), 0);  // a free joint's angular velocity is in its body frame
-    obs.set([-R[6], -R[7], -R[8]], 3);         // R^T (0, 0, -1)
-    for (let i = 0; i < n; i++) obs[6 + i] = qpos[this.qadr[i]] - s.default_pose[i];
-    obs.set(this.qvel, 6 + n);
-    obs.set(this.action, 6 + 2 * n);
-    obs.set(this.cmd, 6 + 3 * n);
+    const parts = {
+      base_ang_vel: () => qvel.subarray(v + 3, v + 6),  // a free joint's angular velocity is in its body frame
+      projected_gravity: () => [-R[6], -R[7], -R[8]],   // R^T (0, 0, -1)
+      joint_pos: () => Array.from(this.qadr, (a, i) => qpos[a] - s.default_pose[i]),
+      joint_vel: () => this.qvel,
+      last_action: () => this.action,
+      command: () => this.cmd,
+    };
+    const obs = new Float32Array(s.obs.reduce((t, [, k]) => t + k, 0));
+    let o = 0;
+    for (const [name, size] of s.obs) {
+      const c = name.startsWith('cmd:') && this.commands[name.slice(4)];
+      const part = c ? commandVector(c, this.command[name.slice(4)]) : parts[name]?.();
+      if (!part || part.length !== size) throw new Error(`${this.name}: cannot build observation part ${name}`);
+      obs.set(part, o);
+      o += size;
+    }
     this.qvel = Float64Array.from(this.dofs, (d) => qvel[d]);
     return obs;
   }

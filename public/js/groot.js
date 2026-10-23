@@ -22,6 +22,7 @@
 //   angular velocity qvel[3:6] (pelvis frame), as the sim's bridge reports it.
 
 import { runBatched } from './batch.js';
+import { commandDefaults } from './commands.js';
 
 export const CONTROL_DT = 0.02;
 
@@ -53,6 +54,11 @@ const ANG_VEL_SCALE = 0.25;
 const DOF_VEL_SCALE = 0.05;
 const CMD_SCALE = [2.0, 2.0, 0.25];
 const FRAME = 86, HISTORY = 6;
+// Its commands besides the twist (commands.js): the pelvis height it holds.
+export const GROOT_COMMANDS = {
+  height: { type: 'scalar', label: 'Height', unit: 'm', range: [0.5, 1.0], default: 0.74,
+    about: 'the pelvis height it holds, standing and walking (also R/F)' },
+};
 
 // Robot files the policy is on for by default: every menagerie G1 variant
 // (its POLICIES entry in policy.js). Any robot can switch it on in the
@@ -78,9 +84,14 @@ export class GrootController {
     this.name = 'GR00T locomotion policy';
     this.drive = { forward: 0.5, back: 0.3, side: 0.3, turn: 0.6 };  // keyboard speeds
     this.cmd = [0, 0, 0];  // vx, vy (m/s), yaw rate (rad/s)
-    this.height = 0.74;    // commanded base height
+    this.commands = GROOT_COMMANDS;
+    this.command = commandDefaults(GROOT_COMMANDS);
     this.reset();
   }
+
+  // The commanded base height (R/F keys).
+  get height() { return this.command.height; }
+  set height(v) { this.command.height = v; }
 
   reset() {
     this.action = new Float32Array(NA);

@@ -41,6 +41,20 @@ VIN = 7.4                     # infer_policy.py's nominal 2S LiPo
 VIN_DROP_GAIN = 0.1           # V/Nm: sag vin - gain * sum|tau| (training samples 0-0.2)
 VIN_MIN = 6.0
 DELAY_STEPS = (3, 6)          # command delay in 5 ms physics steps
+# The velocity task's head_pose and body_pose commands (microduck_velocity_env_cfg.py):
+# the head's are offsets of its joints from the default pose, sampled up to
+# each joint's reach by the end of the head_pose_range curriculum (step
+# 2000 * 24); the body pose stays within a few mm and degrees there, at a
+# reward weight of 0 (the standup task is the one that follows it).
+COMMANDS = {
+    'head': {'type': 'vector', 'label': 'Head', 'dims': ['neck pitch', 'head pitch', 'head yaw', 'head roll'],
+             'unit': 'rad', 'range': [[-1.1, 1.1], [-1.1, 1.1], [-1.4, 1.4], [-0.31, 0.31]],
+             'about': 'head joint offsets from the default pose, held while walking'},
+    'body': {'type': 'vector', 'label': 'Body', 'dims': ['x', 'y', 'z', 'roll', 'pitch', 'yaw'],
+             'unit': ['m', 'm', 'm', 'rad', 'rad', 'rad'],
+             'range': [[-0.005, 0.005]] * 3 + [[-0.05, 0.05]] * 3,
+             'about': 'body pose offset: trained only within these few mm and degrees, and barely followed'},
+}
 # bam.mjlab.BamActuator's stiffened joint friction (stiff_frictionloss=True).
 SOLREF_FRICTION = [-5.0e4, -2.0e2]
 SOLIMP_FRICTION = [0.99, 0.9999, 0.001, 0.5, 2.0]
@@ -73,9 +87,11 @@ def spec(sources):
       # mjlab's actor observation terms, in order: root angular velocity and
       # gravity in the trunk frame, q - default, qdot (one control tick old,
       # as in training), the last action, then the 13-D command block
-      # [twist (vx, vy, yaw rate), head pose (4), body pose (6)].
+      # [twist (vx, vy, yaw rate), head pose (4), body pose (6)], the poses
+      # being the commands below (public/js/commands.js).
       'obs': [['base_ang_vel', 3], ['projected_gravity', 3], ['joint_pos', 14], ['joint_vel', 14],
-              ['last_action', 14], ['command', 3], ['head_command', 4], ['body_command', 6]],
+              ['last_action', 14], ['command', 3], ['cmd:head', 4], ['cmd:body', 6]],
+      'commands': COMMANDS,
       'joint_vel_lag': 1,
       'command_range': {'lin_vel_x': [-0.4, 0.4], 'lin_vel_y': [-0.3, 0.3], 'ang_vel_yaw': [-1.0, 1.0]},
       # The policy's dead band: standing still, it does not start for

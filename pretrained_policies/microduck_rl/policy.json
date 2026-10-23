@@ -85,14 +85,93 @@
    3
   ],
   [
-   "head_command",
+   "cmd:head",
    4
   ],
   [
-   "body_command",
+   "cmd:body",
    6
   ]
  ],
+ "commands": {
+  "head": {
+   "type": "vector",
+   "label": "Head",
+   "dims": [
+    "neck pitch",
+    "head pitch",
+    "head yaw",
+    "head roll"
+   ],
+   "unit": "rad",
+   "range": [
+    [
+     -1.1,
+     1.1
+    ],
+    [
+     -1.1,
+     1.1
+    ],
+    [
+     -1.4,
+     1.4
+    ],
+    [
+     -0.31,
+     0.31
+    ]
+   ],
+   "about": "head joint offsets from the default pose, held while walking"
+  },
+  "body": {
+   "type": "vector",
+   "label": "Body",
+   "dims": [
+    "x",
+    "y",
+    "z",
+    "roll",
+    "pitch",
+    "yaw"
+   ],
+   "unit": [
+    "m",
+    "m",
+    "m",
+    "rad",
+    "rad",
+    "rad"
+   ],
+   "range": [
+    [
+     -0.005,
+     0.005
+    ],
+    [
+     -0.005,
+     0.005
+    ],
+    [
+     -0.005,
+     0.005
+    ],
+    [
+     -0.05,
+     0.05
+    ],
+    [
+     -0.05,
+     0.05
+    ],
+    [
+     -0.05,
+     0.05
+    ]
+   ],
+   "about": "body pose offset: trained only within these few mm and degrees, and barely followed"
+  }
+ },
  "joint_vel_lag": 1,
  "command_range": {
   "lin_vel_x": [

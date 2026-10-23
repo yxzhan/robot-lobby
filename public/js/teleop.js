@@ -26,6 +26,7 @@
 import { dragPose, markerScale, pickMarker, startDrag } from './marker.js';
 import { BaseController, KINDS } from './base.js';
 import { POLICIES, POLICY_ROOT, defaultPolicy, isInstalled, policyById } from './policy.js';
+import { COMMAND_TYPES, clampCommand, commandDefault, setCommand } from './commands.js';
 import { bodyPose, goalCommand } from './goal.js';
 import { RosLink, bridgeUrl } from './ros.js';
 import { ACTIONS, BINDINGS, GamepadMap, bindingName, gamepad } from './gamepad.js';
@@ -36,10 +37,15 @@ const DRIVE = {
   q: [2, 1, 'turn'], e: [2, -1, 'turn'],
 };
 const HEIGHT_RATE = 0.15;  // m/s while R/F is held
-const HEIGHT_RANGE = [0.5, 1.0];
 // Marker centers, by chain (at most this many markers are shown).
 export const CHAIN_COLORS = [[0.2, 0.85, 1], [1, 0.35, 0.8], [1, 0.6, 0.15], [0.6, 0.4, 1],
   [0.3, 1, 0.75], [1, 1, 0.4], [0.55, 0.75, 1], [1, 0.55, 0.55]];
+
+// Raises a controller's commanded height (a command named `height`,
+// commands.js) by dh within its range: R/F, the gamepad's height actions.
+function raise(c, dh) {
+  if (dh && c.commands?.height) c.height = clampCommand(c.commands.height, c.height + dh);
+}
 
 // Keys typed into a text field are not commands.
 function isTyping(target) {
@@ -216,6 +222,7 @@ export class TeleopPanel {
     this.readout = null;
     this.errs = [];          // per chain: the span showing its tracking error
     this.grips = [];         // per chain with a gripper: {chain, slider, label} (its closure, kept up to date)
+    this.cmdViews = [];      // per policy command (or vector dimension): {c, name, i, slider, label, show}, kept up to date
     this.closedChains = new Set();  // "<prefix><chain name>" folded in the panel
     // Folded sections ('base', 'ik'), kept across robots and page loads.
     try { this.folded = new Set(JSON.parse(localStorage.getItem(FOLDED) ?? '[]')); } catch { this.folded = new Set(); }
@@ -534,6 +541,7 @@ export class TeleopPanel {
     this.readout = null;
     this.errs = [];
     this.grips = [];
+    this.cmdViews = [];
     if (!robots.length) {
       this.body.innerHTML = '<div class="hint">Nothing to drive: spawn a robot, e.g. a Unitree G1 (Robots › Humanoids), which walks under the GR00T policy, or Garmi (mecanum base, two arms).</div>';
       return;
@@ -727,10 +735,85 @@ export class TeleopPanel {
           this.app.setPhysics({ ...structuredClone(ph), ...structuredClone(want) }).then(() => this.render());
         })));
     }
+    const c = r.use.policy && r.policy;
+    if (c && Object.keys(c.commands ?? {}).length) this.renderCommands(c, box);
     const hint = el('div', { className: 'hint' });
     hint.textContent = (p ? `${p.about} ` : '') + 'Untick Policy to give the joints their own actuator gains back.';
     box.append(hint);
     if (r.errors?.policy) box.append(el('div', { className: 'error', textContent: r.errors.policy }));
+  }
+
+  // The policy's commands besides the twist (commands.js), a control per
+  // type: a slider per number, a select, a checkbox, else JSON text.
+  // Double-clicking a slider puts it back to its default.
+  renderCommands(c, box) {
+    box.append(el('div', { className: 'sub', textContent: 'Commands' }));
+    const err = el('div', { className: 'error', hidden: true });
+    const set = (name, v) => {
+      try {
+        setCommand(c, name, v);
+        err.hidden = true;
+        return true;
+      } catch (e) {
+        err.textContent = `${c.commands[name].label ?? name}: ${e.message ?? e}`;
+        err.hidden = false;
+        return false;
+      }
+    };
+    // A slider for one number: the command (i null) or one dimension of it.
+    const slider = (name, i, label, [lo, hi], unit, title) => {
+      const def = c.commands[name], value = () => (i == null ? c.command[name] : c.command[name][i]);
+      const digits = Math.max(2, Math.ceil(2 - Math.log10(hi - lo)));  // a hundredth of the range shows
+      const fmt = (v) => `${(+v).toFixed(digits)}${unit ? ` ${unit}` : ''}`;
+      const input = el('input', { type: 'range', min: lo, max: hi, step: (hi - lo) / 1000, value: value(), title });
+      const out = el('span', { className: 'cmd-value', textContent: fmt(value()) });
+      const write = (v) => {
+        const next = i == null ? v : c.command[name].map((x, k) => (k === i ? v : x));
+        if (set(name, next)) out.textContent = fmt(v);
+      };
+      input.oninput = () => write(Number(input.value));
+      input.ondblclick = () => {
+        const d = commandDefault(def);
+        input.value = i == null ? d : d[i];
+        write(Number(input.value));
+      };
+      this.cmdViews.push({ c, name, i, slider: input, label: out, show: fmt });
+      box.append(el('div', { className: 'field', title }, el('span', { textContent: label }), el('div', { className: 'ctl' }, input, out)));
+    };
+    for (const [name, def] of Object.entries(c.commands)) {
+      const label = def.label ?? name, title = `${def.about ?? name} · double-click: default`;
+      if (def.type === 'scalar') {
+        slider(name, null, label, def.range ?? [-1, 1], def.unit, title);
+      } else if (def.type === 'vector') {
+        box.append(el('div', { className: 'minor', textContent: label, title: def.about ?? '' }));
+        commandDefault(def).forEach((_, i) => {
+          const unit = Array.isArray(def.unit) ? def.unit[i] : def.unit;
+          slider(name, i, def.dims?.[i] ?? `${i}`, def.range?.[i] ?? [-1, 1], unit, `${def.about ?? name}: ${def.dims?.[i] ?? i} · double-click: default`);
+        });
+      } else if (def.type === 'enum') {
+        const s = this.select(def.values.map((v) => [v, v]), c.command[name], (v) => set(name, v));
+        box.append(el('div', { className: 'field', title: def.about ?? '' }, el('span', { textContent: label }), el('div', { className: 'ctl' }, s)));
+      } else if (def.type === 'bool') {
+        const b = el('input', { type: 'checkbox', checked: !!c.command[name] });
+        b.onchange = () => set(name, b.checked);
+        box.append(el('label', { className: 'field', title: def.about ?? '' }, el('span', { textContent: label }), el('div', { className: 'ctl' }, b)));
+      } else {  // a type the panel has no control for: its value as JSON
+        const t = el('input', { type: 'text', value: JSON.stringify(c.command[name]), title: `${def.about ?? name} (${def.type ?? 'no type'}: JSON)` });
+        t.onchange = () => {
+          let v;
+          try { v = JSON.parse(t.value); } catch { err.textContent = `${label}: not JSON`; err.hidden = false; return; }
+          set(name, v);
+        };
+        box.append(el('div', { className: 'field', title: t.title }, el('span', { textContent: label }), el('div', { className: 'ctl' }, t)));
+      }
+    }
+    if (Object.values(c.commands).some((d) => !COMMAND_TYPES.includes(d.type))) {
+      box.append(el('div', { className: 'hint', textContent: 'Commands of other types take JSON.' }));
+    }
+    box.append(err, el('div', { className: 'bar' }, this.button('Defaults', 'Every command back to its default', () => {
+      for (const [name, def] of Object.entries(c.commands)) set(name, commandDefault(def));
+      this.render();
+    })));
   }
 
   // A foldable panel section: <details> with a summary of `title`, a short
@@ -1097,14 +1180,12 @@ export class TeleopPanel {
         if (!mine.includes(c) || !keyboard) { c.cmd = [0, 0, 0]; continue; }
         const { cmd, dh } = this.input.read(dt, c.drive);
         c.cmd = cmd;
-        if ('height' in c) c.height = Math.min(HEIGHT_RANGE[1], Math.max(HEIGHT_RANGE[0], c.height + dh));
+        raise(c, dh);
       }
     }
     // The height also while following a goal (in keyboard mode read() has it).
     if (!keyboard && this.input.height()) {
-      for (const c of locos) {
-        if ('height' in c) c.height = Math.min(HEIGHT_RANGE[1], Math.max(HEIGHT_RANGE[0], c.height + this.input.height() * HEIGHT_RATE * dt));
-      }
+      for (const c of locos) raise(c, this.input.height() * HEIGHT_RATE * dt);
     }
     if (this.goalReadout) {
       const g = this.active?.goalResult;
@@ -1127,6 +1208,15 @@ export class TeleopPanel {
       const text = e ? `${(e[0] * 1000).toFixed(0)} mm · ${(e[1] * 57.3).toFixed(0)}°` : '';
       if (span.textContent !== text) span.textContent = text;
     });
+    // Command sliders follow the values (R/F, the server, other browsers),
+    // except one being dragged.
+    for (const v of this.cmdViews) {
+      if (document.activeElement === v.slider && v.slider.matches(':active')) continue;
+      const x = v.c.command[v.name], val = v.i == null ? x : x?.[v.i];
+      if (typeof val !== 'number' || Math.abs(Number(v.slider.value) - val) < 1e-9) continue;
+      v.slider.value = val;
+      v.label.textContent = v.show(val);
+    }
     // Gripper sliders follow the gripper (G, VR, ROS), except one just moved.
     const data = this.app.data, now = performance.now();
     for (const { chain, slider, label, until } of this.grips) {
