@@ -28,7 +28,8 @@ Protocol (client -> server, JSON {op, ...}; `rid` asks for a reply):
   frame)   ik_reset_target {chain or null}   ik_gripper {chain, amount?}
   (amount: 0 open … 1 closed; none: toggle)   ik_save   ik_defaults
   base_config {config}   base_save   base_defaults
-  stage_load {id}   the saved stage replaces the world (for everyone)
+  stage_load {id} or {bundle}   a published stage, or one the page has,
+                    replaces the world (for everyone)
 Server -> client:
   {type: 'scene', version, items, physics, paused, world, stage?}   the world
                               (`world`: names, joint and actuator tables for
@@ -64,12 +65,17 @@ browser. Setups
 saved from the panel go to server/saved/{ik,base}.json. Not yet: the Physics
 panel's default geom properties.
 
-Stages (public/js/stage.js) are folders under mjcf_assets/saved_stage/,
-named by a random id: stage.json, thumbnail.jpg, ik.json, base.json,
-cameras.json. GET /api/stages lists them, GET /api/stages/<id> reads one as
-a bundle, POST /api/stages saves the world as a new one (the page sends its
-name, thumbnail, view and cameras), POST /api/stages/import writes a bundle,
-DELETE /api/stages/<id> deletes one; the stage_load request loads one.
+Stages (public/js/stage.js): a page saves its own in its browser; the
+server's are the published ones, the community's, folders under
+mjcf_assets/saved_stage/ named by a random id: stage.json, thumbnail.jpg,
+ik.json, base.json, cameras.json. GET /api/stages lists them, GET
+/api/stages/<id> reads one as a bundle, POST /api/stages/capture returns the
+world as a new bundle without keeping it (the page sends its name,
+thumbnail, view and cameras; it saves it in the browser), POST
+/api/stages/publish {bundle, author: {name, email}} writes a bundle and
+commits it in the library's git repository (git_commit_stage), DELETE
+/api/stages/<id> deletes one; the stage_load request loads one of them, or a
+bundle the page sends.
 """
 
 import asyncio
@@ -82,6 +88,7 @@ import math
 import os
 import pathlib
 import re
+import subprocess
 import sys
 import time
 import traceback
@@ -498,7 +505,18 @@ def apply_state(m, d, r, at, state):
 
 def stage_summary(stage, folder):
   return {'id': folder.name, 'name': stage.get('name', ''), 'saved': stage.get('saved'),
-          'count': len(stage.get('items', [])), 'thumb': (folder / 'thumbnail.jpg').is_file()}
+          'count': len(stage.get('items', [])), 'thumb': (folder / 'thumbnail.jpg').is_file(),
+          'author': stage.get('author') or ''}
+
+
+def check_bundle(bundle):
+  """A bundle's stage, if it is one (items with rel and pos); ValueError if not."""
+  stage = bundle.get('stage') if isinstance(bundle, dict) else None
+  items = stage.get('items') if isinstance(stage, dict) else None
+  if not isinstance(items, list) or any(not isinstance(it, dict) or not isinstance(it.get('rel'), str)
+                                        or not isinstance(it.get('pos'), list) for it in items):
+    raise ValueError('not a stage: items need rel and pos')
+  return stage
 
 
 def list_stages():
@@ -530,10 +548,7 @@ def read_stage(sid):
 def write_stage(bundle):
   """Writes a bundle as a stage folder (its id kept if it is a good one, else
   a new one); returns its summary."""
-  stage = dict(bundle['stage'])
-  items = stage.get('items')
-  if not isinstance(items, list) or any(not isinstance(it.get('rel'), str) or not isinstance(it.get('pos'), list) for it in items):
-    raise ValueError('not a stage: items need rel and pos')
+  stage = dict(check_bundle(bundle))
   if not (isinstance(stage.get('id'), str) and STAGE_ID.match(stage['id'])):
     stage['id'] = str(uuid.uuid4())
   folder = stage_path(stage['id'])
@@ -546,6 +561,59 @@ def write_stage(bundle):
   if isinstance(thumb, str) and thumb.startswith(THUMB_PREFIX):
     (folder / 'thumbnail.jpg').write_bytes(base64.b64decode(thumb[len(THUMB_PREFIX):]))
   return stage_summary(stage, folder)
+
+
+AUTHOR_NAME = re.compile(r'[<>\n\r\t]')
+AUTHOR_EMAIL = re.compile(r'^[^\s<>@]+@[^\s<>@]+$')
+COMMITTER = {'GIT_COMMITTER_NAME': 'Robot Lobby', 'GIT_COMMITTER_EMAIL': 'robot-lobby@localhost'}
+
+
+def publish_stage(bundle, author):
+  """Writes a bundle as a new published stage (a new id if one of that id
+  is there: a stage is never written over another's) with its author's
+  name, and commits it (git_commit_stage); returns its summary with
+  `commit` (the commit's id, or null and `commit_error`)."""
+  stage = dict(check_bundle(bundle))
+  name = AUTHOR_NAME.sub(' ', str((author or {}).get('name') or '')).strip()[:100]
+  email = str((author or {}).get('email') or '').strip()[:200]
+  if email and not AUTHOR_EMAIL.match(email):
+    raise ValueError(f'not an email address: {email!r}')
+  if not (isinstance(stage.get('id'), str) and STAGE_ID.match(stage['id'])) or stage_path(stage['id']).exists():
+    stage['id'] = str(uuid.uuid4())
+  stage['author'] = name
+  stage['published'] = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
+  out = write_stage({**bundle, 'stage': stage})
+  try:
+    out['commit'] = git_commit_stage(stage, name, email)
+  except (OSError, RuntimeError, subprocess.SubprocessError) as err:
+    print(f'stage {stage["id"]}: written, not committed: {err}')
+    out['commit'], out['commit_error'] = None, str(err)
+  return out
+
+
+def git_commit_stage(stage, name, email):
+  """Commits the stage's folder alone in the library's git repository,
+  authored by `name` <`email`> (Anonymous if none), committed by the
+  server; returns the commit's id. Another server on the same library may
+  be committing too: a held index lock is waited for a little."""
+  lib = stages_dir().parent
+  rel = f'saved_stage/{stage["id"]}'
+  env = {**os.environ, **COMMITTER}
+
+  def git(*args):
+    for _ in range(10):
+      p = subprocess.run(['git', '-C', str(lib), *args], capture_output=True, text=True, timeout=60, env=env)
+      if p.returncode == 0:
+        return p.stdout.strip()
+      if 'index.lock' not in p.stderr:
+        raise RuntimeError(f'git {args[0]}: {p.stderr.strip() or p.stdout.strip()}')
+      time.sleep(0.5)
+    raise RuntimeError(f'git {args[0]}: the index stayed locked')
+  if git('rev-parse', '--is-inside-work-tree') != 'true':
+    raise RuntimeError(f'{lib} is not a git repository')
+  git('add', '--', rel)
+  git('commit', '--quiet', '-m', f'Stage: {stage.get("name") or stage["id"]}', f'--author={name or "Anonymous"} <{email}>', '--', rel)
+  return git('rev-parse', 'HEAD')
 
 
 def delete_stage(sid):
@@ -799,8 +867,12 @@ class World:
       await self.set_scene([*self.robots, r], [r])
     elif op == 'restart':
       await self.restart()
-    elif op == 'stage_load':
-      await self.load_stage(await asyncio.to_thread(read_stage, msg['id']))
+    elif op == 'stage_load':  # a published stage, or a bundle the page has (its own)
+      if msg.get('bundle') is not None:
+        check_bundle(msg['bundle'])
+        await self.load_stage(msg['bundle'])
+      else:
+        await self.load_stage(await asyncio.to_thread(read_stage, msg['id']))
     elif op == 'remove':
       ids = set(msg['ids'])
       await self.set_scene([r for r in self.robots if r.id not in ids])
@@ -1422,22 +1494,24 @@ async def api_stage(request):
     raise web.HTTPNotFound(text=str(err))
 
 
-async def api_save_stage(request):
-  """Saves the world as a new stage; the JSON body has what only the page
-  knows: {name, thumbnail (a JPEG data URL), view, cameras, on}."""
+async def api_capture_stage(request):
+  """The world as a new stage bundle, not kept (the page saves it in its
+  browser); the JSON body has what only the page knows: {name, thumbnail (a
+  JPEG data URL), view, cameras, on}."""
   try:
     extra = await request.json()
     async with world.stepping:
-      bundle = world.stage_bundle(extra)
-    return web.json_response(await asyncio.to_thread(write_stage, bundle))
+      return web.json_response(world.stage_bundle(extra))
   except (ValueError, KeyError, TypeError) as err:
     raise web.HTTPBadRequest(text=str(err))
 
 
-async def api_import_stage(request):
-  """Writes a stage bundle (a downloaded stage file)."""
+async def api_publish_stage(request):
+  """Publishes a stage bundle: {bundle, author: {name, email}} (both
+  optional); returns its summary, with `commit` (publish_stage)."""
   try:
-    return web.json_response(await asyncio.to_thread(write_stage, await request.json()))
+    body = await request.json()
+    return web.json_response(await asyncio.to_thread(publish_stage, body['bundle'], body.get('author')))
   except (ValueError, KeyError, TypeError) as err:
     raise web.HTTPBadRequest(text=str(err))
 
@@ -1456,8 +1530,8 @@ async def main():
   app.router.add_get('/api/robots', api_robots)
   app.router.add_post('/api/goal', api_goal)
   app.router.add_get('/api/stages', api_stages)
-  app.router.add_post('/api/stages', api_save_stage)
-  app.router.add_post('/api/stages/import', api_import_stage)
+  app.router.add_post('/api/stages/capture', api_capture_stage)
+  app.router.add_post('/api/stages/publish', api_publish_stage)
   app.router.add_get('/api/stages/{id}', api_stage)
   app.router.add_delete('/api/stages/{id}', api_stage)
   app.router.add_get('/render', render)

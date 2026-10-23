@@ -1,9 +1,10 @@
-// Stages: what is spawned and how it stands, saved, shared and exported the
-// same way in local and network mode.
+// Stages: what is spawned and how it stands, saved, published, shared and
+// exported the same way in local and network mode.
 //
 // A stage is a folder named by a random id (crypto.randomUUID), so two
 // stages of the same name never collide; its name is in stage.json:
-//   stage.json     {version, id, name, saved, items, physics, view}
+//   stage.json     {version, id, name, saved, items, physics, view; published
+//                  ones also author, published}
 //   thumbnail.jpg  the main view when it was saved, 256x256
 //   ik.json        IK setups in use, by robot file (keyed like ik_defaults.json)
 //   base.json      mobile base setups in use, likewise (base_defaults.json)
@@ -16,16 +17,20 @@
 // camera ({center, dist, azim, elev}). Automatic controller and camera
 // setups are left out: they are found again from the model.
 //
-// Where stages are kept:
-// - On the server (network mode): public/mjcf_assets/saved_stage/<id>/, for
-//   everyone on it (server.py, /api/stages).
-// - In this browser (local mode): IndexedDB, one record per stage holding
-//   the same files (BrowserStages).
-// - Read-only in local mode: the stages under mjcf_assets/saved_stage/,
-//   listed in public/json/stages.json by scripts/vendor.mjs (LibraryStages).
+// Where stages are kept, as the Stage panel lists them:
+// - Mine: in this browser, in either mode (Save, Import): IndexedDB, one
+//   record per stage holding the same files (BrowserStages). In network
+//   mode the server makes the bundle of its world (/api/stages/capture).
+// - Community, read-only: the published ones, in the library's
+//   saved_stage/<id>/. On a server, its shared library (ServerStages):
+//   Publish (network mode only) writes a stage there and the server commits
+//   it in the library's git repository, with its author's name and email
+//   if given (server.py publish_stage). In local mode, the stages of the
+//   library next to the page, listed in public/json/stages.json by
+//   scripts/vendor.mjs (LibraryStages).
 // Download exports a stage as one JSON file, a bundle: {stage, files:
 // {'ik.json', 'base.json', 'cameras.json'}, thumbnail (a data URL)}; Import
-// takes such a file in either mode.
+// takes such a file into Mine.
 
 import { dataUrl, serverUrl } from './endpoint.js';
 
@@ -127,11 +132,11 @@ export function setView(orbit, view) {
   Object.assign(orbit, { dist: view.dist, azim: view.azim, elev: view.elev });
 }
 
-// One line per stage for a list: {id, name, saved, count, thumb (URL or
-// null), where, deletable, store}.
+// One line per stage for a list: {id, name, saved, count, author, thumb (URL
+// or null), where ('mine' | 'community'), deletable, store}.
 const summary = (stage, thumb, store) => ({
-  id: stage.id, name: stage.name, saved: stage.saved, count: stage.count ?? stage.items?.length ?? 0, thumb,
-  where: store.where, deletable: store.deletable, store,
+  id: stage.id, name: stage.name, saved: stage.saved, count: stage.count ?? stage.items?.length ?? 0,
+  author: stage.author ?? '', thumb, where: store.where, deletable: store.deletable, store,
 });
 
 export const blobToDataUrl = (blob) => new Promise((resolve, reject) => {
@@ -164,7 +169,7 @@ export function checkBundle(b) {
 
 // Stages in this browser (IndexedDB), a record per stage: a bundle.
 export class BrowserStages {
-  where = 'browser';
+  where = 'mine';
   deletable = true;
 
   db() {
@@ -196,9 +201,10 @@ export class BrowserStages {
   remove(id) { return this.run('readwrite', (s) => s.delete(id)); }
 }
 
-// The stages under mjcf_assets/saved_stage/ (public/json/stages.json), read-only.
+// The published stages of the library next to the page (local mode):
+// mjcf_assets/saved_stage/ (public/json/stages.json), read-only.
 export class LibraryStages {
-  where = 'library';
+  where = 'community';
   deletable = false;
 
   async list() {
@@ -209,11 +215,14 @@ export class LibraryStages {
   get(id) { return readFolder(new URL(`${STAGE_DIR}/${id}/`, location.href), id); }
 }
 
-// The server's stages (network mode): mjcf_assets/saved_stage/ on the server.
-// Saving is the server's (it has the world): `save(extra)` sends what only
-// the page knows (name, thumbnail, view, cameras), see server.py api_save_stage.
+// The server's published stages (network mode): saved_stage/ of its shared
+// library. The server has the world: `capture(extra)` gets it as a new
+// bundle (not kept there) with what only the page knows (name, thumbnail,
+// view, cameras, on), see server.py api_capture_stage; `publish(bundle,
+// author)` writes one and commits it ({name, email}, both optional), and
+// resolves with its summary ({id, …, commit: its id or null, commit_error}).
 export class ServerStages {
-  where = 'server';
+  where = 'community';
   deletable = false;  // for now (the server has DELETE /api/stages/<id>)
 
   async request(path, init) {
@@ -228,9 +237,44 @@ export class ServerStages {
   }
 
   get(id) { return this.request(`api/stages/${id}`); }
-  save(extra) { return this.request('api/stages', { method: 'POST', body: JSON.stringify(extra) }).then((s) => s.id); }
-  put(bundle) { return this.request('api/stages/import', { method: 'POST', body: JSON.stringify(bundle) }).then((s) => s.id); }
+  capture(extra) { return this.request('api/stages/capture', { method: 'POST', body: JSON.stringify(extra) }); }
+  publish(bundle, author) { return this.request('api/stages/publish', { method: 'POST', body: JSON.stringify({ bundle, author }) }); }
   remove(id) { return this.request(`api/stages/${id}`, { method: 'DELETE' }); }
+}
+
+const AUTHOR_KEY = 'mujoco-filament/author';  // localStorage: {name, email} last published with
+
+// Asks what to publish a stage as: {name, author: {name, email}}, or null
+// (cancelled). The author is remembered for next time.
+export function askPublish(name) {
+  let saved = {};
+  try { saved = JSON.parse(localStorage.getItem(AUTHOR_KEY)) ?? {}; } catch { /* none */ }
+  const dlg = document.createElement('dialog');
+  dlg.className = 'publish';
+  dlg.innerHTML = `<form method="dialog">
+    <h3>Publish stage</h3>
+    <label>Name <input name="name" required maxlength="200"></label>
+    <label>Author <input name="author" maxlength="100" placeholder="optional" autocomplete="name"></label>
+    <label>Email <input name="email" type="email" maxlength="200" placeholder="optional" autocomplete="email"></label>
+    <p class="hint">Published stages are listed for everyone on this server (Community) and committed to the
+    model library's public git repository, with this name and email as its author.</p>
+    <div class="buttons"><button value="cancel" formnovalidate>Cancel</button><button value="ok" class="primary">Publish</button></div>
+  </form>`;
+  const f = dlg.querySelector('form').elements;
+  f.name.value = name ?? '';
+  f.author.value = saved.name ?? '';
+  f.email.value = saved.email ?? '';
+  document.body.append(dlg);
+  return new Promise((resolve) => {
+    dlg.onclose = () => {
+      dlg.remove();
+      if (dlg.returnValue !== 'ok') { resolve(null); return; }
+      const author = { name: f.author.value.trim(), email: f.email.value.trim() };
+      try { localStorage.setItem(AUTHOR_KEY, JSON.stringify(author)); } catch { /* no storage */ }
+      resolve({ name: f.name.value.trim() || 'Stage', author });
+    };
+    dlg.showModal();
+  });
 }
 
 // Saves a bundle as a file (Download).
@@ -260,14 +304,17 @@ export function pickBundle() {
 
 const SHOWN = 20;  // stages listed, the newest
 
-// The Stage panel's list of saved stages: a row each with its thumbnail,
-// name, when and how many items, and Load / Download / Link / Delete.
-// `actions`: {load(entry), download(entry), link(entry): a URL that opens
-// it (null: none, it is in this browser only), remove(entry)}.
+// A list of stages in the Stage panel (Mine, Community): a row each with
+// its thumbnail, name, author, when and how many items, and Load / Publish /
+// Download / Link / Delete. `actions`: {load(entry), publish(entry) (left
+// out: not offered), download(entry), link(entry): a URL that opens it (null:
+// none, it is in this browser only), remove(entry)}; `empty`: the text of
+// an empty list.
 export class StageList {
-  constructor(el, actions) {
+  constructor(el, actions, empty = 'No saved stages yet.') {
     this.el = el;
     this.actions = actions;
+    this.empty = empty;
     this.entries = [];
     this.start = null;  // id of the stage loaded at start (local mode)
   }
@@ -280,7 +327,7 @@ export class StageList {
     const shown = entries.slice(0, SHOWN);
     this.el.querySelector('.stage-count').textContent = entries.length > SHOWN ? `${SHOWN} of ${entries.length}` : entries.length;
     if (!entries.length) {
-      list.append(Object.assign(document.createElement('div'), { className: 'hint', textContent: 'No saved stages yet.' }));
+      list.append(Object.assign(document.createElement('div'), { className: 'hint', textContent: this.empty }));
       return;
     }
     for (const e of shown) {
@@ -294,7 +341,7 @@ export class StageList {
       const name = Object.assign(document.createElement('div'), { className: 'name', textContent: e.name || '(unnamed)', title: `${e.name} · ${e.id}` });
       const when = e.saved ? new Date(e.saved).toLocaleString([], { year: 'numeric', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
       const meta = Object.assign(document.createElement('div'), { className: 'meta',
-        textContent: `${e.count} item${e.count === 1 ? '' : 's'} · ${when}${e.where === 'library' ? ' · library' : ''}${e.id === this.start ? ' · at start' : ''}` });
+        textContent: `${e.count} item${e.count === 1 ? '' : 's'} · ${when}${e.author ? ` · by ${e.author}` : ''}${e.id === this.start ? ' · at start' : ''}` });
       const buttons = document.createElement('div');
       buttons.className = 'buttons';
       const button = (text, title, fn) => {
@@ -304,6 +351,7 @@ export class StageList {
         return b;
       };
       button('Load', 'Replace what is spawned with this stage', () => this.actions.load(e));
+      if (this.actions.publish) button('Publish', 'Share this stage with everyone on this server (Community)', () => this.actions.publish(e));
       button('Download', 'Save this stage as a file (Import takes it, in either mode)', () => this.actions.download(e));
       const link = this.actions.link(e);
       if (link) {

@@ -274,8 +274,18 @@
     #stage .stage-bar { display: flex; align-items: center; gap: 6px; padding-bottom: 6px; margin-bottom: 4px;
                         border-bottom: 1px solid #3a3d44; }
     #stage .stage-bar button { cursor: pointer; font: inherit; font-size: 12px; color: #eee; background: #333;
-                               border: 1px solid #555; border-radius: 4px; padding: 2px 8px; }
+                               border: 1px solid #555; border-radius: 4px; padding: 2px 8px; white-space: nowrap; }
     #stage .stage-bar button.save { background: #2f5a3c; border-color: #4d8a5f; }
+    #stage .stage-bar button.publish { background: #2f4a6a; border-color: #4d7aa8; }
+    dialog.publish { color: #eee; background: #24272d; border: 1px solid #555; border-radius: 8px; padding: 14px 16px; width: min(360px, calc(100vw - 32px)); font: 13px system-ui, sans-serif; }
+    dialog.publish::backdrop { background: rgba(0,0,0,.5); }
+    dialog.publish h3 { margin: 0 0 10px; font-size: 14px; }
+    dialog.publish label { display: grid; grid-template-columns: 60px 1fr; align-items: center; gap: 8px; margin: 6px 0; }
+    dialog.publish input { min-width: 0; font: inherit; color: #eee; background: #1b1d21; border: 1px solid #555; border-radius: 4px; padding: 4px 6px; }
+    dialog.publish .hint { color: #999; font-size: 12px; line-height: 1.5; margin: 8px 0; }
+    dialog.publish .buttons { display: flex; justify-content: flex-end; gap: 6px; }
+    dialog.publish button { cursor: pointer; font: inherit; color: #eee; background: #333; border: 1px solid #555; border-radius: 4px; padding: 4px 12px; }
+    dialog.publish button.primary { background: #2f4a6a; border-color: #4d7aa8; }
     #stage .stage-bar button:hover:not(:disabled) { filter: brightness(1.2); }
     #stage .stage-bar button:disabled { opacity: .45; cursor: default; }
     #stage .stage-bar .saved { flex: 1; text-align: right; color: #999; font-size: 11px;
@@ -390,14 +400,19 @@
   </div>
   <div id="stage">
     <div class="stage-bar">
-      <button class="save" title="Save what is spawned, its joints and controllers, the cameras and the view as a new stage">Save stage</button>
-      <button class="import" title="Add a stage from a downloaded stage file">Import</button>
+      <button class="save" title="Save what is spawned, its joints and controllers, the cameras and the view as a new stage, in this browser (My stages)">Save</button>
+      <button class="publish" title="Publish what is spawned as a stage for everyone on this server (Community)">Publish</button>
+      <button class="import" title="Add a stage from a downloaded stage file (My stages)">Import</button>
       <span class="saved"></span>
       <button class="forget" title="Start with an empty floor next time">Forget</button>
     </div>
     <div class="stages">
-      <details open>
-        <summary>Saved stages <span class="count stage-count"></span></summary>
+      <details class="mine" open>
+        <summary>My stages <span class="count stage-count"></span></summary>
+        <div class="stage-items"></div>
+      </details>
+      <details class="community" open>
+        <summary>Community <span class="count stage-count"></span></summary>
         <div class="stage-items"></div>
       </details>
     </div>

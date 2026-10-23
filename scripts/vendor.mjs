@@ -213,8 +213,8 @@ function indexLibrary() {
 }
 
 // Saved stages (public/js/stage.js): mjcf_assets/saved_stage/<id>/stage.json,
-// listed in public/json/stages.json ([{id, name, saved, count}], newest
-// first) for local mode, which cannot list a folder (the server lists it
+// listed in public/json/stages.json ([{id, name, saved, count, author}],
+// newest first) for local mode, which cannot list a folder (the server lists it
 // itself).
 function indexStages() {
   const dir = existsSync(LIBRARY) ? `${LIBRARY}/${STAGES}` : `public/${LIBRARY}/${STAGES}`;
@@ -222,7 +222,7 @@ function indexStages() {
   for (const id of existsSync(dir) ? subdirs(dir) : []) {
     try {
       const s = JSON.parse(readFileSync(`${dir}/${id}/stage.json`, 'utf8'));
-      stages.push({ id, name: s.name ?? '', saved: s.saved ?? null, count: s.items?.length ?? 0 });
+      stages.push({ id, name: s.name ?? '', saved: s.saved ?? null, count: s.items?.length ?? 0, author: s.author ?? '' });
     } catch { /* not a stage */ }
   }
   stages.sort((a, b) => String(b.saved ?? '').localeCompare(String(a.saved ?? '')));

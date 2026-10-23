@@ -42,7 +42,7 @@ pose); a fixed base (an arm, an environment) is placed by its attach frame,
 heading only, so the world is rebuilt with its state kept and its mocap
 bodies carried along.
 
-**Stages** (`public/js/stage.js`): Save stage asks for a name and saves
+**Stages** (`public/js/stage.js`): Save asks for a name and saves
 what is spawned as a new stage: each item's spawn pose, joint positions,
 actuator controls and mocap bodies (by name, so a changed model loads what
 still matches), the controllers switched on with their IK and base setups,
@@ -50,17 +50,27 @@ the camera setups and which cameras are on, the Physics panel's physics, the
 view, and a 256×256 picture of it. A stage is a folder named by a random id
 (the name is inside, so names may repeat): `stage.json`, `thumbnail.jpg`,
 `ik.json`, `base.json`, `cameras.json` (keyed like `ik_defaults.json`,
-`base_defaults.json`, `camera_defaults.json`). On a server it is
-`mjcf_assets/saved_stage/<id>/`, for everyone; in local mode an IndexedDB
-record of the same files in this browser. The **Saved stages** list loads
-one (it replaces what is spawned, in one compile, each item in its saved
-state, which Reset then goes back to; in a shared world for everyone),
-downloads it as one `.stage.json` file, which **Import** takes in either
-mode, copies a link to it (`?stage=<id>`; for now only for the library's
-stages, below) or deletes it (not a server's stage, for now). Local mode also lists the stages under
-`mjcf_assets/saved_stage/` (read-only; `scripts/vendor.mjs` indexes them
-into `public/json/stages.json`), and loads the stage last saved or loaded
-at the next page load (Forget starts from an empty floor again).
+`base_defaults.json`, `camera_defaults.json`). Saved stages are **My
+stages**: an IndexedDB record of those files in this browser, in either
+mode (on a server, the server makes the stage of its world and the page
+keeps it). **Publish** (on a server only) shares what is spawned, or one of
+My stages, as a **Community** stage: it asks for the name and, optionally,
+an author and email, and the server writes it into its library,
+`mjcf_assets/saved_stage/<id>/` (a new id: never over another's), and
+commits that folder alone in the library's git repository, authored by
+them (Anonymous without a name), committed by "Robot Lobby"
+(`server.py` `publish_stage`; written even if the commit fails, which the
+status line says). The server only commits: pushing the commits to the
+library repository's remote is done from there by hand. In local mode
+Community is the library's own `saved_stage/` (read-only;
+`scripts/vendor.mjs` indexes it into `public/json/stages.json`). Either list
+loads a stage (it replaces what is spawned, in one compile, each item in
+its saved state, which Reset then goes back to; in a shared world for
+everyone: one of My stages is sent to the server whole) and downloads it as
+one `.stage.json` file, which **Import** adds to My stages; Community stages
+also copy a link (`?stage=<id>`), and My stages can be deleted. Local mode
+loads the stage last saved or loaded at the next page load (Forget starts
+from an empty floor again).
 Picking uses `mj_ray` on the physics world, so it hits collision geoms.
 
 - **Asset list** — the model library is `mjcf_assets/` next to

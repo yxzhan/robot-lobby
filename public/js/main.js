@@ -40,7 +40,7 @@ import { CHAIN_COLORS } from './teleop.js';
 import Stats from '../vendor/stats/Stats.js';
 import { NET_MUJOCO, NetClient, loadRender, worldData, worldModel } from './net.js';
 import { dataUrl, problem, server, shareUrl } from './endpoint.js';
-import { BrowserStages, LibraryStages, STAGE_VERSION, ServerStages, StageList, applyState, blobToDataUrl, captureState, downloadBundle, newId, pickBundle, setView, viewOf } from './stage.js';
+import { BrowserStages, LibraryStages, STAGE_VERSION, ServerStages, StageList, applyState, askPublish, blobToDataUrl, captureState, downloadBundle, newId, pickBundle, setView, viewOf } from './stage.js';
 import { RemoteBase, RemoteIk, RemotePolicy } from './remote.js';
 
 // Filament.init() replaces the global with the loaded module, so re-read it after init.
@@ -1808,6 +1808,7 @@ try {
     onRemove: (robot) => respawn(robots.filter((r) => r !== robot)),
     onMove: (robot, pos, yaw) => moveFixed(robot, pos, yaw),
     onSave: () => saveStage(),
+    onPublish: server ? () => publishStage() : null,
     onImport: () => importStage(),
     onForget: () => { setStartStage(null); refreshStages(); status.textContent = `the next page load starts from an empty floor · ${hint()}`; },
   });
@@ -2273,15 +2274,17 @@ try {
     return true;
   }
 
-  // Stages (stage.js): saved on the server in network mode, in this
-  // browser in local mode (where the library's can be loaded too), and
-  // loaded, downloaded, imported and linked to alike. In local mode the
-  // stage last saved or loaded is loaded again at the next page load
-  // (Forget: an empty floor). ?stage=<id> opens a stage.
+  // Stages (stage.js): saved in this browser (My stages) in either mode,
+  // published on a server for everyone on it (Community; in local mode the
+  // library's), and loaded, downloaded and imported alike; community ones
+  // are linked to. In local mode the stage last saved or loaded is loaded
+  // again at the next page load (Forget: an empty floor). ?stage=<id> opens
+  // a stage.
   const START_KEY = 'mujoco-filament/stage-start';  // localStorage: the stage loaded at start
   const OLD_STAGE_KEY = 'mujoco-filament/stage';    // localStorage: the one stage of before (migrated)
   const browserStages = new BrowserStages();
-  const stores = server ? [new ServerStages()] : [browserStages, new LibraryStages()];
+  const community = server ? new ServerStages() : new LibraryStages();
+  const stores = [browserStages, community];
   const startStage = () => {
     try { return localStorage.getItem(START_KEY); } catch { return null; }
   };
@@ -2294,14 +2297,14 @@ try {
     u.searchParams.set('stage', id);
     return u.href;
   };
-  const stageList = new StageList(document.querySelector('#stage .stages'), {
+  const stageActions = {
     load: (e) => openStage(e),
     download: async (e) => {
       try { downloadBundle(await e.store.get(e.id)); } catch (err) { status.textContent = `could not download the stage: ${err.message ?? err}`; }
     },
-    link: (e) => (e.where === 'library' ? stageLink(e.id) : null),  // in this browser only it opens nowhere else; the server's: not yet
+    link: (e) => (e.where === 'community' ? stageLink(e.id) : null),  // one in this browser opens nowhere else
     remove: async (e) => {
-      if (!confirm(`Delete the stage "${e.name}"${e.where === 'server' ? ' from the server, for everyone' : ''}?`)) return;
+      if (!confirm(`Delete the stage "${e.name}" from this browser?`)) return;
       try {
         await e.store.remove(e.id);
         if (startStage() === e.id) setStartStage(null);
@@ -2310,13 +2313,22 @@ try {
       }
       refreshStages();
     },
-  });
+  };
+  const myList = new StageList(document.querySelector('#stage .stages .mine'),
+    { ...stageActions, ...(server && { publish: (e) => publishStage(e) }) },
+    'None yet: Save keeps what is spawned here, in this browser.');
+  const communityList = new StageList(document.querySelector('#stage .stages .community'), stageActions,
+    server ? 'Nothing published on this server yet.' : 'None in the library next to this page.');
+  const newest = (list) => list.sort((a, b) => String(b.saved ?? '').localeCompare(String(a.saved ?? '')));
   async function refreshStages() {
-    const lists = await Promise.all(stores.map((s) => s.list().catch((err) => { console.warn(`stages (${s.where}):`, err); return []; })));
-    const entries = lists.flat().sort((a, b) => String(b.saved ?? '').localeCompare(String(a.saved ?? '')));
-    stageList.start = server ? null : startStage();
-    stageList.show(entries);
-    app.panel.showStart(server ? undefined : entries.find((e) => e.id === stageList.start)?.name ?? null);
+    const [mine, theirs] = await Promise.all(stores.map((s) => s.list().catch((err) => { console.warn(`stages (${s.where}):`, err); return []; })));
+    const start = server ? null : startStage();
+    for (const [list, entries] of [[myList, mine], [communityList, theirs]]) {
+      list.start = start;
+      list.show(newest(entries));
+    }
+    const entries = [...mine, ...theirs];
+    app.panel.showStart(server ? undefined : entries.find((e) => e.id === start)?.name ?? null);
     return entries;
   }
   async function findStage(id) {
@@ -2368,23 +2380,46 @@ try {
     };
   }
 
+  const defaultName = () => `${robots.map((r) => r.label).slice(0, 3).join(', ')}${robots.length > 3 ? ', …' : ''}`;
+
+  // What is spawned as a new bundle named `name`: the server makes it in
+  // network mode (its world), this page in local mode.
+  async function sceneBundle(name) {
+    const shot = await app.capture(256);
+    const common = { name, view: viewOf(app.orbit), cameras: cameraSetups(), thumbnail: shot && await blobToDataUrl(shot) };
+    if (!app.net) return localBundle(common);
+    return community.capture({ ...common, on: Object.fromEntries(robots.map((r) => [r.netId, camerasOn(r)])) });
+  }
+
+  // Save: into this browser (My stages), in either mode.
   async function saveStage() {
     if (!robots.length) { status.textContent = 'nothing spawned to save'; return; }
-    const name = prompt('Name of the stage:', `${robots.map((r) => r.label).slice(0, 3).join(', ')}${robots.length > 3 ? ', …' : ''}`);
+    const name = prompt('Name of the stage:', defaultName());
     if (name == null) return;
-    const shot = await app.capture(256);
-    const common = { name: name.trim() || 'Stage', view: viewOf(app.orbit), cameras: cameraSetups(), thumbnail: shot && await blobToDataUrl(shot) };
     try {
-      if (app.net) {
-        await stores[0].save({ ...common, on: Object.fromEntries(robots.map((r) => [r.netId, camerasOn(r)])) });
-      } else {
-        const bundle = localBundle(common);
-        await browserStages.put(bundle);
-        setStartStage(bundle.stage.id);
-      }
-      status.textContent = `stage "${common.name}" saved (${robots.length} items) · ${hint()}`;
+      const bundle = await sceneBundle(name.trim() || 'Stage');
+      await browserStages.put(bundle);
+      if (!app.net) setStartStage(bundle.stage.id);
+      status.textContent = `stage "${bundle.stage.name}" saved in this browser (${robots.length} items) · ${hint()}`;
     } catch (err) {
       status.textContent = `could not save the stage: ${err.message ?? err}`;
+    }
+    refreshStages();
+  }
+
+  // Publish (network mode): what is spawned, or one of My stages (`e`), to
+  // the server's Community stages, which the server commits to the library.
+  async function publishStage(e = null) {
+    if (!e && !robots.length) { status.textContent = 'nothing spawned to publish'; return; }
+    const asked = await askPublish(e ? e.name : defaultName());
+    if (!asked) return;
+    try {
+      const bundle = e ? await e.store.get(e.id) : await sceneBundle(asked.name);
+      bundle.stage = { ...bundle.stage, name: asked.name };
+      const out = await community.publish(bundle, asked.author);
+      status.textContent = `stage "${asked.name}" published${out.commit ? ` (commit ${out.commit.slice(0, 8)})` : `, not committed: ${out.commit_error}`} · ${hint()}`;
+    } catch (err) {
+      status.textContent = `could not publish the stage: ${err.message ?? err}`;
     }
     refreshStages();
   }
@@ -2395,7 +2430,7 @@ try {
       bundle = await pickBundle();
       if (!bundle) return;
       bundle.stage.id ??= newId();
-      await (app.net ? stores[0] : browserStages).put(bundle);
+      await browserStages.put(bundle);
       status.textContent = `stage "${bundle.stage.name}" imported · ${hint()}`;
     } catch (err) {
       status.textContent = `could not import the stage: ${err.message ?? err}`;
@@ -2422,7 +2457,9 @@ try {
         bundle.stage.items.forEach((it, i) => { for (const name of it.cameras ?? []) if (list[i]) app.cameras.switchOn(list[i].prefix + name); });
         setView(app.orbit, bundle.stage.view);
       };
-      app.net.send('stage_load', { id: e.id });
+      // A published one by its id; one of this browser's as it is (its
+      // picture left out: the server has no use for it).
+      app.net.send('stage_load', e.where === 'community' ? { id: e.id } : { bundle: { ...bundle, thumbnail: null } });
       status.textContent = `loading the stage "${e.name}" on the server…`;
       return;
     }

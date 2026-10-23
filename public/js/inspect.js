@@ -124,18 +124,23 @@ export class Perturb {
 // buttons, a slider per hinge/slide joint (qpos) and per actuator (ctrl).
 // Rebuilt for every world, refreshed ~10 times a second for the expanded
 // robots. `onRemove(robot)` removes a robot (the page rebuilds the world);
-// the Save / Import / Forget buttons call `onSave()` / `onImport()` /
-// `onForget()` (the saved stages' list is stage.js's StageList). Each robot's
+// the Save / Publish / Import / Forget buttons call `onSave()` /
+// `onPublish()` (null: there is nowhere to publish, the button is off) /
+// `onImport()` / `onForget()` (the stage lists are stage.js's StageList). Each robot's
 // Pose section places it: on a free joint at once (App.placeFree), a fixed
 // base through `onMove(robot, pos, yaw)` (a rebuild).
 export class StagePanel {
-  constructor(app, el, { onRemove = () => {}, onSave = () => {}, onImport = () => {}, onForget = () => {}, onMove = async () => false } = {}) {
+  constructor(app, el, { onRemove = () => {}, onSave = () => {}, onPublish = null, onImport = () => {}, onForget = () => {}, onMove = async () => false } = {}) {
     this.app = app;
     this.el = el;
     this.onRemove = onRemove;
     this.onMove = onMove;
     this.poses = [];        // {inputs, read(), sub} per robot's Pose section
     el.querySelector('.save').onclick = onSave;
+    const publish = el.querySelector('.publish');
+    publish.onclick = onPublish;
+    publish.disabled = !onPublish;
+    if (!onPublish) publish.title = 'Publishing shares a stage with everyone on a server: it needs one (Server panel)';
     el.querySelector('.import').onclick = onImport;
     el.querySelector('.forget').onclick = onForget;
     this.savedEl = el.querySelector('.saved');
