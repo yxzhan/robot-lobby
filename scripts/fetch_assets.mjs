@@ -1,35 +1,34 @@
-// Downloads the GitHub Pages site's model library, the archive pages.json's
-// `assets` names (a release asset holding mjcf_assets/<category>/<source>/
-// <model>/, packed from part of the library), and unpacks it as
-// public/mjcf_assets, where node scripts/vendor.mjs indexes it like the
-// library itself. For the build (.github/workflows/pages.yml), on a checkout
-// without the library: an existing public/mjcf_assets (a link to the
-// library next to package.json, or an earlier download) is left alone.
+// Gets the GitHub Pages site's model library, the branch pages.json's
+// `assets` names in the library repository ({repo, branch}: the `lite`
+// branch, part of the library laid out as <category>/<source>/<model>/),
+// as public/mjcf_assets, where node scripts/vendor.mjs indexes it like the
+// library itself: a shallow clone, without its .git. For the build
+// (.github/workflows/pages.yml), on a checkout without the library: an
+// existing public/mjcf_assets (a link to the library next to package.json,
+// or an earlier fetch) is left alone.
 //
-//   node scripts/fetch_assets.mjs [url]
+//   node scripts/fetch_assets.mjs [repo [branch]]
 //   node scripts/vendor.mjs && python3 scripts/thumbnails.py
 import { execFileSync } from 'node:child_process';
-import { existsSync, lstatSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { lstatSync, mkdtempSync, readFileSync, renameSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 
 const DEST = 'public/mjcf_assets';
-const url = process.argv[2] ?? JSON.parse(readFileSync('pages.json', 'utf8')).assets;
-if (!url) throw new Error('no archive: give its URL or set "assets" in pages.json');
+const config = JSON.parse(readFileSync('pages.json', 'utf8')).assets ?? {};
+const repo = process.argv[2] ?? config.repo, branch = process.argv[3] ?? config.branch ?? 'lite';
+if (!repo) throw new Error('no library repository: give its URL or set "assets": {"repo"} in pages.json');
 if (lstatSync(DEST, { throwIfNoEntry: false })) {
-  console.log(`${DEST} is there already, left alone (delete it to download ${url})`);
+  console.log(`${DEST} is there already, left alone (delete it to fetch ${repo} ${branch})`);
   process.exit(0);
 }
 
-const res = await fetch(url);  // follows GitHub's redirect to its storage
-if (!res.ok) throw new Error(`${url}: ${res.status} ${res.statusText}`);
 const tmp = mkdtempSync('public/.mjcf_assets-');  // next to DEST: the rename stays on one file system
 try {
-  const archive = join(tmp, 'mjcf_assets.tar.gz');
-  writeFileSync(archive, Buffer.from(await res.arrayBuffer()));
-  execFileSync('tar', ['-xzf', archive, '-C', tmp]);  // GNU tar refuses members outside tmp
-  if (!existsSync(join(tmp, 'mjcf_assets'))) throw new Error(`${url}: no mjcf_assets/ at the top of the archive`);
-  renameSync(join(tmp, 'mjcf_assets'), DEST);
-  console.log(`${url} -> ${DEST}`);
+  const out = join(tmp, 'mjcf_assets');
+  execFileSync('git', ['clone', '--quiet', '--depth', '1', '--single-branch', '--branch', branch, repo, out], { stdio: 'inherit' });
+  rmSync(join(out, '.git'), { recursive: true, force: true });  // the files only
+  renameSync(out, DEST);
+  console.log(`${repo} ${branch} -> ${DEST}`);
 } finally {
   rmSync(tmp, { recursive: true, force: true });
 }

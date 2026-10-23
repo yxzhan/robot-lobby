@@ -1,8 +1,9 @@
 // Builds the static site for GitHub Pages into dist/: the page (public/,
 // with its vendored runtimes), every model of public/mjcf_assets with its
 // index and thumbnails, and the policies that pages.json names, with their
-// slice of policies.json. In CI public/mjcf_assets is the archive pages.json's
-// `assets` names (scripts/fetch_assets.mjs), part of the library; here it is
+// slice of policies.json. In CI public/mjcf_assets is the library
+// repository's branch pages.json's `assets` names (scripts/fetch_assets.mjs:
+// its lite branch), part of the library; here it is
 // usually a link to the whole library, which this would publish. The
 // page runs locally on those; its Server panel joins a server
 // (server/server.py, e.g. on Binder) for the whole library and a shared
@@ -56,7 +57,7 @@ cpSync('public', out, {
 // too), its index and the recent list's models that are there.
 cpSync('public/mjcf_assets', join(out, 'mjcf_assets'), {
   recursive: true, dereference: true,
-  filter: (src) => !src.split('/').includes('.git'),
+  filter: (src) => !src.split('/').includes('.git') && src !== 'public/mjcf_assets/scripts',  // the library repository's scripts
 });
 const assets = JSON.parse(readFileSync('public/json/assets.json', 'utf8'));
 writeFileSync(join(out, 'json', 'assets.json'), JSON.stringify(assets, null, 1));

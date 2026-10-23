@@ -1,6 +1,6 @@
 {
-  "_comment": "What scripts/build_pages.mjs puts on the static site (GitHub Pages) besides the page itself: the models of the archive `assets` (scripts/fetch_assets.mjs unpacks it as public/mjcf_assets), policy directories under pretrained_policies/, and the Binder repository the Server panel starts sessions of (repo null: this checkout's GitHub remote and branch).",
-  "assets": "https://github.com/yxzhan/robot-lobby/releases/download/v1.0.0/mjcf_assets.tar.gz",
+  "_comment": "What scripts/build_pages.mjs puts on the static site (GitHub Pages) besides the page itself: the models of the library repository's branch `assets` names (scripts/fetch_assets.mjs clones it as public/mjcf_assets), policy directories under pretrained_policies/, and the Binder repository the Server panel starts sessions of (repo null: this checkout's GitHub remote and branch).",
+  "assets": {"repo": "https://gitlab.informatik.uni-bremen.de/yanxiang/mjcf_assets.git", "branch": "lite"},
   "policies": ["GR00T-WholeBodyControl_g1", "playground_go2", "playground_spot", "microduck_rl"],
   "binder": {
     "hub": "https://binder.intel4coro.de",

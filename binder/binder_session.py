@@ -11,13 +11,21 @@ which is the same channel the JupyterLab "Terminal" tab uses:
 The terminal is a real bash process inside the session container, so shell
 state (cwd, exported variables, sourced setup files) persists across `run()`
 calls, and the terminal also shows up in JupyterLab's "Running Terminals" list.
+
+upload_file() puts a local file into the session through the Jupyter Server
+contents API, in chunks, the way JupyterLab uploads a large file:
+
+    PUT    {url}api/contents/{path}            {"type": "file", "format": "base64",
+                                                "content": ..., "chunk": 1, 2, ..., -1 (last)}
 """
 
+import base64
 import json
+import os
 import re
 import time
 import uuid
-from urllib.parse import urlparse, urlunparse
+from urllib.parse import quote, urlparse, urlunparse
 
 import requests
 import websocket  # pip install websocket-client
@@ -99,6 +107,50 @@ def shutdown_session(url, token, timeout=10):
     except requests.RequestException:
         return False
     return r.ok
+
+
+def upload_file(url, token, local_path, remote_path, chunk_size=8 << 20, verbose=True, timeout=600):
+    """Upload `local_path` into the session as `remote_path`, relative to the Jupyter
+    server's root directory (where JupyterLab's file browser starts), overwriting it;
+    missing parent directories are made.
+
+    Sent in chunks of `chunk_size` bytes (JupyterLab uses 1 MB); the size the file
+    arrived with is checked at the end. Raises on any failure. Returns the session's
+    model of the file (name, path, size, last_modified, ...).
+    """
+    url = url if url.endswith("/") else url + "/"
+    headers = {"Authorization": f"token {token}"}
+    parts = remote_path.strip("/").split("/")
+    for i in range(1, len(parts)):  # the parent directories (a PUT of one that exists changes nothing)
+        r = requests.put(url + "api/contents/" + quote("/".join(parts[:i])), json={"type": "directory"},
+                         headers=headers, timeout=60)
+        if not r.ok:
+            raise RuntimeError(f"directory {'/'.join(parts[:i])}: HTTP {r.status_code} {r.text[:300]}")
+    api = url + "api/contents/" + quote("/".join(parts))
+    size, sent, start = os.path.getsize(local_path), 0, time.monotonic()
+    with open(local_path, "rb") as f:
+        data, chunk = f.read(chunk_size), 1
+        while True:
+            following = f.read(chunk_size)
+            model = {"type": "file", "format": "base64", "content": base64.b64encode(data).decode()}
+            if chunk > 1 or following:  # a file of one chunk is a plain save
+                model["chunk"] = chunk if following else -1
+            r = requests.put(api, json=model, headers=headers, timeout=timeout)
+            if not r.ok:
+                raise RuntimeError(f"upload of {remote_path}: HTTP {r.status_code} {r.text[:300]}")
+            sent += len(data)
+            if verbose:
+                rate = sent / max(time.monotonic() - start, 1e-3) / 2**20
+                print(f"\ruploaded {sent / 2**20:.1f} of {size / 2**20:.1f} MB ({rate:.1f} MB/s)", end="", flush=True)
+            if not following:
+                break
+            data, chunk = following, chunk + 1
+    if verbose:
+        print()
+    info = requests.get(api, params={"content": 0}, headers=headers, timeout=60).json()
+    if info.get("size") != size:
+        raise RuntimeError(f"{remote_path} arrived with {info.get('size')} bytes, not {size}")
+    return info
 
 
 class BinderTerminal:

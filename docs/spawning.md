@@ -64,7 +64,10 @@ at the next page load (Forget starts from an empty floor again).
 Picking uses `mj_ray` on the physics world, so it hits collision geoms.
 
 - **Asset list** — the model library is `mjcf_assets/` next to
-  `package.json`, laid out as `<category>/<source>/<model>/`: the category
+  `package.json`, a git repository of its own (the library repository: the
+  models, saved stages, menagerie as a submodule, and in its `scripts/` the
+  conversions that made them, `urdf2mjcf.py`, `usd2mjcf.py`,
+  `basic_scenes.py`, …; see its README), laid out as `<category>/<source>/<model>/`: the category
   (`environments`, `robots`, `objects`) is the panel tab, the source
   (`aicor`, `mujoco_menagerie`, `robocasa`, …) where the models come
   from. Naming convention: a model directory `<name>/` holds `<name>.xml`,
@@ -96,9 +99,9 @@ Picking uses `mj_ray` on the physics world, so it hits collision geoms.
   the index was written is picked up too, and models with no image at all
   are listed at the end.
 - **Objects from RoboCasa** — `python3 scripts/import_robocasa.py
-  [/path/to/robocasa]` copies the picked objaverse instances (`PICKS` in the
-  script, named `<category>_<n>` like RoboCasa's directories) into
-  `mjcf_assets/objects/robocasa/<name>/`, writing `<name>.xml` with a free
+  [/path/to/robocasa]`, in the library repository (below), copies the picked
+  objaverse instances (`PICKS` in the script, named `<category>_<n>` like
+  RoboCasa's directories) into `mjcf_assets/objects/robocasa/<name>/`, writing `<name>.xml` with a free
   joint (raised so the object rests on the floor) and collision geoms moved
   to group 3. Models without a screenshot get one from
   `node scripts/render_previews.mjs [category[/source[/name or group]]…]`,

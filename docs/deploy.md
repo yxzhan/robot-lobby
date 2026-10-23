@@ -11,12 +11,13 @@ and `/render` come from it. The server answers any origin (CORS); on Binder
 the session's token, which the page puts on every request, WebSockets
 included, is what guards it.
 
-**The static site.** Its models are an archive of part of the library,
-a GitHub release asset that `pages.json`'s `assets` names
-(`mjcf_assets/<category>/<source>/<model>/` at its top, e.g.
-`tar czf mjcf_assets.tar.gz ./mjcf_assets` of a trimmed copy; screenshots
-included make the thumbnails). `scripts/fetch_assets.mjs` downloads it and
-unpacks it as `public/mjcf_assets`, which `scripts/vendor.mjs` indexes like
+**The static site.** Its models are part of the library, the `lite` branch
+of the library repository (public, on gitlab.informatik.uni-bremen.de) that
+`pages.json`'s `assets` names (`{repo, branch}`; laid out like the library,
+`<category>/<source>/<model>/`, a branch of its own rather than one based
+on `main`; screenshots included make the thumbnails).
+`scripts/fetch_assets.mjs` clones it (shallow, without its `.git`) as
+`public/mjcf_assets`, which `scripts/vendor.mjs` indexes like
 the library (menagerie directories without their README or scenes are
 indexed by their model files) and `scripts/check_assets.py` compiles model
 by model. `pages.json` also lists the policy directories the site carries.
@@ -48,7 +49,10 @@ change it).
 **The Binder repository** is this one (`binder/`), with the policies of
 `pretrained_policies/` in git. The model library is not in the image: it is
 a volume mounted into the user pod, `/mnt/dev-tools/mjcf_assets`
-(`MJCF_ASSETS` at build time to change it). `environment.yml` has Python,
+(`MJCF_ASSETS` at build time to change it), a checkout of the library
+repository (the one `mjcf_assets/` is, see its README): `git pull
+--recurse-submodules` there updates it, stages saved on the server are new
+`saved_stage/<id>/` folders to commit from there. `environment.yml` has Python,
 MuJoCo, onnxruntime and Node; `postBuild` vendors the page's runtimes
 (`npm ci`), links the volume as `public/mjcf_assets` and installs
 `jupyter_server_config.py`, which puts server.py behind the session's
@@ -61,10 +65,9 @@ library and the policies (`scripts/vendor.mjs`, which indexes through
 `public/mjcf_assets` when there is no `mjcf_assets/` next to
 `package.json`), and makes the thumbnails (`mjcf_assets/thumbs`, kept on
 the volume) only when there are none yet; the log is `/tmp/index.log`.
-`binder_build.ipynb` launches a session from a script, copies the local
-library into it (`sync_assets.py`: only what is new or changed, through the
-Jupyter Contents API and the session's terminal; the thumbnails go with
-it), then indexes it again there.
+`binder_build.ipynb` launches a session from a script
+(`binder_session.py`): it runs commands in the session's terminal and
+uploads files through the Jupyter Contents API (`upload_file`).
 
 **Joining.** The Server panel is hidden for now (its button in
 `index.html` has `hidden`). *Start a server on Binder* there calls

@@ -9,9 +9,6 @@ public/json/assets.json
 public/json/stages.json
 # the GitHub Pages site, scripts/build_pages.mjs
 dist/
-# model library / policies checked out next to package.json
-mjcf_assets/
-mjcf_assets_lite/
 # IK setups saved from the Teleop panel in network mode
 server/saved/
 __pycache__/

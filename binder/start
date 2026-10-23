@@ -3,8 +3,8 @@
 # (public/mjcf_assets, see postBuild) and the policies for the page's asset
 # panel. The thumbnails live in the library (mjcf_assets/thumbs, kept on the
 # volume), so they are made only when there are none yet; after models are
-# added, `python3 scripts/thumbnails.py` updates them (binder/sync_assets.py
-# copies them along and runs it).
+# added (git pull in the library), `python3 scripts/thumbnails.py` updates
+# them.
 # A missing library leaves the panel empty but does not stop the session.
 (
   cd "${REPO_DIR:-$HOME}" &&

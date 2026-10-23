@@ -1,6 +1,6 @@
 # The static site on GitHub Pages (scripts/build_pages.mjs): the page, the
-# models of the archive pages.json's `assets` names (a release asset,
-# unpacked as public/mjcf_assets) and the policies of pages.json. Needs
+# models of the library repository's branch pages.json's `assets` names (its
+# `lite` branch, cloned as public/mjcf_assets) and the policies of pages.json. Needs
 # Settings -> Pages -> Source: "GitHub Actions".
 name: Pages
 
