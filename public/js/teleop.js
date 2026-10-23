@@ -191,7 +191,12 @@ const FOLDED = 'mujoco-filament/teleop-folded';
 const INPUT = 'mujoco-filament/teleop-input';
 const INPUTS = [['keyboard', 'Keyboard'], ['goal', 'Goal marker'], ['gamepad', 'Gamepad']];
 const GOAL_TURN = Math.PI / 12;  // per wheel notch or Q/E press while dragging a goal (like assets.js)
-const GOAL_GRAB = 0.35;          // m: grab radius around the goal marker's center
+// The goal marker as drawn (main.js spawnMarkerShape, SPAWN_MARKER_RADIUS):
+// a ring of this radius and a heading arrow whose head reaches past it; it
+// is grabbed within them, give or take GOAL_SLACK.
+const GOAL_RADIUS = 0.25;         // m
+const GOAL_HEAD = [0.75, 1.25, 0.22];  // arrow head: from, to (tip) along the heading, half width; in radii
+const GOAL_SLACK = 0.02;          // m
 const GOAL_GAP_MS = 50;          // network mode: a dragged goal goes to the server at most this often
 const GOAL_ECHO_MS = 600;        // and the server's echoes of it are ignored for this long
 const DEG = 180 / Math.PI;
@@ -409,7 +414,14 @@ export class TeleopPanel {
 
   pickGoal(ray) {
     const g = this.goalOf(), p = g && TeleopPanel.floorHit(ray);
-    return p && Math.hypot(p[0] - g.x, p[1] - g.y) < GOAL_GRAB ? p : null;
+    if (!p) return null;
+    const dx = p[0] - g.x, dy = p[1] - g.y;
+    if (Math.hypot(dx, dy) <= GOAL_RADIUS + GOAL_SLACK) return p;
+    // On the arrow head: along the heading (u) and across it (v), in radii.
+    const c = Math.cos(g.yaw), s = Math.sin(g.yaw), slack = GOAL_SLACK / GOAL_RADIUS;
+    const u = (c * dx + s * dy) / GOAL_RADIUS, v = Math.abs(-s * dx + c * dy) / GOAL_RADIUS;
+    const [from, tip, half] = GOAL_HEAD;
+    return u >= from && u <= tip + slack && v <= half * Math.min(1, (tip - u) / (tip - from)) + slack ? p : null;
   }
 
   turnGoal(delta) {
