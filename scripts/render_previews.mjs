@@ -9,13 +9,13 @@
 // Re-run node scripts/vendor.mjs to pick them up; scripts/thumbnails.py
 // then turns them into panel thumbnails.
 //
-//   npm start &                                   # serves public/ on :4000
+//   npm start &                                   # serves public/ on :4007
 //   node scripts/render_previews.mjs [filter…]    # e.g. objects, robots/aicor,
 //                                                 # objects/robocasa/apple; default: all
 //   node scripts/vendor.mjs && python3 scripts/thumbnails.py
 //
 // Options (env): CHROME=/path/to/chrome (default: Playwright's headless
-// shell in ~/.cache/ms-playwright), URL=http://127.0.0.1:4000/, FORCE=1 to
+// shell in ~/.cache/ms-playwright), URL=http://127.0.0.1:4007/, FORCE=1 to
 // re-render assets that already have a screenshot, GPU=1 to render on the
 // GPU (Vulkan; several times faster than the default SwiftShader).
 import { spawn } from 'node:child_process';
@@ -24,7 +24,7 @@ import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 const filters = process.argv.slice(2);
-const url = process.env.URL ?? 'http://127.0.0.1:4000/';
+const url = process.env.URL ?? 'http://127.0.0.1:4007/';
 
 function findChrome() {
   if (process.env.CHROME) return process.env.CHROME;

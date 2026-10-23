@@ -3,7 +3,7 @@ keep anything (Cache-Control: no-store). Without it, a caching proxy in front
 of the page (e.g. Cloudflare) keeps serving old .js files after an edit, which
 DevTools' "Disable cache" cannot bypass: it only skips the browser's cache.
 
-    python3 scripts/serve.py [port]   # default 4000
+    python3 scripts/serve.py [port]   # default 4007
 """
 
 import functools
@@ -19,7 +19,7 @@ class NoStoreHandler(http.server.SimpleHTTPRequestHandler):
 
 
 def main():
-  port = int(sys.argv[1]) if len(sys.argv) > 1 else 4000
+  port = int(sys.argv[1]) if len(sys.argv) > 1 else 4007
   public = pathlib.Path(__file__).resolve().parent.parent / 'public'
   handler = functools.partial(NoStoreHandler, directory=str(public))
   with http.server.ThreadingHTTPServer(('', port), handler) as server:

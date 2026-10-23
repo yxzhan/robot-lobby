@@ -47,10 +47,10 @@ In the browser alone (the physics in the page):
 
 ```sh
 npm install      # postinstall copies the wasm/js runtimes into public/vendor/
-npm start        # python3 scripts/serve.py 4000: public/ with Cache-Control: no-store
+npm start        # python3 scripts/serve.py 4007: public/ with Cache-Control: no-store
 ```
 
-Open http://localhost:4000 (in JupyterHub: `.../user/<name>/proxy/4000/` — all
+Open http://localhost:4007 (in JupyterHub: `.../user/<name>/proxy/4007/` — all
 URLs are relative, so the path proxy works).
 
 A world shared by every browser that opens it (the physics in Python):
