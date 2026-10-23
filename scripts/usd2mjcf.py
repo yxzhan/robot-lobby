@@ -48,6 +48,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from urdf2mjcf import fmt, quat, write_stl  # noqa: E402
 
 CELL = 0.05          # m, the grid thin meshes are covered with boxes on
+FINE = 0.01          # m, the voxels of a mesh whose 5 cm ones would hold something that moves
 THIN = 0.25          # m: thinner than this, and
 WIDE = 1.0           # wider than this in both other directions: a wall or floor
 MIN_HALF = 0.01      # m, the thinnest half size of a generated box
@@ -56,6 +57,24 @@ DENSITY = 300        # kg/m³ of a rigid body without physics:mass
 
 def name_of(path):
   return re.sub(r'\W', '_', str(path).rsplit('/', 1)[-1])
+
+
+def srgb(c):
+  """A linear color component in sRGB."""
+  c = min(max(float(c), 0.0), 1.0)
+  return 12.92 * c if c <= 0.0031308 else 1.055 * c ** (1 / 2.4) - 0.055
+
+
+def moving(prim):
+  """A rigid body that moves (not kinematic, not disabled)."""
+  if not prim.HasAPI(UsdPhysics.RigidBodyAPI):
+    return False
+  rb = UsdPhysics.RigidBodyAPI(prim)
+  return rb.GetRigidBodyEnabledAttr().Get() is not False and not rb.GetKinematicEnabledAttr().Get()
+
+
+def collides(prim):
+  return prim.HasAPI(UsdPhysics.CollisionAPI) and UsdPhysics.CollisionAPI(prim).GetCollisionEnabledAttr().Get() is not False
 
 
 def matrix(prim, cache):
@@ -106,6 +125,7 @@ class Converter:
     self.meshes = []       # (name, file)
     self.names = set()
     self.voxelize = set()  # meshes whose bounding box would hold something that moves: boxes over voxels
+    self.fine = set()      # meshes whose 5 cm voxel boxes would: 1 cm ones
     self.no_collision = None  # regex: bodies whose meshes get no generated collision geoms
 
   def unique(self, name):
@@ -119,18 +139,45 @@ class Converter:
   # --- the body tree ---------------------------------------------------------
 
   def owner(self, prim):
-    """The body a prim belongs to: its nearest rigid body, else its top-level prim."""
+    """The body a prim belongs to: its nearest moving rigid body, else its
+    topmost transformable ancestor (under scopes)."""
     p, top = prim, None
     while p and p != self.root:
-      if p.HasAPI(UsdPhysics.RigidBodyAPI):
+      if moving(p):
         return p
-      top = p
+      if p.IsA(UsdGeom.Xformable):
+        top = p
       p = p.GetParent()
     return top
 
+  def tops(self):
+    """The topmost transformable prims under the default prim (through scopes)."""
+    out = []
+    it = iter(Usd.PrimRange(self.root))
+    for p in it:
+      if p != self.root and p.IsA(UsdGeom.Xformable):
+        if any(q.IsA(UsdGeom.Gprim) for q in Usd.PrimRange(p)):   # not a light or a camera
+          out.append(p)
+        it.PruneChildren()
+    return out
+
+  def label(self, prim):
+    """A body's name: the transformable prims on its path, the topmost one
+    named for the scope it is in when it is an Actor_NNNN (chair/Actor_0001
+    /Geom/body: chair_0001_body)."""
+    names, p = [], prim
+    while p and p != self.root:
+      if p.IsA(UsdGeom.Xformable):
+        name = p.GetName()
+        if re.match(r'Actor_\d+$', name) and p.GetParent() != self.root:
+          name = p.GetParent().GetName() + name[len('Actor'):]
+        names.append(name)
+      p = p.GetParent()
+    return '_'.join(re.sub(r'\W', '_', n) for n in reversed(names))
+
   def tree(self):
-    bodies = [c for c in self.root.GetChildren() if c.IsA(UsdGeom.Xformable)]
-    bodies += [p for p in Usd.PrimRange(self.root) if p.HasAPI(UsdPhysics.RigidBodyAPI) and p not in bodies]
+    bodies = self.tops()
+    bodies += [p for p in Usd.PrimRange(self.root) if moving(p) and p not in bodies]
     joints = {}
     for p in Usd.PrimRange(self.root):
       if p.IsA(UsdPhysics.RevoluteJoint) or p.IsA(UsdPhysics.PrismaticJoint):
@@ -149,24 +196,45 @@ class Converter:
         if len(parents) > 1:
           print(f'warning: {b.GetPath()}: joints to {len(parents)} bodies, the first used')
         parent[b] = joints[b][0][1]
-      elif b.HasAPI(UsdPhysics.RigidBodyAPI) and b.GetParent() == self.root:
-        parent[b] = None
+      elif moving(b):
+        parent[b] = None   # free: at the top, as MuJoCo wants free joints
       else:
-        o = self.owner(b.GetParent()) if b.GetParent() != self.root else None
-        parent[b] = o
+        parent[b] = self.owner(b.GetParent()) if b.GetParent() != self.root else None
     return bodies, joints, parent
 
   # --- materials ---------------------------------------------------------------
 
   def material(self, prim):
-    """The MJCF material of a mesh or subset: (name, textured)."""
+    """The MJCF material of a mesh or subset: (name, textured, uv transform
+    (scale, translate) or None). UsdPreviewSurface, or Omniverse's OmniPBR /
+    OmniGlass MDL: the diffuse color or texture, opacity, metallic,
+    roughness."""
     mat, _ = UsdShade.MaterialBindingAPI(prim).ComputeBoundMaterial()
-    color, image, alpha = (0.7, 0.7, 0.7), None, 1.0
+    color, image, alpha, metallic, roughness, uvx = (0.7, 0.7, 0.7), None, 1.0, None, None, None
     label = 'default'
     if mat:
       label = mat.GetPrim().GetName()
-      shader = mat.ComputeSurfaceSource()[0]
-      if shader:
+      shader = mat.ComputeSurfaceSource()[0] or mat.ComputeSurfaceSource('mdl')[0]
+      get = lambda n: shader.GetInput(n).Get() if shader and shader.GetInput(n) else None
+      mdl = str(shader.GetSourceAsset('mdl')) if shader and shader.GetImplementationSource() == 'sourceAsset' else ''
+      if 'OmniGlass' in mdl:
+        color, alpha = tuple(get('glass_color') or (1, 1, 1)), 0.25
+        roughness, metallic = get('frosting_roughness') or 0.0, 0.0
+      elif 'OmniPBR' in mdl:
+        color = tuple(get('diffuse_color_constant') or color)
+        tint = get('diffuse_tint')
+        f = get('diffuse_texture')
+        if f is not None and f.resolvedPath:
+          image = pathlib.Path(f.resolvedPath)
+          if tint is not None:
+            color = tuple(tint)
+        if get('enable_opacity') and get('opacity_constant') is not None:
+          alpha = float(get('opacity_constant'))
+        metallic, roughness = get('metallic_constant'), get('reflection_roughness_constant')
+        sc, tr = get('texture_scale'), get('texture_translate')
+        if (sc is not None and tuple(sc) != (1, 1)) or (tr is not None and tuple(tr) != (0, 0)):
+          uvx = (np.array(sc if sc is not None else (1, 1)), np.array(tr if tr is not None else (0, 0)))
+      elif shader:
         d = shader.GetInput('diffuseColor')
         if d:
           src = d.GetConnectedSources()[0]
@@ -180,16 +248,22 @@ class Converter:
         o = shader.GetInput('opacity')
         if o and o.Get() is not None and not o.GetConnectedSources()[0]:
           alpha = float(o.Get())
+        metallic, roughness = get('metallic'), get('roughness')
+    # USD's colors (UsdPreviewSurface, MDL) are linear; MJCF's rgba is sRGB.
+    color = tuple(srgb(c) for c in color)
+    tname = None
     if image is not None:
       tname, rgb = self.texture(image)
       if rgb is not None:   # one color: no texture needed
         image, color = None, rgb
-    key = (str(image), tuple(round(c, 4) for c in color), round(alpha, 3))
+    pbr = '' if metallic is None else f' metallic="{float(metallic):.3g}" roughness="{float(roughness if roughness is not None else 0.5):.3g}"'
+    key = (str(image), tuple(round(c, 4) for c in color), round(alpha, 3), pbr)
     if key not in self.materials:
       name = self.unique(re.sub(r'\W', '_', label))
-      self.materials[key] = (name, 'texture' if image else 'rgba', tname if image else fmt(list(color) + [alpha]), alpha)
-    name, kind, _, _ = self.materials[key]
-    return name, kind == 'texture'
+      rgba = fmt(list(color) + [alpha]) if not image else f'1 1 1 {alpha:.3g}'
+      self.materials[key] = (name, tname, rgba, pbr)
+    name, tex, _, _ = self.materials[key]
+    return name, tex is not None, uvx if tex is not None else None
 
   def texture(self, image):
     if image not in self.textures:
@@ -262,6 +336,8 @@ class Converter:
       write_stl(self.out / 'assets' / file, tris)
     else:
       file = f'{name}.obj'
+      if len(tris) > self.max_faces:
+        tris, uv, normals = self.simplify_textured(tris, uv, name)
       n = normals if normals is not None else np.repeat(
         np.cross(tris[:, 1] - tris[:, 0], tris[:, 2] - tris[:, 0])[:, None], 3, axis=1)
       corners = np.hstack([tris.reshape(-1, 3), uv.reshape(-1, 2), n.reshape(-1, 3)]).round(6)
@@ -274,6 +350,22 @@ class Converter:
         f.writelines('f ' + ' '.join(f'{i}/{i}/{i}' for i in t) + '\n' for t in index.reshape(-1, 3) + 1)
     self.meshes.append((name, file))
     return name
+
+  def simplify_textured(self, tris, uv, what):
+    """Like simplify, keeping texture coordinates: the mesh's corners (position
+    and uv) are its vertices, so seams stay; each vertex left takes the uv of
+    one it merged."""
+    import fast_simplification
+    corners = np.hstack([tris.reshape(-1, 3), uv.reshape(-1, 2)]).round(7)
+    unique, inverse = np.unique(corners, axis=0, return_inverse=True)
+    faces = inverse.reshape(-1, 3).astype(np.int32)
+    _, _, collapses = fast_simplification.simplify(unique[:, :3].astype(np.float32), faces,
+                                                   target_reduction=1 - self.max_faces / len(tris), return_collapses=True)
+    points, faces, mapping = fast_simplification.replay_simplification(unique[:, :3].astype(np.float32), faces, collapses)
+    st = np.zeros((len(points), 2))
+    st[mapping] = unique[:, 3:5]
+    print(f'{what}: {len(tris)} textured triangles simplified to {len(faces)}')
+    return points[faces].astype(float), st[faces], None
 
   def simplify(self, tris, what):
     import fast_simplification
@@ -346,6 +438,10 @@ class Converter:
     n = np.maximum(np.ceil((hi - lo) / cell).astype(int), 1)
     size = (hi - lo) / n
     grid = np.zeros(n, bool)
+    # Each voxel's box around the surface points in it: merged boxes are
+    # fitted to these, not to whole cells (a 2 cm shelf board gets a 2 cm box).
+    vlo = np.full(tuple(n) + (3,), np.inf)
+    vhi = np.full(tuple(n) + (3,), -np.inf)
     # Points spread over each triangle, finer than a cell.
     for tri in tris:
       e = max(np.linalg.norm(tri[1] - tri[0]), np.linalg.norm(tri[2] - tri[0]), np.linalg.norm(tri[2] - tri[1]))
@@ -353,8 +449,11 @@ class Converter:
       u, v = np.meshgrid(np.linspace(0, 1, k + 1), np.linspace(0, 1, k + 1))
       keep = u + v <= 1
       p = tri[0] + u[keep, None] * (tri[1] - tri[0]) + v[keep, None] * (tri[2] - tri[0])
+      p = np.vstack([p, tri])
       i = np.clip(((p - lo) / np.maximum(size, 1e-9)).astype(int), 0, n - 1)
       grid[i[:, 0], i[:, 1], i[:, 2]] = True
+      np.minimum.at(vlo, (i[:, 0], i[:, 1], i[:, 2]), p)
+      np.maximum.at(vhi, (i[:, 0], i[:, 1], i[:, 2]), p)
     out, used = [], np.zeros_like(grid)
     for i, j, k in zip(*np.nonzero(grid)):
       if used[i, j, k]:
@@ -368,13 +467,25 @@ class Converter:
       while k1 + 1 < n[2] and free(i, i1 + 1, j, j1 + 1, k1 + 1, k1 + 2):
         k1 += 1
       used[i:i1 + 1, j:j1 + 1, k:k1 + 1] = True
-      a, b = lo + np.array([i, j, k]) * size, lo + np.array([i1 + 1, j1 + 1, k1 + 1]) * size
+      a = vlo[i:i1 + 1, j:j1 + 1, k:k1 + 1].reshape(-1, 3).min(0)
+      b = vhi[i:i1 + 1, j:j1 + 1, k:k1 + 1].reshape(-1, 3).max(0)
       out.append(((a + b) / 2, np.maximum((b - a) / 2, MIN_HALF)))
     return out
 
   def collision(self, prim, to_body):
     """Collision geoms of a collision prim: [(kind, center, half / mesh, rotation)]."""
     w = to_body @ matrix(prim, self.cache)
+    if prim.IsA(UsdGeom.Cylinder) or prim.IsA(UsdGeom.Capsule) or prim.IsA(UsdGeom.Sphere):
+      rot, pos = pose(w)
+      scale = np.linalg.norm(w[:3, :3], axis=0)
+      if prim.IsA(UsdGeom.Sphere):
+        return [('sphere', pos, np.array([prim.GetAttribute('radius').Get() * scale.max()]), rot)]
+      k = 'XYZ'.index(prim.GetAttribute('axis').Get() or 'Z')
+      # MuJoCo's cylinders and capsules run along z: turn the axis onto it.
+      turn = np.eye(3)[:, [(k + 1) % 3, (k + 2) % 3, k]]
+      r = prim.GetAttribute('radius').Get() * max(scale[(k + 1) % 3], scale[(k + 2) % 3])
+      h = prim.GetAttribute('height').Get() * scale[k] / 2
+      return [('cylinder' if prim.IsA(UsdGeom.Cylinder) else 'capsule', pos, np.array([r, h]), rot @ turn)]
     if prim.IsA(UsdGeom.Cube):
       size = UsdGeom.Cube(prim).GetSizeAttr().Get() or 2.0
       corners = np.array([[x, y, z] for x in (-1, 1) for y in (-1, 1) for z in (-1, 1)]) * size / 2
@@ -391,14 +502,22 @@ class Converter:
     if not len(UsdGeom.Mesh(prim).GetFaceVertexCountsAttr().Get() or []):
       return []
     tris, _, _, _ = self.triangles(prim, to_body)
-    if approx in ('convexDecomposition', 'meshSimplification'):
+    if approx is None and not moving(self.owner(prim)):
+      approx = 'none'   # PhysX's default for a static mesh: the triangles as they are
+    if approx in ('convexDecomposition', 'meshSimplification', 'none', 'sdf'):
       # Concave (a table, a wall with openings): boxes.
       lo, hi = tris.reshape(-1, 3).min(0), tris.reshape(-1, 3).max(0)
       ext = np.sort(hi - lo)
-      boxes = self.boxes_covering(tris) if ext[0] < THIN and ext[1] > WIDE else self.voxel_boxes(tris)
-      return [('box', c, h, np.eye(3)) for c, h in boxes]
+      if ext[0] < THIN and ext[1] > WIDE:
+        return [('box', c, h, np.eye(3)) for c, h in self.boxes_covering(tris)]
+      label = f'{self.label(self.owner(prim))}_{name_of(prim.GetPath())}'
+      boxes = self.voxel_boxes(tris, FINE if label in self.fine else CELL)
+      return [('box', c, h, np.eye(3), f'{label}_vox') for c, h in boxes]
     name = self.unique(f'{name_of(prim.GetPath())}_hull')
-    self.write_mesh(name, tris, None, None)
+    from scipy.spatial import ConvexHull   # MuJoCo takes the hull anyway: only its faces
+    pts = np.unique(tris.reshape(-1, 3).round(7), axis=0)
+    hull = ConvexHull(pts)
+    self.write_mesh(name, pts[hull.simplices], None, None)
     return [('mesh', None, name, None)]
 
   # --- the model ---------------------------------------------------------------------
@@ -413,12 +532,12 @@ class Converter:
       rot, pos = prot.T @ rot, prot.T @ (pos - ppos)
     to_body = np.eye(4)
     to_body[:3, :3], to_body[:3, 3] = world_rot.T, -world_rot.T @ world_pos
-    name = self.unique(name_of(body.GetPath()))
+    name = self.unique(self.label(body))
     attrs = f' pos="{fmt(pos)}"' if np.abs(pos).max() > 1e-9 else ''
     if np.abs(rot - np.eye(3)).max() > 1e-9:
       attrs += f' quat="{fmt(quat(rot))}"'
     lines = [f'{ind}<body name="{name}"{attrs}>']
-    rigid = body.HasAPI(UsdPhysics.RigidBodyAPI)
+    rigid = moving(body)
     if body in joints:
       for jp, _ in joints[body]:
         j = UsdPhysics.Joint(jp)
@@ -441,10 +560,10 @@ class Converter:
     visual, colliders = [], []
     it = iter(Usd.PrimRange(body))
     for p in it:
-      if p != body and (p.HasAPI(UsdPhysics.RigidBodyAPI) or p in self.bodies):
+      if p != body and (moving(p) or p in self.bodies):
         it.PruneChildren()
         continue
-      if p.HasAPI(UsdPhysics.CollisionAPI):
+      if collides(p):
         colliders.append(p)
       # A visible mesh can be its own collider too (a table, a wall).
       if p.IsA(UsdGeom.Mesh) and UsdGeom.Imageable(p).ComputeVisibility() != UsdGeom.Tokens.invisible \
@@ -465,38 +584,44 @@ class Converter:
       for k, (target, sel) in enumerate(groups):
         if not sel.any():
           continue
-        mat, textured = self.material(target)
-        mesh = self.write_mesh(self.unique(name_of(p.GetPath()) + (f'_{k}' if len(groups) > 1 else '')), tris[sel],
-                               uv[sel] if textured and uv is not None else None,
+        mat, textured, uvx = self.material(target)
+        st = uv[sel] if textured and uv is not None else None
+        if st is not None and uvx is not None:
+          st = st * uvx[0] + uvx[1]
+        mesh = self.write_mesh(self.unique(f'{self.label(body)}_{name_of(p.GetPath())}' + (f'_{k}' if len(groups) > 1 else '')),
+                               tris[sel], st,
                                normals[sel] if normals is not None else None)
         geoms.append(f'{ind}  <geom class="visual" type="mesh" mesh="{mesh}" material="{mat}"/>')
       # No collision geom of its own around it: boxes.
-      covered = any(c.GetParent() == p.GetParent() for c in colliders)   # UCX_* next to it, or itself
+      # Collision geoms of its own: itself, UCX_* next to it, shapes under it.
+      covered = any(c == p or c.GetParent() == p.GetParent() or c.GetParent() == p for c in colliders)
       if not covered and not (self.no_collision and re.search(self.no_collision, body.GetName())):
         lo, hi = tris.reshape(-1, 3).min(0), tris.reshape(-1, 3).max(0)
         ext = np.sort(hi - lo)
-        mesh_name = name_of(p.GetPath())
+        mesh_name = f'{self.label(body)}_{name_of(p.GetPath())}'
         if ext[0] < THIN and ext[1] > WIDE:
           cols += [('box', c, h, np.eye(3)) for c, h in self.boxes_covering(tris)]
         elif mesh_name in self.voxelize:
-          cols += [('box', c, h, np.eye(3)) for c, h in self.voxel_boxes(tris)]
+          boxes = self.voxel_boxes(tris, FINE if mesh_name in self.fine else CELL)
+          cols += [('box', c, h, np.eye(3), f'{mesh_name}_vox') for c, h in boxes]
         else:
           cols.append(('box', (lo + hi) / 2, np.maximum((hi - lo) / 2, MIN_HALF), np.eye(3), f'{mesh_name}_aabb'))
     for c in colliders:
       cols += self.collision(c, to_body)
     # Mass: physics:mass over the collision geoms by volume.
     mass = body.GetAttribute('physics:mass').Get() if rigid else None
-    vol = [8 * np.prod(col[2]) if col[0] == 'box' else None for col in cols]
+    vol = [8 * np.prod(col[2]) if col[0] == 'box' else
+           2 * math.pi * col[2][0] ** 2 * col[2][1] if col[0] in ('cylinder', 'capsule') else None for col in cols]
     known = sum(v for v in vol if v) or 1.0
     for (k, c, h, r, *label), v in zip(cols, vol):
       m = ''
       if rigid:
         share = (v or known / max(len(cols), 1)) / known
         m = f' mass="{(mass if mass else DENSITY * known) * share:.6g}"'
-      if k == 'box':
+      if k in ('box', 'sphere', 'cylinder', 'capsule'):
         q = '' if np.abs(r - np.eye(3)).max() < 1e-9 else f' quat="{fmt(quat(r))}"'
         named = f' name="{self.unique(label[0])}"' if label else ''
-        geoms.append(f'{ind}  <geom{named} class="collision" type="box" pos="{fmt(c)}"{q} size="{fmt(h)}"{m}/>')
+        geoms.append(f'{ind}  <geom{named} class="collision" type="{k}" pos="{fmt(c)}"{q} size="{fmt(h)}"{m}/>')
       else:
         geoms.append(f'{ind}  <geom class="collision" type="mesh" mesh="{h}"{m}/>')
     lines += geoms
@@ -515,12 +640,11 @@ class Converter:
     for b in children.get(None, []):
       worldbody += self.body_xml(b, None, children, joints, '    ')
     assets = []
-    for name, kind, value, alpha in sorted(self.materials.values()):
-      if kind == 'texture':
-        assets.append(f'    <texture name="{value}" type="2d" file="{value}.png"/>')
-        assets.append(f'    <material name="{name}" texture="{value}" rgba="1 1 1 {alpha:.3g}"/>')
-      else:
-        assets.append(f'    <material name="{name}" rgba="{value}"/>')
+    for tex in sorted({t for _, t, _, _ in self.materials.values() if t}):
+      assets.append(f'    <texture name="{tex}" type="2d" file="{tex}.png"/>')
+    for name, tex, rgba, pbr in sorted(self.materials.values()):
+      texture = f' texture="{tex}"' if tex else ''
+      assets.append(f'    <material name="{name}"{texture} rgba="{rgba}"{pbr}/>')
     assets += [f'    <mesh name="{n}" file="{f}"/>' for n, f in self.meshes]
     return '\n'.join([
       f'<mujoco model="{model_name}">',
@@ -532,7 +656,8 @@ class Converter:
       '      <geom contype="0" conaffinity="0" group="2" density="0"/>',
       '    </default>',
       '    <default class="collision">',
-      '      <geom rgba="0.9 0.9 0.0 0.2" group="3"/>',
+      # Torsional friction: a book on a shelf of small boxes does not creep.
+      '      <geom rgba="0.9 0.9 0.0 0.2" group="3" condim="4" friction="1 0.02 0.002"/>',
       '    </default>',
       '  </default>',
       '  <asset>',
@@ -547,18 +672,21 @@ class Converter:
 
 
 def boxes_in_the_way(xml):
-  """Meshes whose bounding box (geoms named *_aabb, on a static body) holds a
-  body that moves at rest."""
+  """Meshes with collision boxes on a static body that hold a body that moves
+  at rest: (bounding boxes, *_aabb geoms; 5 cm voxel boxes, *_vox geoms)."""
   m = mujoco.MjModel.from_xml_path(str(xml))
   d = mujoco.MjData(m)
   mujoco.mj_forward(m, d)
-  out = set()
+  aabb, vox = set(), set()
   for c in d.contact[:d.ncon]:
     for g, other in ((c.geom1, c.geom2), (c.geom2, c.geom1)):
       name = m.geom(g).name
-      if name.endswith('_aabb') and m.body_weldid[m.geom_bodyid[g]] == 0 and m.body_weldid[m.geom_bodyid[other]] != 0:
-        out.add(re.sub(r'_aabb(_\d+)?$', '', name))
-  return out
+      if m.body_weldid[m.geom_bodyid[g]] == 0 and m.body_weldid[m.geom_bodyid[other]] != 0 and c.dist < -0.002:
+        if re.search(r'_aabb(_\d+)?$', name):
+          aabb.add(re.sub(r'_aabb(_\d+)?$', '', name))
+        elif re.search(r'_vox(_\d+)?$', name):
+          vox.add(re.sub(r'_vox(_\d+)?$', '', name))
+  return aabb, vox
 
 
 def hold_joints(xml):
@@ -634,15 +762,22 @@ def main():
   conv = Converter(stage, out, args.offset, args.max_faces)
   conv.no_collision = args.no_collision
   xml.write_text(conv.mjcf(out.name))
-  voxelize = boxes_in_the_way(xml)
-  if voxelize:
-    # Again, those bounding boxes made of voxels.
-    print(f'boxes over voxels for {len(voxelize)} meshes whose bounding box holds what moves:', ' '.join(sorted(voxelize)))
+  voxelize, fine = set(), set()
+  for _ in range(2):
+    # Again, with boxes over voxels for bounding boxes that hold what moves,
+    # finer voxels where 5 cm ones do.
+    aabb, vox = boxes_in_the_way(xml)
+    if not (aabb - voxelize or vox - fine):
+      break
+    voxelize |= aabb
+    fine |= vox
+    print(f'boxes over voxels for {len(voxelize)} meshes, finer ones for {len(fine)}: what moves is in their boxes:',
+          ' '.join(sorted(voxelize | fine)))
     shutil.rmtree(out / 'assets')
     (out / 'assets').mkdir()
     conv = Converter(stage, out, args.offset, args.max_faces)
     conv.no_collision = args.no_collision
-    conv.voxelize = voxelize
+    conv.voxelize, conv.fine = voxelize, fine
     xml.write_text(conv.mjcf(out.name))
   hold_joints(xml)
   n = exclude_resting(xml)
