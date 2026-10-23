@@ -146,7 +146,7 @@ export class StagePanel {
     this.savedEl = el.querySelector('.saved');
     this.empty = el.querySelector('.empty');
     this.open = new Set();  // robot prefixes whose section is expanded
-    this.closed = new Set();  // "<prefix>Joints"/"<prefix>Controls" subsections collapsed
+    this.folds = new Map();  // "<prefix>Pose"/"Joints"/"Controls" -> open: as left (Pose starts open, the others folded)
     this.rows = [];         // {input, out, read(), write(v), joint}
     this.lastUpdate = 0;
   }
@@ -155,7 +155,7 @@ export class StagePanel {
     const { mujoco, model, robots } = this.app;
     const T = mujoco.mjtObj;
     const keep = (set, d, on) => (on ? set.add(d.dataset.key) : set.delete(d.dataset.key));
-    this.el.querySelectorAll('details details').forEach((d) => keep(this.closed, d, !d.open));
+    this.el.querySelectorAll('details details').forEach((d) => this.folds.set(d.dataset.key, d.open));
     this.el.querySelectorAll(':scope > details').forEach((d) => { keep(this.open, d, d.open); d.remove(); });
     this.rows = [];
     this.poses = [];
@@ -223,7 +223,7 @@ export class StagePanel {
         if (!list.length) continue;
         const sub = document.createElement('details');
         sub.dataset.key = r.prefix + title;
-        sub.open = !this.closed.has(sub.dataset.key);
+        sub.open = this.folds.get(sub.dataset.key) ?? false;
         sub.innerHTML = `<summary>${title} <span class="count">${list.length}</span></summary>`;
         sub.ontoggle = () => { this.lastUpdate = 0; };
         for (const item of list) sub.append(this.row(r, item));
@@ -241,7 +241,7 @@ export class StagePanel {
   poseSection(r) {
     const sub = document.createElement('details');
     sub.dataset.key = r.prefix + 'Pose';
-    sub.open = !this.closed.has(sub.dataset.key);
+    sub.open = this.folds.get(sub.dataset.key) ?? true;
     const free = this.app.rootFreeJoint(r) >= 0;
     sub.innerHTML = `<summary>Pose <span class="count">${free ? 'free joint · live' : 'fixed base · rebuilds the world'}</span></summary>`;
     sub.ontoggle = () => { this.lastUpdate = 0; };
