@@ -55,6 +55,15 @@ Goals can also come from a script, for several robots at once:
   goals. `which` is `'all'` (every robot whose walking policy or base is
   on), a name (`'r3'`), a label, or a list of those. E.g.
   `goals.move('all', {forward: 1}); await goals.wait('all'); goals.move('all', {forward: -1})`.
+  Behaviours on a timer (`public/js/swarm.js`):
+  `goals.randomWalk({model: 'microduck', exclude: ['r1']})` gives a few
+  robots at a time a random goal nearby, inside a play area;
+  `goals.chase({target: 'r1', distance: 0.4})` has them walk after robot
+  `r1` and stop short of it, facing it. Both take `robots` (as `which`),
+  `model` (part of the label) and `exclude`; each returns an id,
+  `goals.running()` lists them, `goals.stop(id)` (or `goals.stop()` for all)
+  stops them and clears their goals. A robot two behaviours take follows the
+  one started last; the other options are at the top of `swarm.js`.
 - **On the server** (HTTP): `GET /api/robots` lists the robots
   (`name`, `pose`, `goal`, `drives`, `arrived`); `POST /api/goal` with JSON
   `{robots, forward, left, turn}` or `{robots, goal: {x, y, yaw}}` sets

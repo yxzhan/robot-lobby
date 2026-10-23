@@ -28,6 +28,7 @@ import { IkController } from './ik.js';
 import { applyOptions, geomOverrides, geomSignature, injectGeomDefaults, loadPhysics, needsRebuild } from './physics.js';
 import { WorldPanel } from './worldpanel.js';
 import { RenderPanel, loadQuality } from './render.js';
+import { addSwarm } from './swarm.js';
 import { FLOOR_STYLES, floorTexture, hexRgb, loadFloor, saveFloor } from './floor.js';
 import { AMBIENT, SUN_LUX, linearRgb, loadLighting, saveLighting, sunDirection } from './lighting.js';
 import { ServerPanel } from './serverpanel.js';
@@ -2412,6 +2413,7 @@ try {
       });
     },
   };
+  addSwarm(window.goals);  // goals.randomWalk, goals.chase, goals.stop (swarm.js)
 
   // Assets are spawned by dragging them from the asset panel onto the floor.
   new AssetPanel(app, document.getElementById('assets'), assets, {
@@ -2567,7 +2569,9 @@ try {
     if (!app.paused && app.data) app.resync();
   };
   document.getElementById('reset').onclick = () => app.model && app.reset();
-  document.getElementById('clear').onclick = () => robots.length && respawn([]);
+  document.getElementById('clear').onclick = () => {
+    if (robots.length && confirm(`Remove all ${robots.length} spawned model${robots.length > 1 ? 's' : ''}?`)) respawn([]);
+  };
   document.getElementById('restart').onclick = () => {
     if (app.net && confirm('Restart the shared world for everyone? The server reads the model files again and starts the simulation anew.')) app.net.send('restart');
   };
