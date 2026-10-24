@@ -12,8 +12,8 @@ const STORE = 'mujoco-filament/floor';
 // colors (hex, sRGB: the pattern's two, or plain's one), shine (%, default
 // 0), cells (cells one texture covers), roughness}
 export const FLOOR_STYLES = {
-  checker: { label: 'Checker', size: 1, colors: ['#737f8f', '#3f464f'], cells: 2, roughness: 0.6, shine: 100 },
   grid: { label: 'Grid', size: 1, colors: ['#9ea6b0', '#4d545e'], cells: 1, roughness: 0.7 },
+  checker: { label: 'Checker', size: 1, colors: ['#737f8f', '#3f464f'], cells: 2, roughness: 0.6, shine: 100 },
   tiles: { label: 'Tiles', size: 0.5, colors: ['#dbd6cc', '#6b6863'], cells: 4, roughness: 0.35 },
   wood: { label: 'Wood', size: 0.2, colors: ['#a8784d', '#734d2e'], cells: 4, roughness: 0.55 },
   concrete: { label: 'Concrete', size: 2, colors: ['#b1aea8', '#77746e'], cells: 1, roughness: 0.85 },
@@ -24,7 +24,7 @@ export const FLOOR_STYLES = {
 // style (white but for these), to turn a saved tint into two colors.
 const OLD_TINT = { checker: '#737f8f', plain: '#8c939c' };
 
-export const floorDefaults = (style = 'checker') => ({
+export const floorDefaults = (style = 'grid') => ({
   style, size: FLOOR_STYLES[style].size ?? 1, colors: [...(FLOOR_STYLES[style].colors ?? [])], shine: FLOOR_STYLES[style].shine ?? 0,
 });
 

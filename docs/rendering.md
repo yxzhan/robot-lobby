@@ -25,9 +25,9 @@ Below the quality settings (`public/js/render.js` too):
 
 - **Floor** (`public/js/floor.js`, saved in this browser, in network mode
   too since it is only this page's view): how the world floor looks, not its
-  physics. Checker, grid, tiles, wood and concrete (textures drawn in code,
-  tileable), plain (one color) or none. Each pattern has two colors, side
-  by side on the Color row (checker's cells, grid's base and lines, tiles
+  physics. Grid (the default), checker, tiles, wood and concrete (textures
+  drawn in code, tileable), plain (one color) or none. Each pattern has two colors, side
+  by side on the Color row (grid's base and lines, checker's cells, tiles
   and grout, light wood and grain, light and dark concrete). The pattern is worked out once per style as a mix
   between the two and a shade per pixel, so a new color only mixes the
   texture again (a few ms, live while the picker moves). Size is one cell,
