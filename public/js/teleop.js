@@ -244,7 +244,7 @@ export class TeleopPanel {
       const d = this.dragging;
       const index = d ? d.index
         : e.target === this.app.canvas && !e.buttons ? this.pick(this.app.pointerRay(e.clientX, e.clientY))?.index : null;
-      if (!d && !this.active.ik.chains[index]?.gripper?.length) return;  // none, or no gripper: the camera zooms
+      if (!d && !this.active?.ik?.chains[index]?.gripper?.length) return;  // none, or no gripper: the camera zooms
       e.preventDefault();
       e.stopImmediatePropagation();
       if (d?.goal) this.turnGoal(Math.sign(e.deltaY || e.deltaX) * GOAL_TURN);
