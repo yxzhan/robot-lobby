@@ -40,7 +40,7 @@ import { CHAIN_COLORS } from './teleop.js';
 import Stats from '../vendor/stats/Stats.js';
 import { NET_MUJOCO, NetClient, loadRender, worldData, worldModel } from './net.js';
 import { dataUrl, problem, server, shareUrl } from './endpoint.js';
-import { BrowserStages, LibraryStages, STAGE_VERSION, ServerStages, StageList, applyState, askPublish, blobToDataUrl, captureState, downloadBundle, newId, pickBundle, setView, viewOf } from './stage.js';
+import { BrowserStages, LibraryStages, STAGE_VERSION, ServerStages, StageList, applyState, askStage, blobToDataUrl, captureState, downloadBundle, newId, pickBundle, setView, viewOf, withParts } from './stage.js';
 import { RemoteBase, RemoteIk, RemotePolicy } from './remote.js';
 
 // Filament.init() replaces the global with the loaded module, so re-read it after init.
@@ -2394,10 +2394,10 @@ try {
   // Save: into this browser (My stages), in either mode.
   async function saveStage() {
     if (!robots.length) { status.textContent = 'nothing spawned to save'; return; }
-    const name = prompt('Name of the stage:', defaultName());
-    if (name == null) return;
+    const asked = await askStage(defaultName());
+    if (!asked) return;
     try {
-      const bundle = await sceneBundle(name.trim() || 'Stage');
+      const bundle = withParts(await sceneBundle(asked.name), asked.parts);
       await browserStages.put(bundle);
       if (!app.net) setStartStage(bundle.stage.id);
       status.textContent = `stage "${bundle.stage.name}" saved in this browser (${robots.length} items) · ${hint()}`;
@@ -2411,10 +2411,10 @@ try {
   // the server's Community stages, which the server commits to the library.
   async function publishStage(e = null) {
     if (!e && !robots.length) { status.textContent = 'nothing spawned to publish'; return; }
-    const asked = await askPublish(e ? e.name : defaultName());
+    const asked = await askStage(e ? e.name : defaultName(), { publish: true });
     if (!asked) return;
     try {
-      const bundle = e ? await e.store.get(e.id) : await sceneBundle(asked.name);
+      const bundle = withParts(e ? await e.store.get(e.id) : await sceneBundle(asked.name), asked.parts);
       bundle.stage = { ...bundle.stage, name: asked.name };
       const out = await community.publish(bundle, asked.author);
       status.textContent = `stage "${asked.name}" published${out.commit ? ` (commit ${out.commit.slice(0, 8)})` : `, not committed: ${out.commit_error}`} · ${hint()}`;

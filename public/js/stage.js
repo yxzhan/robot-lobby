@@ -16,6 +16,9 @@
 // actuator or body of the robot when it has no name). `view` is the orbit
 // camera ({center, dist, azim, elev}). Automatic controller and camera
 // setups are left out: they are found again from the model.
+// Save and Publish ask which parts to keep (STAGE_PARTS: joint state,
+// controllers on, IK and base setups, cameras, physics, view); the others
+// are left out of the bundle (withParts), and a stage loads without them.
 //
 // Where stages are kept, as the Stage panel lists them:
 // - Mine: in this browser, in either mode (Save, Import): IndexedDB, one
@@ -244,34 +247,82 @@ export class ServerStages {
 
 const AUTHOR_KEY = 'mujoco-filament/author';  // localStorage: {name, email} last published with
 
-// Asks what to publish a stage as: {name, author: {name, email}}, or null
-// (cancelled). The author is remembered for next time.
-export function askPublish(name) {
-  let saved = {};
+const PARTS_KEY = 'mujoco-filament/stage-parts';  // localStorage: the parts last chosen, {key: bool}
+
+// What a stage may keep besides its models and where they stand, as the
+// Save and Publish dialogs offer it: [key, label, tooltip]. A stage without
+// a part loads without it: the physics settings, the view, the camera and
+// controller setups stay as they are or come from the model, the models
+// stand in their spawn pose.
+export const STAGE_PARTS = [
+  ['state', 'Joint state', 'joint positions, actuator controls and mocap bodies as they are now (else the models\' spawn pose)'],
+  ['use', 'Controllers on', 'which controllers are switched on (policy, IK, mobile base)'],
+  ['ik', 'IK and base setups', 'IK chains and mobile base setups edited in the Teleop panel'],
+  ['cameras', 'Cameras', 'camera setups and which robot cameras are switched on'],
+  ['physics', 'Physics', 'the Physics panel settings'],
+  ['view', 'View', 'the main camera\'s orbit'],
+];
+
+// A bundle without the parts `parts` leaves out ({key: false}).
+export function withParts(bundle, parts) {
+  const off = (k) => parts[k] === false, stage = { ...bundle.stage }, files = { ...bundle.files };
+  if (off('physics')) delete stage.physics;
+  if (off('view')) delete stage.view;
+  if (off('ik')) { delete files['ik.json']; delete files['base.json']; }
+  if (off('cameras')) delete files['cameras.json'];
+  stage.items = (stage.items ?? []).map((it) => {
+    it = { ...it };
+    if (off('state')) delete it.state;
+    if (off('use')) delete it.use;
+    if (off('cameras')) delete it.cameras;
+    return it;
+  });
+  return { ...bundle, stage, files };
+}
+
+// Asks what to save or publish a stage as (`publish`: with an author):
+// {name, parts: {key: bool}, author: {name, email}}, or null (cancelled).
+// The author and the parts are remembered for next time.
+export function askStage(name, { publish = false } = {}) {
+  let saved = {}, parts = {};
   try { saved = JSON.parse(localStorage.getItem(AUTHOR_KEY)) ?? {}; } catch { /* none */ }
+  try { parts = JSON.parse(localStorage.getItem(PARTS_KEY)) ?? {}; } catch { /* none */ }
   const dlg = document.createElement('dialog');
   dlg.className = 'publish';
   dlg.innerHTML = `<form method="dialog">
-    <h3>Publish stage</h3>
+    <h3>${publish ? 'Publish' : 'Save'} stage</h3>
     <label>Name <input name="name" required maxlength="200"></label>
-    <label>Author <input name="author" maxlength="100" placeholder="optional" autocomplete="name"></label>
-    <label>Email <input name="email" type="email" maxlength="200" placeholder="optional" autocomplete="email"></label>
-    <p class="hint">Published stages are listed for everyone on this server (Community) and committed to the
-    model library's public git repository, with this name and email as its author.</p>
-    <div class="buttons"><button value="cancel" formnovalidate>Cancel</button><button value="ok" class="primary">Publish</button></div>
+    ${publish ? `<label>Author <input name="author" maxlength="100" placeholder="optional" autocomplete="name"></label>
+    <label>Email <input name="email" type="email" maxlength="200" placeholder="optional" autocomplete="email"></label>` : ''}
+    <fieldset class="parts"><legend>Keep, besides the models and where they stand</legend>
+      ${STAGE_PARTS.map(([k, label, title]) => `<label title="${title}"><input type="checkbox" name="part-${k}"> ${label}</label>`).join('')}
+    </fieldset>
+    <p class="hint">${publish
+      ? `Published stages are listed for everyone on this server (Community) and committed to the
+    model library's public git repository, with this name and email as its author.`
+      : 'Saved in this browser (My stages). What is left out stays as it is when the stage is loaded.'}</p>
+    <div class="buttons"><button value="cancel" formnovalidate>Cancel</button><button value="ok" class="primary">${publish ? 'Publish' : 'Save'}</button></div>
   </form>`;
   const f = dlg.querySelector('form').elements;
   f.name.value = name ?? '';
-  f.author.value = saved.name ?? '';
-  f.email.value = saved.email ?? '';
+  if (publish) {
+    f.author.value = saved.name ?? '';
+    f.email.value = saved.email ?? '';
+  }
+  for (const [k] of STAGE_PARTS) f[`part-${k}`].checked = parts[k] !== false;
   document.body.append(dlg);
   return new Promise((resolve) => {
     dlg.onclose = () => {
       dlg.remove();
       if (dlg.returnValue !== 'ok') { resolve(null); return; }
-      const author = { name: f.author.value.trim(), email: f.email.value.trim() };
-      try { localStorage.setItem(AUTHOR_KEY, JSON.stringify(author)); } catch { /* no storage */ }
-      resolve({ name: f.name.value.trim() || 'Stage', author });
+      const chosen = Object.fromEntries(STAGE_PARTS.map(([k]) => [k, f[`part-${k}`].checked]));
+      try { localStorage.setItem(PARTS_KEY, JSON.stringify(chosen)); } catch { /* no storage */ }
+      let author = null;
+      if (publish) {
+        author = { name: f.author.value.trim(), email: f.email.value.trim() };
+        try { localStorage.setItem(AUTHOR_KEY, JSON.stringify(author)); } catch { /* no storage */ }
+      }
+      resolve({ name: f.name.value.trim() || 'Stage', parts: chosen, author });
     };
     dlg.showModal();
   });

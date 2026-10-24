@@ -42,12 +42,16 @@ pose); a fixed base (an arm, an environment) is placed by its attach frame,
 heading only, so the world is rebuilt with its state kept and its mocap
 bodies carried along.
 
-**Stages** (`public/js/stage.js`): Save asks for a name and saves
-what is spawned as a new stage: each item's spawn pose, joint positions,
+**Stages** (`public/js/stage.js`): Save asks for a name and which parts
+to keep, and saves what is spawned as a new stage: each item's spawn pose, joint positions,
 actuator controls and mocap bodies (by name, so a changed model loads what
 still matches), the controllers switched on with their IK and base setups,
 the camera setups and which cameras are on, the Physics panel's physics, the
-view, and a 256×256 picture of it. A stage is a folder named by a random id
+view, and a 256×256 picture of it. Each of joint state, controllers on,
+IK and base setups, cameras, physics and view can be left out (the dialog
+remembers the choice; Publish asks the same): a stage loads without them,
+leaving the physics, the view and the setups as they are and the models in
+their spawn pose. A stage is a folder named by a random id
 (the name is inside, so names may repeat): `stage.json`, `thumbnail.jpg`,
 `ik.json`, `base.json`, `cameras.json` (keyed like `ik_defaults.json`,
 `base_defaults.json`, `camera_defaults.json`). Saved stages are **My
