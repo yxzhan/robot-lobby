@@ -552,8 +552,10 @@ class IkController:
     self.set_gripper(chain, data, 0.0 if abs(data.ctrl[g['a']] - g['closed']) < abs(data.ctrl[g['a']] - g['open']) else 1.0)
 
   def set_gripper(self, chain, data, t):
-    for g in chain['gripper']:
-      data.ctrl[g['a']] = g['open'] + t * (g['closed'] - g['open'])
+    """0 open, 1 closed; or a list, each actuator its own way (a hand's fingers)."""
+    for i, g in enumerate(chain['gripper']):
+      k = (t[i] if i < len(t) else 0.0) if isinstance(t, (list, tuple)) else t
+      data.ctrl[g['a']] = g['open'] + k * (g['closed'] - g['open'])
 
   # -- solving --------------------------------------------------------------
 

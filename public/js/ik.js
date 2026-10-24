@@ -608,9 +608,13 @@ export class IkController {
     this.setGripper(chain, data, Math.abs(data.ctrl[g.a] - g.closed) < Math.abs(data.ctrl[g.a] - g.open) ? 0 : 1);
   }
 
-  // Sets the gripper part way: 0 open, 1 closed.
+  // Sets the gripper part way: 0 open, 1 closed; or each actuator its own
+  // way (t an array, by gripper entry: a hand's fingers).
   setGripper(chain, data, t) {
-    for (const { a, open, closed } of chain.gripper ?? []) data.ctrl[a] = open + t * (closed - open);
+    (chain.gripper ?? []).forEach(({ a, open, closed }, i) => {
+      const k = Array.isArray(t) ? t[i] ?? 0 : t;
+      data.ctrl[a] = open + k * (closed - open);
+    });
   }
 
   // One control tick: every chain one DLS step towards its target.

@@ -26,7 +26,8 @@ Protocol (client -> server, JSON {op, ...}; `rid` asks for a reply):
   goal {goal: {x, y, yaw} or null} (the robot drives there: goal.py)
   ik_config {config}   ik_target {chain, pos, rot} (in the chain's ref body
   frame)   ik_reset_target {chain or null}   ik_gripper {chain, amount?}
-  (amount: 0 open … 1 closed; none: toggle)   ik_save   ik_defaults
+  (amount: 0 open … 1 closed, or a list of them by gripper actuator; none:
+  toggle)   ik_save   ik_defaults
   base_config {config}   base_save   base_defaults
   stage_load {id} or {bundle}   a published stage, or one the page has,
                     replaces the world (for everyone)
@@ -1011,7 +1012,9 @@ class World:
         if msg.get('amount') is None:
           ik.toggle_gripper(c, d)
         else:
-          ik.set_gripper(c, d, min(1.0, max(0.0, float(msg['amount']))))
+          a = msg['amount']
+          clamp = lambda v: min(1.0, max(0.0, float(v)))
+          ik.set_gripper(c, d, [clamp(v) for v in a] if isinstance(a, list) else clamp(a))
         self.dirty = True
       return
     elif op in ('ik_save', 'base_save'):

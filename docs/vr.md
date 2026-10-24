@@ -40,21 +40,33 @@ ends on the menu, the IK marker or the floor it meets:
 
 **Hand tracking** (Quest 3 and others with WebXR Hand Input; the session
 asks for `hand-tracking`, optionally): put the controllers down and your
-hands take their place, each pointing the same kind of ray, its skeleton
+hands take their place (a hand still holding a controller is that
+controller: its gestures are not read), each pointing the same kind of ray, its skeleton
 (25 joints and the bones between them) drawn in its color. The gestures stand for the buttons above:
 
 - **Pinch** (thumb and index tips together) is the **trigger**, as far as
   they are close: rows of the menu, the gripper of a marker under the ray,
   the goal marker, selecting a robot.
-- **Fist** (middle, ring and little fingers curled) is the **grip**: it
-  holds the IK marker reached by hand or with the ray, and pinching with
-  the index left free closes that arm's gripper. On no marker the fist is
-  **A**: it pulls the body under the ray.
+- **Palm on a marker**: hold the middle of your palm (between the wrist
+  and the middle finger's knuckle) within 5 cm of an IK marker's center
+  for 3 s (it lights up meanwhile) and it sticks to your palm, following
+  it as a held grip does. The robot's fingers then follow yours: each
+  actuator of that chain's gripper goes with a finger by its name (thumb,
+  index, middle, ring, pinky / little) and closes as far as your finger is
+  curled (the angles between its bones added up; one on no named finger
+  as the hand is on average). A gripper with no named fingers (Panda's)
+  closes as far as you pinch. If the headset loses track of the hand, the
+  marker stays stuck where it is and is taken up again from wherever the
+  hand comes back.
+- **Palm up, all five fingers straight, held still** (within 3 cm) for
+  3 s lets go of the marker that hand is stuck to. While any hand is stuck
+  to a marker, this is the only gesture (the other hand can still stick to
+  another marker by holding its palm on it).
+- **Right hand pointing** (index straight, middle, ring and little fingers
+  curled in) aims a **teleport**: the ray's spot on the floor shows where
+  (the spawn marker). Open the hand all the way and you are there; curl it
+  into a full fist instead to call it off.
 - **Left pinch with the palm towards you**, held 0.4 s, opens or closes the
   **menu** (Y).
-- **Right pinch with the palm up** aims a **teleport**: the ray's spot on
-  the floor shows where (the spawn marker); let go of the pinch and you are
-  there. Turn the palm up before pinching: what a pinch does (menu,
-  teleport or trigger) is chosen as it starts.
-- Otherwise there are no sticks: walking the robot and snap turns stay on
-  the controllers.
+- Otherwise there are no sticks and no pulling bodies: walking the robot,
+  snap turns and pulling stay on the controllers.
