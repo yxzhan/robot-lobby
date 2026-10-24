@@ -411,9 +411,10 @@ class BamServos:
   """XL330 servos as BAM models them (see public/js/microduck.js): the firmware's
   P loop gives a duty cycle, the DC motor a torque, and the M6 friction budget
   goes into the joints' friction loss and damping, where MuJoCo's solver
-  applies it. update() runs before every physics step. join() makes one bank
-  of the servos of several robots, updated with the same numpy calls as one
-  robot's: those calls, not their sizes, are what a step costs."""
+  applies it. update() runs before every physics step, as one function
+  compiled with numba (_bam_update): in numpy, the calls' own overhead
+  (some 0.5 µs each, whatever the size) cost more than the physics step of
+  a microduck. join() makes one bank of the servos of several robots."""
 
   def __init__(self, p, model, acts, dofs, qadr, sizes=None):
     self.p, self.model, self.acts, self.dofs, self.qadr = p, model, acts, dofs, qadr
@@ -422,6 +423,9 @@ class BamServos:
     self.robot = np.repeat(np.arange(len(self.sizes)), self.sizes)
     self.target = np.zeros(len(acts))
     self.prev = np.zeros(len(acts))  # last motor torques: the battery sag (per robot)
+    self.consts = np.array([{**p, 'gain': p['kp'] * p['error_gain'], 'max_current': p.get('max_current') or 0}[k]
+                            for k in BAM_CONSTS], float)
+    self.data = None  # the data the views below are of (bind)
 
   @staticmethod
   def join(banks):
@@ -439,34 +443,74 @@ class BamServos:
       b.target, b.prev = self.target[at:at + n].copy(), self.prev[at:at + n].copy()
       at += n
 
+  def bind(self, data):
+    """The views update() works on, of `data` and the model. The damping is
+    a constant: set here, once."""
+    m, d = self.model, self.dofs
+    self.data = data
+    self.v = (data.qpos, data.qvel, data.ctrl, data.qfrc_bias, data.qfrc_constraint, data.qfrc_actuator,
+              m.dof_frictionloss)
+    m.dof_damping[d] = self.p['friction_viscous']
+
   def update(self, data):
-    p, d = self.p, self.dofs
-    q, dq = data.qpos[self.qadr], data.qvel[d]
-    sag = np.add.reduceat(np.abs(self.prev), self.starts)[self.robot]
-    vin = np.maximum(p['vin'] - p['vin_drop_gain'] * sag, p['vin_min'])
-    duty = (self.target - q) * p['kp'] * p['error_gain']
-    if p.get('max_current'):  # the firmware's current limit, a window on the duty cycle
-      center, span = p['kt'] * dq / vin, p['R'] * p['max_current'] / vin
-      duty = np.clip(duty, center - span, center + span)
-    duty = np.clip(duty, -p['max_pwm'], p['max_pwm'])
-    tau = p['kt'] * vin * duty / p['R'] - p['kt'] ** 2 * dq / p['R']
-    data.ctrl[self.acts] = tau
-    self.prev = tau
-    # The load on the gearbox: bias and constraint forces without our own joint friction.
-    fric = np.zeros(self.model.nv)
-    n = data.nefc
-    rows = data.efc_type[:n] == FRICTION_DOF
-    np.add.at(fric, data.efc_id[:n][rows], data.efc_force[:n][rows])
-    ext = -data.qfrc_bias[d] + data.qfrc_constraint[d] - fric[d]
-    mot = data.qfrc_actuator[d]  # applied on the last step
-    s = np.exp(-(np.abs(dq) / p['dtheta_stribeck']) ** p['alpha'])
-    loss = (p['friction_base'] + s * p['friction_stribeck']
-            + np.abs(ext * p['load_friction_external'] - mot * p['load_friction_motor'])
-            + s * np.abs(ext * p['load_friction_external_stribeck'] - mot * p['load_friction_motor_stribeck']))
-    drive = np.abs(mot) > np.abs(ext)
-    loss += s * np.where(drive, p['load_friction_external_quad'] * ext ** 2, p['load_friction_motor_quad'] * mot ** 2)
-    self.model.dof_frictionloss[d] = loss
-    self.model.dof_damping[d] = p['friction_viscous']
+    if data is not self.data:
+      self.bind(data)
+    self.prev = _bam_update(self.consts, *self.v, self.qadr, self.dofs, self.acts, self.target, self.prev,
+                            self.starts, self.robot, data.efc_type, data.efc_id, data.efc_force, FRICTION_DOF)
+
+
+# BamServos.consts, in this order.
+BAM_CONSTS = ['kt', 'R', 'vin', 'vin_drop_gain', 'vin_min', 'gain',  # gain: kp error_gain
+              'max_pwm', 'max_current',
+              'dtheta_stribeck', 'alpha', 'friction_base', 'friction_stribeck',
+              'load_friction_external', 'load_friction_motor', 'load_friction_external_stribeck',
+              'load_friction_motor_stribeck', 'load_friction_external_quad', 'load_friction_motor_quad']
+
+
+def _bam_kernel(c, qpos, qvel, ctrl, bias, cons, act, loss_out, qadr, dofs, acts, target, prev, starts, robot,
+                efc_type, efc_id, efc_force, friction_dof):
+  """BamServos.update, compiled by numba (without it, as Python: slower, but
+  the same): returns the new motor torques."""
+  (kt, R, vin0, drop, vin_min, gain, max_pwm, max_current, dth, alpha,
+   fb, fs, lfe, lfm, lfes, lfms, lfeq, lfmq) = (c[0], c[1], c[2], c[3], c[4], c[5], c[6], c[7], c[8], c[9],
+                                               c[10], c[11], c[12], c[13], c[14], c[15], c[16], c[17])
+  n = len(acts)
+  sag = np.zeros(len(starts))
+  for i in range(n):
+    sag[robot[i]] += abs(prev[i])
+  # Our own joint friction, by dof.
+  fric = np.zeros(len(qvel))
+  for r in range(len(efc_type)):
+    if efc_type[r] == friction_dof:
+      fric[efc_id[r]] += efc_force[r]
+  tau = np.empty(n)
+  for i in range(n):
+    d = dofs[i]
+    q, dq = qpos[qadr[i]], qvel[d]
+    vin = max(vin0 - drop * sag[robot[i]], vin_min)
+    duty = (target[i] - q) * gain
+    if max_current:
+      center, span = kt * dq / vin, R * max_current / vin
+      duty = min(max(duty, center - span), center + span)
+    duty = min(max(duty, -max_pwm), max_pwm)
+    t = (kt / R) * (vin * duty - kt * dq)
+    ctrl[acts[i]] = t
+    tau[i] = t
+    ext = cons[d] - bias[d] - fric[d]
+    mot = act[d]
+    s = math.exp(-(abs(dq) / dth) ** alpha)
+    loss = (fb + s * fs + abs(ext * lfe - mot * lfm) + s * abs(ext * lfes - mot * lfms))
+    loss += s * (lfeq * ext * ext if abs(mot) > abs(ext) else lfmq * mot * mot)
+    loss_out[d] = loss
+  return tau
+
+
+try:
+  import numba
+  _bam_update = numba.njit(cache=True)(_bam_kernel)  # compiled on first use (~1 s), then cached in __pycache__
+except ImportError:
+  print('numba not installed: the Microduck servos run as Python, slower')
+  _bam_update = _bam_kernel
 
 
 class Substeps:

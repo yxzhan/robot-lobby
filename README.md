@@ -57,7 +57,7 @@ URLs are relative, so the path proxy works).
 A world shared by every browser that opens it (the physics in Python):
 
 ```sh
-pip install mujoco numpy aiohttp onnxruntime
+pip install mujoco numpy aiohttp onnxruntime numba
 npm run server   # python3 server/server.py 4007
 ```
 

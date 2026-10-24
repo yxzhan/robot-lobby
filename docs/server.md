@@ -1,7 +1,7 @@
 # Shared world (Python server)
 
 ```sh
-pip install mujoco numpy aiohttp onnxruntime
+pip install mujoco numpy aiohttp onnxruntime numba
 npm run server   # python3 server/server.py 4007
 ```
 

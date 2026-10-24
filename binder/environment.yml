@@ -13,5 +13,6 @@ dependencies:
       - numpy
       - aiohttp
       - onnxruntime
+      - numba
       - pillow
       - jupyter-server-proxy
