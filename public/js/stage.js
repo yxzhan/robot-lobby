@@ -390,8 +390,8 @@ export class StageList {
       info.className = 'info';
       const name = Object.assign(document.createElement('div'), { className: 'name', textContent: e.name || '(unnamed)', title: `${e.name} · ${e.id}` });
       const when = e.saved ? new Date(e.saved).toLocaleString([], { year: 'numeric', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
-      const meta = Object.assign(document.createElement('div'), { className: 'meta',
-        textContent: `${e.count} item${e.count === 1 ? '' : 's'} · ${when}${e.author ? ` · by ${e.author}` : ''}` });
+      const metaText = `${e.count} item${e.count === 1 ? '' : 's'} · ${when}${e.author ? ` · by ${e.author}` : ''}`;
+      const meta = Object.assign(document.createElement('div'), { className: 'meta', textContent: metaText, title: metaText });
       const buttons = document.createElement('div');
       buttons.className = 'buttons';
       const button = (text, title, fn) => {
