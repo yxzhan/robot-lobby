@@ -8,8 +8,10 @@ that axis, the center ball (colored by chain) to move it in the plane
 facing the camera. Axes are the target's own (red x, green y, blue z); the
 part under the pointer turns yellow, and the camera does not move while a
 marker is held. **G** opens or closes the gripper of the chain dragged
-last; so does a **right-click** on a marker, or the right button pressed
-while the left one drags it (a right-click there does not pan the camera). Until a marker moves, a chain just holds its joints where they are.
+last. With the pointer over a marker (no button needed; while dragging it
+too), the **mouse wheel** closes its gripper (towards you) or opens it
+(away), 5 % a notch (1 % with Shift), from where it is, with a label by the
+pointer; the camera zooms only elsewhere. Until a marker moves, a chain just holds its joints where they are.
 
 A chain is only `{root, tip}`, plus the tip frame: a site rigidly attached
 to the tip body (a TCP) or the body moved by an offset (Franka's 0.1034 m):
@@ -56,10 +58,10 @@ another joint: else it is likely a wrist). Which end of its range closes is
 worked out from the model: with its joints at that end, the geoms below the
 tip lie closer together (fingers meet, or curl into the palm). So TIAGo's
 two finger servos, Talos's gripper and G1's seven hand actuators per hand
-are found as well as single-actuator grippers. G and a right-click toggle
+are found as well as single-actuator grippers. G toggles
 all of a gripper's actuators together (closed:
-its first one nearer its closed ctrl); the panel's **Closed** slider and a
-VR trigger set it part way.
+its first one nearer its closed ctrl); the panel's **Closed** slider, the
+wheel over the marker and a VR trigger set it part way.
 Examples: Panda `link1 → hand` (gripper
 `actuator8`), UR5e `shoulder_link → wrist_3_link`, ALOHA and TIAGo dual
 both arms, Apollo arms, legs and neck, Spot four legs, G1 both arms (legs

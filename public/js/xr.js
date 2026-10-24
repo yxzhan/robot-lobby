@@ -15,7 +15,7 @@
 //   trigger         while the same hand holds a marker: closes that chain's
 //                   gripper as far as it is pressed (let go: open), once
 //                   pressed at all during the hold; on a marker under the
-//                   ray: opens or closes its gripper (like a right-click); held on the
+//                   ray: opens or closes its gripper (like G); held on the
 //                   goal marker: drags it over the floor like the mouse, the
 //                   same hand's stick sideways turning it; on a robot:
 //                   selects it and drives it (like a double-click), on

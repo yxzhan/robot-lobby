@@ -237,12 +237,18 @@ export class TeleopPanel {
     try { this.mode = ['keyboard', 'gamepad'].find((m) => m === localStorage.getItem(INPUT)) ?? 'goal'; } catch { this.mode = 'goal'; }
     this.goalReadout = null;
     // While the goal marker is dragged, the wheel and Q/E turn it and Esc puts
-    // it back (capture phase: before the camera zoom and the drive keys).
+    // it back; over an IK marker, or while dragging one, the wheel opens and
+    // closes its gripper (capture phase: before the camera zoom and the drive
+    // keys).
     window.addEventListener('wheel', (e) => {
-      if (!this.dragging?.goal) return;
+      const d = this.dragging;
+      const index = d ? d.index
+        : e.target === this.app.canvas && !e.buttons ? this.pick(this.app.pointerRay(e.clientX, e.clientY))?.index : null;
+      if (!d && !this.active.ik.chains[index]?.gripper?.length) return;  // none, or no gripper: the camera zooms
       e.preventDefault();
       e.stopImmediatePropagation();
-      this.turnGoal(Math.sign(e.deltaY || e.deltaX) * GOAL_TURN);
+      if (d?.goal) this.turnGoal(Math.sign(e.deltaY || e.deltaX) * GOAL_TURN);
+      else this.wheelGripper(e, index);
     }, { capture: true, passive: false });
     window.addEventListener('keydown', (e) => {
       if (!this.dragging?.goal) return;
@@ -368,18 +374,45 @@ export class TeleopPanel {
     return best;
   }
 
-  // Right button on an arm's marker, or pressed while dragging one (the left
-  // button held): opens or closes that chain's gripper, like G. False if no
-  // marker is concerned.
-  gripperClick(ray) {
-    const ik = this.active?.use?.ik && this.active.ik;
-    if (!ik?.enabled) return false;
-    const index = this.dragging?.chain ? this.dragging.index : this.pick(ray)?.index;
-    const chain = index != null && ik.chains[index];
-    if (!chain) return false;
+  // The wheel over an IK marker, or while dragging one: closes (towards you)
+  // or opens (away) the chain `index`'s gripper, 5 % a notch, 1 % with Shift,
+  // from where it is; a label by the pointer shows how far closed, gone a
+  // second after the last notch.
+  wheelGripper(e, index) {
+    const ik = this.active?.ik, chain = ik?.chains[index], g = chain?.gripper?.[0];
+    if (!g || g.closed === g.open) return;
     ik.focus = index;
-    ik.toggleGripper(chain, this.app.data);
-    return true;
+    let w = this.wheelGrip;
+    if (w?.chain !== chain) {
+      this.endWheelGrip();
+      w = this.wheelGrip = { chain, grip: null, ghost: null, timer: 0 };
+    }
+    const notches = (e.deltaY || e.deltaX) * (e.deltaMode === 1 ? 1 / 3 : 1 / 100);  // lines (3 a notch) or pixels (100)
+    // Kept while the wheel turns, not read back: in network mode the ctrl comes back late.
+    w.grip ??= (this.app.data.ctrl[g.a] - g.open) / (g.closed - g.open);
+    w.grip = Math.min(1, Math.max(0, w.grip + notches * (e.shiftKey ? 0.01 : 0.05)));
+    ik.setGripper(chain, this.app.data, w.grip);
+    for (const grip of this.grips) {  // the panel's slider, left alone while the server's ctrl catches up
+      if (grip.chain !== chain) continue;
+      grip.until = performance.now() + 600;
+      grip.slider.value = w.grip;
+      grip.label.textContent = `${Math.round(w.grip * 100)}%`;
+    }
+    clearTimeout(w.timer);
+    w.timer = setTimeout(() => this.endWheelGrip(), 1000);
+    if (this.app.xr) return;  // (no label on the page in VR)
+    if (!w.ghost) {
+      w.ghost = el('div', { className: 'drag-ghost placing' }, el('div', { textContent: `gripper · ${chain.cfg.name}` }), el('div', { className: 'readout' }));
+      document.body.append(w.ghost);
+    }
+    w.ghost.style.transform = `translate(${e.clientX + 14}px, ${e.clientY + 10}px)`;
+    w.ghost.lastChild.textContent = `${Math.round(w.grip * 100)}% closed`;
+  }
+
+  endWheelGrip() {
+    clearTimeout(this.wheelGrip?.timer);
+    this.wheelGrip?.ghost?.remove();
+    this.wheelGrip = null;
   }
 
   // Pointer moved with no button down: highlights the part under it.
@@ -533,6 +566,8 @@ export class TeleopPanel {
       return;
     }
     if (!g || !this.active?.ik) return;
+    const label = this.wheelGrip?.ghost;  // the gripper's (wheelGripper): along
+    if (label && at) label.style.transform = `translate(${at[0] + 14}px, ${at[1] + 10}px)`;
     const pose = dragPose(g, ray);
     if (pose) this.active.ik.setTargetPose(g.chain, this.app.data, pose);
   }
@@ -993,7 +1028,7 @@ export class TeleopPanel {
     const hint = el('div', { className: 'hint' });
     hint.innerHTML = ik.chains.length
       ? 'Drag a marker: arrows move along an axis, rings turn about it, the ball moves in the view plane · '
-        + '<kbd>G</kbd> or a right-click (on a marker, or while dragging it) opens/closes its gripper'
+        + '<kbd>G</kbd> opens/closes its gripper; the wheel over the marker closes (towards you) or opens it bit by bit (<kbd>Shift</kbd>: finer)'
         + (gamepad() ? `; the gamepad's ${['gripper1', 'gripper2'].map((a) => bindingName(this.input.padMap.map[a]) || 'none').join(' / ')}`
           + ' close the first / second chain\'s as far as pressed (Input → Gamepad)' : '')
         + '. Pick bodies for tip/root by double-clicking them, then ◎.'
@@ -1102,8 +1137,8 @@ export class TeleopPanel {
     row('Gripper', add,
       this.button('Auto', 'Find the gripper actuators below the tip, and which way each closes', () => { cfg.gripper = 'auto'; changed(cfg, true); }));
     if (chain.gripper?.length) {
-      // How far closed: 0 open … 1 closed (G or a right-click on the marker toggles it).
-      const slider = el('input', { type: 'range', min: 0, max: 1, step: 0.01, title: 'How far the gripper is closed (G, or a right-click on the marker, toggles it)' });
+      // How far closed: 0 open … 1 closed (G toggles it, the wheel over the marker sets it).
+      const slider = el('input', { type: 'range', min: 0, max: 1, step: 0.01, title: 'How far the gripper is closed (G toggles it; the wheel over the marker sets it)' });
       const label = el('span', { className: 'closure' }), grip = { chain, slider, label, until: 0 };
       slider.oninput = () => {
         grip.until = performance.now() + 600;  // (network mode: until the server's ctrl has caught up)

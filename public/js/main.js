@@ -2719,15 +2719,9 @@ try {
   // On a touch screen: double tap, and press and hold on a body, then drag.
   const canvas = document.getElementById('canvas');
   let dragging = false;
-  // Dragging an IK marker (Teleop panel) moves it instead of the camera; a
-  // right-click on one toggles its gripper (below) instead of panning.
-  app.orbit.intercept = (e) => (e.button === 0 && app.teleop.grab(app.pointerRay(e.clientX, e.clientY), [e.clientX, e.clientY]))
-    || (e.button === 2 && !!app.teleop.pick(app.pointerRay(e.clientX, e.clientY)));
-  // mousedown, not pointerdown: a second button pressed during a drag (the
-  // right one while the left drags a marker) only makes a pointermove.
-  canvas.addEventListener('mousedown', (e) => {
-    if (e.button === 2) app.teleop.gripperClick(app.pointerRay(e.clientX, e.clientY));
-  });
+  // Dragging an IK marker (Teleop panel) moves it instead of the camera (the
+  // wheel over one opens and closes its gripper: teleop.js).
+  app.orbit.intercept = (e) => e.button === 0 && app.teleop.grab(app.pointerRay(e.clientX, e.clientY), [e.clientX, e.clientY]);
   app.orbit.busy = () => dragging || !!app.teleop.dragging;
   const fingers = new Map();  // pointerId -> [x, y] on the canvas (touch only)
   let hold = null;            // {timer, id, x, y}: a finger that may become a long press

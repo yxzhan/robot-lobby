@@ -34,7 +34,7 @@
 //
 // A chain's gripper is a list of actuators, each with the ctrl that opens
 // and the ctrl that closes it ({actuator, open, closed}); toggled together
-// (G, right-click), or set part way (setGripper). An older config's single
+// (G), or set part way (setGripper: the wheel over a marker). An older config's single
 // actuator name opens at the top of its ctrlrange (as the Franka hand).
 
 import { CONTROL_DT } from './groot.js';
