@@ -1810,7 +1810,6 @@ try {
     onSave: () => saveStage(),
     onPublish: server ? () => publishStage() : null,
     onImport: () => importStage(),
-    onForget: () => { setStartStage(null); refreshStages(); status.textContent = `the next page load starts from an empty floor · ${hint()}`; },
   });
   app.teleop = new TeleopPanel(app, document.getElementById('teleop'));
   app.physics = loadPhysics();  // Physics panel settings (physics.js)
@@ -2277,20 +2276,12 @@ try {
   // Stages (stage.js): saved in this browser (My stages) in either mode,
   // published on a server for everyone on it (Community; in local mode the
   // library's), and loaded, downloaded and imported alike; community ones
-  // are linked to. In local mode the stage last saved or loaded is loaded
-  // again at the next page load (Forget: an empty floor). ?stage=<id> opens
-  // a stage.
-  const START_KEY = 'mujoco-filament/stage-start';  // localStorage: the stage loaded at start
+  // are linked to. A page load starts from an empty floor; ?stage=<id>
+  // opens a stage.
   const OLD_STAGE_KEY = 'mujoco-filament/stage';    // localStorage: the one stage of before (migrated)
   const browserStages = new BrowserStages();
   const community = server ? new ServerStages() : new LibraryStages();
   const stores = [browserStages, community];
-  const startStage = () => {
-    try { return localStorage.getItem(START_KEY); } catch { return null; }
-  };
-  const setStartStage = (id) => {
-    try { if (id) localStorage.setItem(START_KEY, id); else localStorage.removeItem(START_KEY); } catch { /* no storage */ }
-  };
   const stageLink = (id) => {
     const u = new URL(shareUrl());
     u.hash = '';
@@ -2307,7 +2298,6 @@ try {
       if (!confirm(`Delete the stage "${e.name}" from this browser?`)) return;
       try {
         await e.store.remove(e.id);
-        if (startStage() === e.id) setStartStage(null);
       } catch (err) {
         status.textContent = `could not delete the stage: ${err.message ?? err}`;
       }
@@ -2322,14 +2312,8 @@ try {
   const newest = (list) => list.sort((a, b) => String(b.saved ?? '').localeCompare(String(a.saved ?? '')));
   async function refreshStages() {
     const [mine, theirs] = await Promise.all(stores.map((s) => s.list().catch((err) => { console.warn(`stages (${s.where}):`, err); return []; })));
-    const start = server ? null : startStage();
-    for (const [list, entries] of [[myList, mine], [communityList, theirs]]) {
-      list.start = start;
-      list.show(newest(entries));
-    }
-    const entries = [...mine, ...theirs];
-    app.panel.showStart(server ? undefined : entries.find((e) => e.id === start)?.name ?? null);
-    return entries;
+    for (const [list, entries] of [[myList, mine], [communityList, theirs]]) list.show(newest(entries));
+    return [...mine, ...theirs];
   }
   async function findStage(id) {
     for (const store of stores) {
@@ -2399,7 +2383,6 @@ try {
     try {
       const bundle = withParts(await sceneBundle(asked.name), asked.parts);
       await browserStages.put(bundle);
-      if (!app.net) setStartStage(bundle.stage.id);
       status.textContent = `stage "${bundle.stage.name}" saved in this browser (${robots.length} items) · ${hint()}`;
     } catch (err) {
       status.textContent = `could not save the stage: ${err.message ?? err}`;
@@ -2466,7 +2449,6 @@ try {
     busy = true;
     try {
       await loadStage(bundle);
-      setStartStage(e.id);
     } catch (err) {
       status.textContent = `could not load the stage: ${err.message ?? err}`;
       console.error(err);
@@ -2533,7 +2515,6 @@ try {
     const id = newId();
     await browserStages.put({ stage: { version: STAGE_VERSION, id, name: 'Saved stage', saved: old.saved, items: old.items }, files: {}, thumbnail: null });
     try { localStorage.removeItem(OLD_STAGE_KEY); } catch { /* no storage */ }
-    if (!startStage()) setStartStage(id);
   }
 
   // Network mode: a robot's controllers as the server runs them (the
@@ -2942,13 +2923,10 @@ try {
     await rebuild([]);
     status.textContent = problem ? `${problem}: running locally (Server panel)` : hint();
     await migrateOldStage().catch((err) => console.warn('old stage:', err));
-    // A linked stage, else the one loaded at start.
-    const asked = new URLSearchParams(location.search).get('stage'), id = asked ?? startStage();
-    const e = id && await findStage(id);
-    if (id && !e) {
-      if (asked) status.textContent = `no stage ${asked} here`;
-      else setStartStage(null);
-    }
+    // A linked stage (else an empty floor).
+    const asked = new URLSearchParams(location.search).get('stage');
+    const e = asked && await findStage(asked);
+    if (asked && !e) status.textContent = `no stage ${asked} here`;
     if (e) {
       busy = true;
       try {

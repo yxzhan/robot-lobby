@@ -295,8 +295,6 @@
     dialog.publish button.primary { background: #2f4a6a; border-color: #4d7aa8; }
     #stage .stage-bar button:hover:not(:disabled) { filter: brightness(1.2); }
     #stage .stage-bar button:disabled { opacity: .45; cursor: default; }
-    #stage .stage-bar .saved { flex: 1; text-align: right; color: #999; font-size: 11px;
-                               overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     #stage .stages { border-bottom: 1px solid #3a3d44; margin-bottom: 4px; }
     #stage .stages summary { font-size: 12px; color: #aaa; padding: 2px 0 4px; }
     #stage .stage-items { max-height: 260px; overflow: auto; padding-bottom: 4px; }
@@ -410,8 +408,6 @@
       <button class="save" title="Save what is spawned, its joints and controllers, the cameras and the view as a new stage, in this browser (My stages)">Save</button>
       <button class="publish" title="Publish what is spawned as a stage for everyone on this server (Community)">Publish</button>
       <button class="import" title="Add a stage from a downloaded stage file (My stages)">Import</button>
-      <span class="saved"></span>
-      <button class="forget" title="Start with an empty floor next time">Forget</button>
     </div>
     <div class="stages">
       <details class="mine" open>

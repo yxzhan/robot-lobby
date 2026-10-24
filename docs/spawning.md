@@ -72,9 +72,9 @@ loads a stage (it replaces what is spawned, in one compile, each item in
 its saved state, which Reset then goes back to; in a shared world for
 everyone: one of My stages is sent to the server whole) and downloads it as
 one `.stage.json` file, which **Import** adds to My stages; Community stages
-also copy a link (`?stage=<id>`), and My stages can be deleted. Local mode
-loads the stage last saved or loaded at the next page load (Forget starts
-from an empty floor again).
+also copy a link (`?stage=<id>`), and My stages can be deleted. A page
+load starts from an empty floor (in local mode; a server keeps its world),
+unless a link names a stage.
 Picking uses `mj_ray` on the physics world, so it hits collision geoms.
 
 - **Asset list** — the model library is `mjcf_assets/` next to
