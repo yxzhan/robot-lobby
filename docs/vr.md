@@ -37,3 +37,24 @@ ends on the menu, the IK marker or the floor it meets:
 - **Right stick** sideways turns you by 30° about where you stand; pushed
   forward it aims at the floor (the spawn marker shows where), and letting
   go puts you there. In AR this moves the scene in your room.
+
+**Hand tracking** (Quest 3 and others with WebXR Hand Input; the session
+asks for `hand-tracking`, optionally): put the controllers down and your
+hands take their place, each pointing the same kind of ray, its skeleton
+(25 joints and the bones between them) drawn in its color. The gestures stand for the buttons above:
+
+- **Pinch** (thumb and index tips together) is the **trigger**, as far as
+  they are close: rows of the menu, the gripper of a marker under the ray,
+  the goal marker, selecting a robot.
+- **Fist** (middle, ring and little fingers curled) is the **grip**: it
+  holds the IK marker reached by hand or with the ray, and pinching with
+  the index left free closes that arm's gripper. On no marker the fist is
+  **A**: it pulls the body under the ray.
+- **Left pinch with the palm towards you**, held 0.4 s, opens or closes the
+  **menu** (Y).
+- **Right pinch with the palm up** aims a **teleport**: the ray's spot on
+  the floor shows where (the spawn marker); let go of the pinch and you are
+  there. Turn the palm up before pinching: what a pinch does (menu,
+  teleport or trigger) is chosen as it starts.
+- Otherwise there are no sticks: walking the robot and snap turns stay on
+  the controllers.

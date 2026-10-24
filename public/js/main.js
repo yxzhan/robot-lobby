@@ -1598,7 +1598,7 @@ class App {
   // is XrControls.sceneFromXr.
 
   async enterVR(ar = false) {
-    const session = await navigator.xr.requestSession(ar ? 'immersive-ar' : 'immersive-vr', { requiredFeatures: ['local-floor'] });
+    const session = await navigator.xr.requestSession(ar ? 'immersive-ar' : 'immersive-vr', { requiredFeatures: ['local-floor'], optionalFeatures: ['hand-tracking'] });
     const gl = this.canvas.getContext('webgl2');  // Filament's own context
     await gl.makeXRCompatible();
     const near = 0.05, far = 200;

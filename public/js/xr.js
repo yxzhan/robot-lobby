@@ -25,6 +25,17 @@
 //   right stick     sideways: turns you by SNAP about where you stand;
 //                   forward: aims at the floor (the spawn marker shows
 //                   where), let go: you are there.
+// Tracked hands (Quest hand tracking, WebXR Hand Input) stand in for the
+// controllers, their gestures read off the joints as the buttons above:
+//   pinch           (thumb and index tips together) the trigger, as far as
+//                   they are close.
+//   fist            (middle, ring and little fingers curled) the grip, and
+//                   on no IK marker the A button: a fist holds a marker and
+//                   the pinch, the index left free, closes its gripper.
+//   left pinch, palm towards you, held: the menu (Y).
+//   right pinch, palm up: aims a teleport at the floor while held (the right
+//                   stick forward), let go: you are there.
+// No sticks otherwise: walking and turning stay on the controllers.
 // You (the WebXR 'local-floor' space) stand in the scene through `rig`.
 
 import { BALL } from './marker.js';
@@ -41,9 +52,25 @@ const HOT = [1, 0.85, 0.2];
 const HANDS = { left: [0.35, 0.65, 1], right: [1, 0.55, 0.2], none: [0.8, 0.8, 0.8] };
 // xr-standard buttons and axes (4 and 5: A/B on the right controller, X/Y on the left)
 const TRIGGER = 0, SQUEEZE = 1, STICK_X = 2, STICK_Y = 3;
-const PULL = { right: 4 };     // A
-const MENU = { left: 5 };      // Y
+const PULL = { right: 4, hand: 4 };          // A (a hand's: its fist)
+const MENU = { left: 5, hand: { left: 5 } };  // Y (a hand's: the left palm-up pinch)
 const MENU_HOLD = 400;         // ms the menu button is held to open the menu
+// Hand gestures (m, and ratios of a fingertip's distance from the wrist to
+// its knuckle's), with hysteresis: on below the first, off above the second.
+const PINCH = [0.018, 0.026];  // thumb tip to index tip
+const PINCH_SPAN = [0.012, 0.03];  // ... the trigger's value from 1 to 0
+const FIST = [1.3, 1.5];       // middle, ring and little fingers, on average
+const PALM_TO_HEAD = 0.6;      // cos: the left palm faces you
+const PALM_UP = 0.6;           // cos: the right palm faces up
+const JOINT_RADIUS = 0.006;    // m: a joint's ball, at most (the runtime's radius: the finger's)
+const BONE_RADIUS = 0.003;     // m
+// A tracked hand's skeleton (WebXR Hand Input): its 25 joints, each finger a
+// chain out of the wrist, and the bones joining them.
+const FINGERS = [['thumb', ['metacarpal', 'phalanx-proximal', 'phalanx-distal', 'tip']],
+  ...['index', 'middle', 'ring', 'pinky'].map((f) => [`${f}-finger`, ['metacarpal', 'phalanx-proximal', 'phalanx-intermediate', 'phalanx-distal', 'tip']])];
+const JOINTS = ['wrist', ...FINGERS.flatMap(([f, js]) => js.map((j) => `${f}-${j}`))];
+const BONES = FINGERS.flatMap(([f, js]) => js.map((j, i) => [i ? `${f}-${js[i - 1]}` : 'wrist', `${f}-${j}`]));
+const CURLED = ['middle-finger', 'ring-finger', 'pinky-finger'];
 // The 'local-floor' space (Y up) in the scene (Z up), before `rig`: x -> x,
 // y -> z, z -> -y, its origin 2.5 m back on -Y (the viewer looks along +Y at
 // the scene origin). Column-major.
@@ -100,12 +127,7 @@ export class XrControls {
   }
 
   end() {
-    for (const h of this.hands.values()) {
-      this.release(h);
-      if (h.goal) this.dropGoal(h);
-      this.put(h.ball, null);
-      this.put(h.ray, null);
-    }
+    for (const h of this.hands.values()) this.lost(h);
     this.hands.clear();
     this.menu.close();
     const t = this.app.teleop;
@@ -125,6 +147,15 @@ export class XrControls {
     return h;
   }
 
+  // A hand put down or lost: lets go and hides it.
+  lost(h) {
+    this.release(h);
+    if (h.goal) this.dropGoal(h);
+    this.put(h.ball, null);
+    this.put(h.ray, null);
+    this.showSkeleton(h, null);
+  }
+
   put(part, m) {
     const tcm = this.app.engine.getTransformManager(), inst = tcm.getInstance(part.e);
     tcm.setTransform(inst, m ?? HIDDEN);
@@ -135,7 +166,7 @@ export class XrControls {
   update(frame, space, viewer) {
     const S = this.sceneFromXr(), seen = new Set();
     for (const src of frame.session.inputSources) {
-      if (!src.gamepad || !src.targetRaySpace) continue;  // tracked hands: not yet
+      if (!src.targetRaySpace || !(src.gamepad || src.hand)) continue;
       const rayPose = frame.getPose(src.targetRaySpace, space);
       if (!rayPose) continue;
       const h = this.hand(src.handedness);
@@ -146,12 +177,14 @@ export class XrControls {
       h.pick = { eye: r.pos, dir, forward: dir };
       const gripPose = src.gripSpace && frame.getPose(src.gripSpace, space);
       h.grip = gripPose ? pose(mul4(S, gripPose.transform.matrix)) : r;
-      const pad = src.gamepad, pressed = pad.buttons.map((b) => b.pressed), was = h.buttons;
+      const pad = src.hand ? this.gestures(h, src.hand, frame, space, viewer) : src.gamepad;
+      if (!src.hand) this.showSkeleton(h, null);
+      const pressed = pad.buttons.map((b) => b.pressed), was = h.buttons;
       const down = (i) => pressed[i] && !was[i], up = (i) => !pressed[i] && was[i];
       h.buttons = pressed;
       h.trigger = pad.buttons[TRIGGER]?.value ?? (pressed[TRIGGER] ? 1 : 0);
       h.menuHit = this.menu.hit(h.pick);
-      const a = PULL[h.name], y = MENU[h.name];
+      const a = src.hand ? PULL.hand : PULL[h.name], y = src.hand ? MENU.hand[h.name] : MENU[h.name];
       if (down(SQUEEZE) && !h.menuHit && !h.grab) this.grab(h);
       if (up(SQUEEZE) && h.grab?.kind === 'ik') this.release(h);
       if (a != null && down(a) && !h.menuHit && !h.grab) this.pull(h);
@@ -166,17 +199,75 @@ export class XrControls {
       this.sticks(h, pad.axes, viewer, frame);
       this.draw(h);
     }
-    for (const h of this.hands.values()) {  // a controller put down or lost
-      if (seen.has(h)) continue;
-      this.release(h);
-      if (h.goal) this.dropGoal(h);
-      this.put(h.ball, null);
-      this.put(h.ray, null);
-    }
+    for (const h of this.hands.values()) if (!seen.has(h)) this.lost(h);  // a controller put down or lost
     this.hover();
     const onMenu = [...this.hands.values()].find((h) => seen.has(h) && h.menuHit?.row >= 0);
     this.menu.hover(onMenu ? onMenu.menuHit.row : -1);
     this.menu.tick();  // live values (FPS)
+  }
+
+  // A tracked hand's gestures as an xr-standard gamepad {buttons, axes}
+  // (none while its joints are not tracked); its skeleton drawn.
+  gestures(h, hand, frame, space, viewer) {
+    const S = this.sceneFromXr(), joints = new Map();
+    for (const name of JOINTS) {
+      const p = hand.get(name) && frame.getJointPose(hand.get(name), space);
+      if (p) joints.set(name, { ...pose(mul4(S, p.transform.matrix)), radius: p.radius });
+    }
+    const joint = (name) => joints.get(name);
+    const wrist = joint('wrist'), thumb = joint('thumb-tip'), index = joint('index-finger-tip');
+    const button = (pressed, value = pressed ? 1 : 0) => ({ pressed, value });
+    if (!wrist || !thumb || !index) {
+      h.pinched = h.fisted = false;
+      this.showSkeleton(h, null);
+      return { buttons: [], axes: [] };
+    }
+    const d = Math.hypot(...sub(thumb.pos, index.pos));
+    h.pinched = h.pinched ? d < PINCH[1] : d < PINCH[0];
+    const curl = CURLED.map((f) => {
+      const tip = joint(`${f}-tip`), knuckle = joint(`${f}-phalanx-proximal`);
+      return tip && knuckle ? Math.hypot(...sub(tip.pos, wrist.pos)) / (Math.hypot(...sub(knuckle.pos, wrist.pos)) || 1) : 2;
+    }).reduce((s, v) => s + v, 0) / CURLED.length;
+    h.fisted = h.fisted ? curl < FIST[1] : curl < FIST[0];
+    // What a pinch is, chosen as it starts by the palm (the wrist's -y): the
+    // left one towards the head, the menu; the right one up, a teleport
+    // (aimed while held, as the right stick pushed forward); else the trigger.
+    const palm = [-wrist.rot[1], -wrist.rot[4], -wrist.rot[7]];
+    if (!h.pinched) h.pinchAs = null;
+    else if (!h.pinchAs) {
+      const head = pose(mul4(S, viewer.transform.matrix)).pos, toHead = sub(head, wrist.pos), l = Math.hypot(...toHead) || 1;
+      if (h.name === 'left' && (palm[0] * toHead[0] + palm[1] * toHead[1] + palm[2] * toHead[2]) / l > PALM_TO_HEAD) h.pinchAs = 'menu';
+      else if (h.name === 'right' && palm[2] > PALM_UP) h.pinchAs = 'teleport';
+      else h.pinchAs = 'trigger';
+    }
+    const pinch = Math.min(1, Math.max(0, (PINCH_SPAN[1] - d) / (PINCH_SPAN[1] - PINCH_SPAN[0])));
+    const as = h.pinchAs, plain = !as || as === 'trigger';
+    const buttons = [button(as === 'trigger', plain ? pinch : 0), button(h.fisted), button(false), button(false),
+      button(h.fisted), button(as === 'menu')];
+    this.showSkeleton(h, joints);
+    return { buttons, axes: [0, 0, 0, as === 'teleport' ? -1 : 0] };
+  }
+
+  // A hand's skeleton from its joint poses (a Map by name), or hidden (null):
+  // a ball on each joint, a rod along each bone.
+  showSkeleton(h, joints) {
+    if (!joints && !h.skeleton) return;
+    h.skeleton ??= (() => {
+      const color = [...(HANDS[h.name] ?? HANDS.none), 1], part = (rod) => {
+        const p = this.part(rod);
+        p.mi.setColor4Parameter('baseColor', Filament.RgbaType.sRGB, color);
+        return p;
+      };
+      return { balls: JOINTS.map(() => part(false)), rods: BONES.map(() => part(true)) };
+    })();
+    JOINTS.forEach((name, i) => {
+      const j = joints?.get(name), k = Math.min(j?.radius ?? JOINT_RADIUS, JOINT_RADIUS);
+      this.put(h.skeleton.balls[i], j && [k, 0, 0, 0, 0, k, 0, 0, 0, 0, k, 0, ...j.pos, 1]);
+    });
+    BONES.forEach(([a, b], i) => {
+      const p = joints?.get(a), q = joints?.get(b);
+      this.put(h.skeleton.rods[i], p && q && rodMatrix(p.pos, q.pos, BONE_RADIUS));
+    });
   }
 
   // The menu button: held MENU_HOLD ms opens or closes the menu, a short
