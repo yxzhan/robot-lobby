@@ -132,16 +132,21 @@ def cpus():
 PHYSICS_THREADS = int(os.environ.get('PHYSICS_THREADS') or min(8, cpus()))
 
 # As in the browser (physics.js): MuJoCo's pyramidal cones and impratio 1
-# (elliptic and 10 made friction too strong).
+# (elliptic and 10 made friction too strong), noslip on (soft friction
+# creeps: held things slide out of a grasp without it).
 PHYSICS_DEFAULTS = {
     'gravity': [0, 0, -9.81], 'wind': [0, 0, 0], 'magnetic': [0, -0.5, 0],
     'density': 0, 'viscosity': 0, 'impratio': 1, 'cone': 'pyramidal',
+    'noslip_iterations': 100, 'noslip_tolerance': 1e-10,
+    'integrator': 'implicitfast', 'solver': 'Newton', 'iterations': 100, 'tolerance': 1e-8,
     'timestep': 0.005,  # s, live
     'speed': 1,         # the most sim seconds per wall second; 0: as fast as it goes
     'stateHz': 30,      # state broadcasts per second (not physics, but the server's too)
     'sleep': True,  # island sleeping (physics.js): set at compile time
 }
-CONES = ['pyramidal', 'elliptic']
+CONES = ['pyramidal', 'elliptic']  # mjtCone order
+INTEGRATORS = ['Euler', 'RK4', 'implicit', 'implicitfast']  # mjtIntegrator order
+SOLVERS = ['PGS', 'CG', 'Newton']  # mjtSolver order
 OPTION_KEYS = [k for k in PHYSICS_DEFAULTS if k not in ('sleep', 'speed', 'stateHz')]
 
 # A model's own <option> loses against the world's (like in the browser):
@@ -163,7 +168,7 @@ def base_xml(physics):
   opts = ' '.join(f'{k}="{fmt(physics[k])}"' for k in OPTION_KEYS)
   return f"""
 <mujoco model="world">
-  <option integrator="implicitfast" {opts}>{'<flag sleep="enable"/>' if physics.get('sleep') else ''}</option>
+  <option {opts}>{'<flag sleep="enable"/>' if physics.get('sleep') else ''}</option>
   <worldbody>
     <geom name="floor" type="plane" size="0 0 0.05"/>
   </worldbody>
@@ -177,6 +182,10 @@ def apply_options(model, physics):
     o.__setattr__(k, physics[k])
   o.density, o.viscosity, o.impratio = physics['density'], physics['viscosity'], physics['impratio']
   o.cone = max(0, CONES.index(physics['cone']) if physics['cone'] in CONES else 0)
+  o.integrator = INTEGRATORS.index(physics['integrator'])
+  o.solver = SOLVERS.index(physics['solver'])
+  o.iterations, o.tolerance = physics['iterations'], physics['tolerance']
+  o.noslip_iterations, o.noslip_tolerance = physics['noslip_iterations'], physics['noslip_tolerance']
 
 
 def checked_physics(physics, old):
@@ -186,6 +195,12 @@ def checked_physics(physics, old):
   new['timestep'] = min(0.05, max(1e-4, float(new['timestep'])))
   new['speed'] = max(0.0, float(new['speed']))
   new['stateHz'] = min(120, max(1, int(new['stateHz'])))
+  new['iterations'] = max(1, int(new['iterations']))
+  new['noslip_iterations'] = max(0, int(new['noslip_iterations']))
+  new['tolerance'], new['noslip_tolerance'] = max(0.0, float(new['tolerance'])), max(0.0, float(new['noslip_tolerance']))
+  for k, names in (('cone', CONES), ('integrator', INTEGRATORS), ('solver', SOLVERS)):
+    if new[k] not in names:
+      new[k] = old[k] if old[k] in names else PHYSICS_DEFAULTS[k]
   return new
 
 

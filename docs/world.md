@@ -14,6 +14,21 @@ follows the selection, are the Render panel's: rendering.md):
   and a Panda's fingers let a 100 g box creep out within seconds; for
   grasping, elliptic with impratio 10 holds the box through a lift and a
   swing to within 2 mm.
+- **Noslip** (Contacts; on by default, unlike MuJoCo: 100 iterations,
+  tolerance 1e-10): a post-pass of the solver that takes the slip out of
+  frictional contacts. MuJoCo's friction is soft: it pushes back only
+  while things slide, so under a steady load (a held box's weight) they
+  creep at a constant rate whatever the friction coefficient. Without
+  noslip, a Panda holding a 100 g box lets it creep 8 mm in 20 000 steps
+  even with elliptic and impratio 10 (out of the fingers within 10^5);
+  with it, 0.05 mm in 10^6 steps. Its tolerance, not its iterations,
+  decides: at MuJoCo's 1e-6 it stops early and the creep is barely
+  smaller. It costs step time where there are many contacts (that grasp:
+  25 → ~100 µs a step); 0 iterations turns it off.
+- **Solver** (Solver): the integrator (implicitfast by default, as the
+  menagerie models set it; Euler, RK4, implicit), the constraint solver
+  (Newton, CG, PGS), its most iterations and its tolerance, live like the
+  options above.
 - **Timestep and speed** (Simulation): the physics step (0.005 s by default,
   changed live; larger steps cost less per simulated second but are less
   stable, and walking policies were trained at 0.002–0.005 s) and the most
@@ -26,14 +41,16 @@ follows the selection, are the Render panel's: rendering.md):
 - **Sync rate** (network mode only): the server's state broadcasts per
   second, 10–60 Hz (30 by default): more is smoother and fresher, and more
   traffic for every page.
-- **Default geom density, mass and friction** apply to geoms that do not
+- **Default geom density, mass, friction, condim, solref and solimp** apply to geoms that do not
   set them themselves or through their own default classes, as a top-level
-  `<default><geom/></default>` would: density and friction are written into
+  `<default><geom/></default>` would: all but mass are written into
   each spawned model's root default class (only what it does not set), and
-  into the world's, so the floor takes the friction; a default mass is
+  into the world's, so the floor takes them too; a default mass is
   written onto each geom whose element and class chain set neither mass
   nor density (an inherited mass would override a geom's own density).
-  They change masses, so **Apply** recompiles the spawned models' inertias
+  Condim 4 adds torsional friction (a held thing does not spin in the
+  fingers); a smaller solref time constant makes contacts stiffer (keep it
+  above two timesteps). They change masses or contacts, so **Apply** recompiles the spawned models' inertias
   (`withPhysics` in main.js) and rebuilds the world, keeping its state.
   Most models set their own masses (menagerie robots have explicit
   inertials), so these mostly reach plain objects and the floor.

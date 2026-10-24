@@ -3,7 +3,7 @@
 // properties change masses, so they wait for Apply (a rebuild). How the
 // floor and the lighting look is the Render panel's (render.js).
 
-import { CONES, PHYSICS_DEFAULTS, SPEEDS, STATE_RATES } from './physics.js';
+import { CONDIMS, CONES, INTEGRATORS, PHYSICS_DEFAULTS, SOLVERS, SPEEDS, STATE_RATES } from './physics.js';
 
 const el = (tag, props = {}, ...children) => {
   const e = Object.assign(document.createElement(tag), props);
@@ -20,6 +20,12 @@ const OPTIONS = [
   ['viscosity', 'Viscosity', 'Pa·s', 1, 'viscosity of the medium (air ≈ 1.8e-5, water ≈ 0.0009)'],
   ['impratio', 'Impratio', '', 1, 'ratio of frictional to normal constraint impedance (> 1 makes friction harder, less slip)'],
   ['cone', 'Cone', '', CONES, 'friction cone: elliptic is more accurate (legged robots), pyramidal cheaper'],
+  ['noslip_iterations', 'Noslip iter.', '', 1, 'noslip post-pass: takes the slip out of frictional contacts, so held things do not creep out of a grasp (0: off). Costs step time with many contacts'],
+  ['noslip_tolerance', 'Noslip tol.', '', 1, 'noslip stops below this; it decides more than the iterations (MuJoCo\'s 1e-6 stops early and things still creep)'],
+  ['integrator', 'Integrator', '', INTEGRATORS, 'implicitfast: stable with damping and stiff actuators, cheap (the menagerie models\'); implicit: also Coriolis terms; RK4: accurate, 4× the cost; Euler: MuJoCo\'s default'],
+  ['solver', 'Solver', '', SOLVERS, 'constraint solver: Newton converges in few iterations (MuJoCo\'s default); CG cheaper per iteration; PGS the old one, harder friction'],
+  ['iterations', 'Iterations', '', 1, 'most solver iterations per step: more if contacts jitter or do not converge'],
+  ['tolerance', 'Tolerance', '', 1, 'the solver stops below this (0: always all the iterations)'],
   ['timestep', 'Timestep', 's', 1, 'physics step: larger costs less per simulated second but is less stable and accurate (walking policies were trained at 0.002-0.005 s)'],
   ['speed', 'Speed', '', SPEEDS, 'the most simulated time per second of wall time (1×: real time, max: as fast as the computer goes); a world that cannot keep up runs slower'],
   ['stateHz', 'Sync rate', 'Hz', STATE_RATES, 'shared world: states the server sends each page per second (more: smoother and fresher, more traffic for everyone)'],
@@ -29,6 +35,9 @@ const GEOM = [
   ['density', 'Density', 'kg/m³', 1, 'for geoms that set neither density nor mass'],
   ['mass', 'Mass', 'kg', 1, 'per geom, for geoms that set neither (empty: from density)'],
   ['friction', 'Friction', '', 3, 'sliding, torsional, rolling, for geoms that set none'],
+  ['condim', 'Condim', '', CONDIMS, 'contact dimensions: 1 frictionless, 3 sliding friction, 4 also torsional (a held thing does not spin in the fingers), 6 also rolling'],
+  ['solref', 'Solref', '', 2, 'contact time constant (s) and damping ratio: a smaller time constant is stiffer, keep it above 2 timesteps'],
+  ['solimp', 'Solimp', '', 3, 'dmin, dmax, width (m): impedance (0-1, nearer 1 harder) from no penetration to width deep'],
 ];
 
 export class WorldPanel {
@@ -61,9 +70,12 @@ export class WorldPanel {
       if (k === 'stateHz' && !this.app.net) continue;  // the server's
       if (k === 'density') this.body.append(el('div', { className: 'sub minor', textContent: 'Medium (air, water…)' }));
       if (k === 'impratio') this.body.append(el('div', { className: 'sub minor', textContent: 'Contacts' }));
+      if (k === 'integrator') this.body.append(el('div', { className: 'sub minor', textContent: 'Solver' }));
       if (k === 'timestep') this.body.append(el('div', { className: 'sub minor', textContent: 'Simulation' }));
       const set = (i) => (v) => {
         if (k === 'timestep' && !(v >= 1e-4 && v <= 0.05)) { this.render(); return; }  // MuJoCo needs > 0; 50 ms is no physics any more
+        if (/iterations$/.test(k)) v = Math.max(k === 'iterations' ? 1 : 0, Math.round(v));
+        if (/tolerance$/.test(k)) v = Math.max(0, v);
         const next = structuredClone(this.app.physics);
         if (!Array.isArray(s[k])) next[k] = v; else next[k][i] = v;
         this.app.setPhysics(next).then(() => this.render());
@@ -98,7 +110,13 @@ export class WorldPanel {
         if (n === 1) d[k] = v; else d[k][i] = v ?? PHYSICS_DEFAULTS.geom[k][i];
         this.render();
       };
-      const inputs = n === 1 ? [num(d[k], set(0), title, k === 'mass')] : d[k].map((v, i) => num(v, set(i), title));
+      let inputs;
+      if (Array.isArray(n)) {
+        const sel = el('select', { title });
+        for (const v of n) sel.append(new Option(String(v), v, false, v === d[k]));
+        sel.onchange = () => { set(0)(Number(sel.value)); sel.blur(); };
+        inputs = [sel];
+      } else inputs = n === 1 ? [num(d[k], set(0), title, k === 'mass')] : d[k].map((v, i) => num(v, set(i), title));
       this.body.append(row(label, unit, title, ...inputs));
     }
     this.body.append(el('div', { className: 'hint', textContent: 'For geoms that do not set these themselves or through their own default classes; the floor takes the friction. Apply rebuilds the world (masses change).' }));
@@ -110,7 +128,7 @@ export class WorldPanel {
       if (!ok) status.textContent = 'busy, try again';
       else this.render();
     };
-    const reset = el('button', { type: 'button', textContent: 'MuJoCo defaults', title: 'Every setting back to MuJoCo\'s defaults' });
+    const reset = el('button', { type: 'button', textContent: 'Defaults', title: 'Every setting back to its default (MuJoCo\'s, but for sleep and noslip)' });
     reset.onclick = async () => {
       this.draft = structuredClone(PHYSICS_DEFAULTS.geom);
       await this.app.setPhysics(structuredClone(PHYSICS_DEFAULTS));

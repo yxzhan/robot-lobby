@@ -8,10 +8,22 @@
 //   costs more step time; friction is softer this way, though, and held
 //   things can creep (a Panda lets a 100 g box slide out of its fingers in
 //   seconds; elliptic with impratio 10 holds it, swinging, within 2 mm),
-//   so grasping may want those back in the Physics panel. They go into
+//   so grasping may want those back in the Physics panel. Noslip (a
+//   post-pass of the solver that takes the slip out of frictional contacts)
+//   is on here, unlike MuJoCo's default: without it soft friction creeps
+//   steadily (a held box drops out after some 10^5 steps even with elliptic
+//   and impratio 10; with noslip it moves 0.1 mm in 2·10^5). Its tolerance,
+//   not its iterations, decides: at MuJoCo's 1e-6 it stops early and the
+//   creep is barely smaller. It costs step time with many contacts.
+//   Solver (Newton, CG, PGS), its iterations and tolerance, and the
+//   integrator are global options too. They go into
 //   the world spec at every rebuild (world.js) and are also set on the live
 //   model, so a change needs no rebuild.
-// - Default geom properties: density, mass and friction for every geom that
+// - Default geom properties: density, mass, friction, condim (1 frictionless,
+//   3 sliding, 4 also torsional: a held thing does not spin in the fingers,
+//   6 also rolling), solref (contact time constant and damping ratio: a
+//   smaller time constant is stiffer, it should stay above 2 timesteps) and
+//   solimp (dmin, dmax, width: how soft and how deep) for every geom that
 //   does not set them itself or through its own default classes, like a
 //   top-level <default><geom …/></default> in each model: they are written
 //   into each spawned model's root default class (only the attributes it
@@ -31,7 +43,7 @@
 //   MuJoCo's default; it is set when the model is compiled, so a change
 //   rebuilds the world.
 
-// MuJoCo's own defaults, but for sleep.
+// MuJoCo's own defaults, but for sleep and noslip.
 export const PHYSICS_DEFAULTS = Object.freeze({
   gravity: [0, 0, -9.81],
   wind: [0, 0, 0],
@@ -40,11 +52,17 @@ export const PHYSICS_DEFAULTS = Object.freeze({
   viscosity: 0,
   impratio: 1,
   cone: 'pyramidal',
+  noslip_iterations: 100,
+  noslip_tolerance: 1e-10,
+  integrator: 'implicitfast',  // the menagerie models' (MuJoCo's own is Euler)
+  solver: 'Newton',
+  iterations: 100,
+  tolerance: 1e-8,
   timestep: 0.005,
   speed: 1,
   stateHz: 30,  // network mode: the server's state broadcasts per second
   sleep: true,
-  geom: { density: 1000, mass: null, friction: [1, 0.005, 0.0001] },
+  geom: { density: 1000, mass: null, friction: [1, 0.005, 0.0001], condim: 3, solref: [0.02, 1], solimp: [0.9, 0.95, 0.001] },
 });
 
 // The Physics panel's settings for this page: the defaults at every load,
@@ -53,8 +71,12 @@ export function loadPhysics() {
   return structuredClone(PHYSICS_DEFAULTS);
 }
 
-const OPTION_KEYS = ['timestep', 'gravity', 'wind', 'magnetic', 'density', 'viscosity', 'impratio', 'cone'];
+const OPTION_KEYS = ['timestep', 'gravity', 'wind', 'magnetic', 'density', 'viscosity', 'impratio', 'cone',
+  'noslip_iterations', 'noslip_tolerance', 'integrator', 'solver', 'iterations', 'tolerance'];
 export const CONES = ['pyramidal', 'elliptic'];  // mjtCone order
+export const INTEGRATORS = ['Euler', 'RK4', 'implicit', 'implicitfast'];  // mjtIntegrator order
+export const SOLVERS = ['PGS', 'CG', 'Newton'];  // mjtSolver order
+export const CONDIMS = [1, 3, 4, 6];
 export const SPEEDS = [0.1, 0.25, 0.5, 1, 2, 4, 10, 0];  // × real time; 0: as fast as it goes
 export const STATE_RATES = [10, 15, 20, 30, 60];  // Hz
 const fmt = (v) => (Array.isArray(v) ? v.join(' ') : String(v));
@@ -62,7 +84,7 @@ const fmt = (v) => (Array.isArray(v) ? v.join(' ') : String(v));
 // The <option> element of the world spec.
 export function optionXml(s) {
   const attrs = OPTION_KEYS.map((k) => `${k}="${fmt(s[k])}"`).join(' ');
-  return `<option integrator="implicitfast" ${attrs}>${s.sleep ? '<flag sleep="enable"/>' : ''}</option>`;
+  return `<option ${attrs}>${s.sleep ? '<flag sleep="enable"/>' : ''}</option>`;
 }
 
 // Sets the global options on a compiled model (takes effect at the next step).
@@ -74,14 +96,22 @@ export function applyOptions(model, s) {
   o.viscosity = s.viscosity;
   o.impratio = s.impratio;
   o.cone = Math.max(0, CONES.indexOf(s.cone));
+  o.integrator = Math.max(0, INTEGRATORS.indexOf(s.integrator));
+  o.solver = Math.max(0, SOLVERS.indexOf(s.solver));
+  o.iterations = s.iterations;
+  o.tolerance = s.tolerance;
+  o.noslip_iterations = s.noslip_iterations;
+  o.noslip_tolerance = s.noslip_tolerance;
 }
 
 // The default geom attributes that differ from MuJoCo's ({name: value}).
 export function geomOverrides(s) {
-  const d = PHYSICS_DEFAULTS.geom, g = s.geom, out = {};
+  const d = PHYSICS_DEFAULTS.geom, g = { ...d, ...s.geom }, out = {};  // a stage saved before some of them: the defaults
   if (g.density !== d.density) out.density = fmt(g.density);
   if (g.mass != null) out.mass = fmt(g.mass);
-  if (g.friction.some((v, i) => v !== d.friction[i])) out.friction = fmt(g.friction);
+  for (const k of ['friction', 'condim', 'solref', 'solimp']) {
+    if (JSON.stringify(g[k]) !== JSON.stringify(d[k])) out[k] = fmt(g[k]);
+  }
   return out;
 }
 

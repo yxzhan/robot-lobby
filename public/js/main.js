@@ -25,7 +25,7 @@ import { TeleopPanel, TOUCH, locomotion } from './teleop.js';
 import { bodyPose } from './goal.js';
 import { BaseController } from './base.js';
 import { IkController } from './ik.js';
-import { applyOptions, geomOverrides, geomSignature, injectGeomDefaults, loadPhysics, needsRebuild } from './physics.js';
+import { applyOptions, geomOverrides, geomSignature, injectGeomDefaults, loadPhysics, needsRebuild, PHYSICS_DEFAULTS } from './physics.js';
 import { WorldPanel } from './worldpanel.js';
 import { RenderPanel, loadQuality } from './render.js';
 import { addSwarm } from './swarm.js';
@@ -2484,7 +2484,8 @@ try {
     const items = stage.items ?? [];
     const progress = (msg) => { status.textContent = msg; setBusy(msg); };
     if (stage.physics) {
-      app.physics = { ...app.physics, ...stage.physics };
+      // A stage saved before some of the settings existed: the defaults for those.
+      app.physics = { ...app.physics, ...stage.physics, geom: { ...PHYSICS_DEFAULTS.geom, ...stage.physics.geom } };
       app.world?.render();
     }
     useCameraSetups(items, files['cameras.json']);
