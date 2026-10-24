@@ -97,7 +97,7 @@ import warnings
 
 import mujoco
 import numpy as np
-from aiohttp import WSMsgType, web
+from aiohttp import WSMsgType, web, web_fileresponse
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import base as BASE  # noqa: E402
@@ -1536,6 +1536,10 @@ async def main():
   app.router.add_delete('/api/stages/{id}', api_stage)
   app.router.add_get('/render', render)
   app.router.add_get('/', index)
+  # aiohttp guesses static types from Python's built-in table, which before
+  # 3.13 has no .webp (the panel thumbnails): served as octet-stream,
+  # Safari does not show them.
+  web_fileresponse.CONTENT_TYPES.add_type('image/webp', '.webp')
   app.router.add_static('/', PUBLIC, follow_symlinks=True)
   runner = web.AppRunner(app)
   await runner.setup()

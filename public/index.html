@@ -50,7 +50,10 @@
     #left > * { pointer-events: auto; box-sizing: border-box; color: #ddd; background: rgba(0,0,0,.6);
                 padding: 8px 10px; border-radius: 6px; }
     #left > [hidden] { display: none; }
-    #assets { display: flex; flex-direction: column; gap: 6px; min-height: 0; flex: 0 1 auto; }
+    /* A grid, not a flex column: WebKit (Safari) counts a flex column's
+       shrinkable scroller as 0 in its max-content height, so the
+       max-height below left the list no room at all. */
+    #assets { display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; gap: 6px; min-height: 0; flex: 0 1 auto; }
     #left > #assets { padding: 8px; }
     /* The column's height shared out evenly, but none taller than its
        content: a short panel (a folded Stage) takes what it needs, the
