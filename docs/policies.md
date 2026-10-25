@@ -106,7 +106,9 @@ robot (`custom/microduck/microduck.xml`) and two of its scenes into
 the library, and after training `scripts/export_microduck.py` (run in the
 clone's environment, see its docstring) exports the walking policy to
 `pretrained_policies/microduck_rl/` (`walk.onnx`, `policy.json`). The duck
-starts with `microduck-walk` on (keys and goal marker).
+starts with `microduck-walk` on (keys and goal marker), and so do its three
+other colors (`custom/microduck_sky`, `_graphite`, `_lavender`: the same model,
+recolored by `import_microduck.py`).
 
 ### Skills: more than one policy
 

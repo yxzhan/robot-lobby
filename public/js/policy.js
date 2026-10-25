@@ -85,7 +85,7 @@ export const POLICIES = [
     name: 'Walking · Microduck',
     about: 'Walking on flat ground (14 servos, 50 Hz), trained in microduck_rl (mjlab) on the BAM model of its XL330 servos, which drives the joints here too.',
     dir: 'microduck_rl',  // scripts/export_microduck.py
-    defaultFor: /(^|\/)custom\/microduck\/microduck\.xml$/,
+    defaultFor: /(^|\/)custom\/(microduck(_sky|_graphite|_lavender)?)\/\2\.xml$/,  // and its colors
     load: async (file) => loadMicroduckPolicy(await onnxRuntime(), file),
     create: (weights, prefix) => new MicroduckController(weights, prefix, 'Microduck walking policy'),
   },

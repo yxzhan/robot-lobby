@@ -4,6 +4,21 @@
       { "name": "head_camera", "link": "jaw_soft", "follow": "link", "pos": [0.015, 0, -0.08], "rpy": [0, 90, 0], "fovy": 45, "width": 256, "height": 256, "hz": 10 }
     ]
   },
+  "custom/microduck_sky/microduck_sky.xml": {
+    "cameras": [
+      { "name": "head_camera", "link": "jaw_soft", "follow": "link", "pos": [0.015, 0, -0.08], "rpy": [0, 90, 0], "fovy": 45, "width": 256, "height": 256, "hz": 10 }
+    ]
+  },
+  "custom/microduck_graphite/microduck_graphite.xml": {
+    "cameras": [
+      { "name": "head_camera", "link": "jaw_soft", "follow": "link", "pos": [0.015, 0, -0.08], "rpy": [0, 90, 0], "fovy": 45, "width": 256, "height": 256, "hz": 10 }
+    ]
+  },
+  "custom/microduck_lavender/microduck_lavender.xml": {
+    "cameras": [
+      { "name": "head_camera", "link": "jaw_soft", "follow": "link", "pos": [0.015, 0, -0.08], "rpy": [0, 90, 0], "fovy": 45, "width": 256, "height": 256, "hz": 10 }
+    ]
+  },
   "mujoco_menagerie/unitree_go2/go2.xml": {
     "cameras": [
       { "name": "front_camera", "link": "base", "follow": "link", "pos": [0.32, 0, 0.04], "rpy": [0, 0, 0], "fovy": 60, "width": 256, "height": 256, "hz": 10 }
