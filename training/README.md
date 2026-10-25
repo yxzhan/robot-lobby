@@ -1,5 +1,8 @@
 # Training locomotion policies (MuJoCo Playground)
 
+(`supermimic/`: model-based training, SuperMimic, on mjlab tasks such as
+microduck_rl's; its own README.)
+
 Train a policy on the GPU with [MuJoCo Playground](https://github.com/google-deepmind/mujoco_playground)
 (MJX / MuJoCo Warp physics, Brax PPO), export it to ONNX and run it in the
 viewer, locally (onnxruntime-web) or on the server (onnxruntime). No Isaac
