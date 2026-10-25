@@ -113,8 +113,12 @@ starts with `microduck-walk` on (keys and goal marker).
 `policy.json`'s `skills` lists the duck's policies by name, walking first;
 the others are skills with the same 61-D observation and 14 actions that it
 switches to for a while and comes back from on its own, as microduck_rl's
-daemon swaps its "episodic" policies on the robot. There is one so far,
-`kick_right` (`kick_right.onnx`, the `Mjlab-BallKick-Flat-MicroDuck` task):
+daemon swaps its "episodic" policies on the robot; one without a duration
+stays on until another is picked. `walk_supermimic` is the walking task
+trained with SuperMimic (`training/supermimic`): it steps as the PPO
+policy does and stays up, but makes little headway (0.06 m/s for 0.32
+commanded, the PPO policy 0.19). `kick_right` (`kick_right.onnx`, the
+`Mjlab-BallKick-Flat-MicroDuck` task):
 from a stand it kicks a ball lying at its right toe forward at about 1 m/s
 and settles on both feet. It does not see the ball (the robot has no way
 to), so aim the duck first: the ball 9 cm ahead and 4 cm right of the

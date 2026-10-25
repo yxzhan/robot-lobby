@@ -557,7 +557,7 @@ def skill_command(skills):
     return None
   about = ' · '.join(f"{k}: {skills[k].get('about') or skills[k].get('label') or k}" for k in names[1:])
   return {'type': 'enum', 'label': 'Skill', 'values': names, 'default': names[0],
-          'about': f'{about} (for {names[0]} again after it; K)'}
+          'about': f'{about} (a timed one goes back to {names[0]}; K: {names[1]})'}
 
 
 class MicroduckController:

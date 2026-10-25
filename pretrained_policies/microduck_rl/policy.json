@@ -187,6 +187,11 @@
    "duration": 2.0,
    "commands": false,
    "about": "kicks a ball at the right toe forward from a stand, then walking again"
+  },
+  "walk_supermimic": {
+   "onnx": "walk_supermimic.onnx",
+   "label": "Walk (SuperMimic)",
+   "about": "walking trained with SuperMimic in 19 min (training/supermimic), until another skill is picked"
   }
  },
  "joint_vel_lag": 1,

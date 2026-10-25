@@ -34,12 +34,17 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 OUT = ROOT / 'pretrained_policies' / 'microduck_rl'
 TASKS = {'walk': 'Mjlab-Velocity-Flat-MicroDuck', 'kick_right': 'Mjlab-BallKick-Flat-MicroDuck'}
 # The skills besides walking: run for `duration` seconds, then back to
-# walking (microduck_rl's "episodic" policies). The kick task starts from a
-# stand with the ball at the right toe (it does not see the ball), kicks at
-# once and settles; its command slots are zero in training (commands: false).
+# walking (microduck_rl's "episodic" policies), or without one until another
+# is picked. The kick task starts from a stand with the ball at the right toe
+# (it does not see the ball), kicks at once and settles; its command slots are
+# zero in training (commands: false). walk_supermimic is the same walking task
+# trained with SuperMimic (training/supermimic, its export_onnx.py writes the
+# ONNX; this script does not make it).
 SKILLS = {
     'kick_right': {'label': 'Kick (right foot)', 'duration': 2.0, 'commands': False,
                    'about': 'kicks a ball at the right toe forward from a stand, then walking again'},
+    'walk_supermimic': {'label': 'Walk (SuperMimic)',
+                        'about': 'walking trained with SuperMimic in 19 min (training/supermimic), until another skill is picked'},
 }
 
 # microduck_rl's src/mjlab_microduck/robot/microduck_constants.py (HOME_FRAME,

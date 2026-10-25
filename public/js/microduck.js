@@ -5,11 +5,12 @@
 // which has the rest:
 //
 // - skills: the policies by name, the first (walking) the one it runs. The
-//   others are skills of the same observation and action (kick_right): the
-//   command `skill` (an enum, the Teleop panel's select, K) switches to one
-//   for its `duration`, then back to walking, as microduck_rl's daemon
-//   swaps them; one with commands: false sees zeros for the twist and the
-//   commands, as in its training. Without skills, just walk.onnx;
+//   others are skills of the same observation and action (kick_right,
+//   walk_supermimic): the command `skill` (an enum, the Teleop panel's
+//   select, K for the first) switches to one, for its `duration` and then
+//   back to walking, as microduck_rl's daemon swaps them, or without one
+//   until another is picked; one with commands: false sees zeros for the
+//   twist and the commands, as in its training. Without skills, just walk.onnx;
 // - joints / actuators, default_pose, action_scale: the 14 servos in action
 //   order; target = default + action * scale (no clipping, as in training);
 // - obs: mjlab's actor observation, 61 values, its parts in order: the root
@@ -61,7 +62,7 @@ function skillCommand(skills) {
   return {
     type: 'enum', label: 'Skill', values: names, default: names[0],
     about: names.slice(1).map((k) => `${k}: ${skills[k].about ?? skills[k].label ?? k}`).join(' · ')
-      + ` (for ${names[0]} again after it; K)`,
+      + ` (a timed one goes back to ${names[0]}; K: ${names[1]})`,
   };
 }
 
