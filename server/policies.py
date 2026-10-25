@@ -549,17 +549,30 @@ class Substeps:
       bank.split([c.servos for c in g])
 
 
+def skill_command(skills):
+  """The command that switches skills, if there is more than one (see
+  public/js/microduck.js)."""
+  names = list(skills)
+  if len(names) < 2:
+    return None
+  about = ' · '.join(f"{k}: {skills[k].get('about') or skills[k].get('label') or k}" for k in names[1:])
+  return {'type': 'enum', 'label': 'Skill', 'values': names, 'default': names[0],
+          'about': f'{about} (for {names[0]} again after it; K)'}
+
+
 class MicroduckController:
-  """See public/js/microduck.js: the microduck_rl walking policy on the BAM
-  servo model."""
+  """See public/js/microduck.js: the microduck_rl policies on the BAM servo
+  model, walking and the skills it switches to for a while."""
 
   def __init__(self, policy, prefix, name='Microduck walking policy'):
-    self.session, self.spec = policy
+    self.sessions, self.spec = policy
     self.prefix = prefix
     self.name = name
     self.drive = drive_of(self.spec['command_range'], self.spec.get('min_command'))
     self.cmd = [0.0, 0.0, 0.0]
-    self.commands = self.spec.get('commands', {})
+    self.skills = self.spec['skills']
+    skill = skill_command(self.skills)
+    self.commands = {**self.spec.get('commands', {}), **({'skill': skill} if skill else {})}
     self.command = command_defaults(self.commands)
     self.model = None
     self.saved = None
@@ -572,6 +585,9 @@ class MicroduckController:
     self.action = np.zeros(n, np.float32)
     self.qvel = np.zeros(n)  # the joint velocities of the last tick: the observation's
     self.pending = []        # [(time, targets)]: commands reach the servos after the delay
+    self.running = None      # the skill of the last tick, and since when: (name, data.time)
+    if 'skill' in self.commands:
+      self.command['skill'] = self.commands['skill']['default']
 
   def bind(self, model):
     s, b = self.spec, self.spec['bam']
@@ -641,7 +657,20 @@ class MicroduckController:
       self.servos.target = t
     self.servos.update(data)
 
-  def observe(self, data):
+  def skill(self, data):
+    """The skill to run at data.time: the one asked for, back to the first
+    once it has run its duration."""
+    first = next(iter(self.skills))
+    want = self.command.get('skill', first)
+    if self.running is None or want != self.running[0]:
+      self.running = (want, data.time)
+    d = self.skills[want].get('duration')
+    if d and data.time - self.running[1] >= d - 1e-9:
+      self.command['skill'] = first
+      self.running = (first, data.time)
+    return self.running[0]
+
+  def observe(self, data, skill=None):
     R = data.xmat[self.root].reshape(3, 3)
     v = self.free_v
     parts = {
@@ -652,13 +681,20 @@ class MicroduckController:
         'last_action': lambda: self.action,
         'command': lambda: self.cmd,
     }
-    obs = observation(self.spec, parts, self.commands, self.command)
+    blind = bool(skill) and self.skills[skill].get('commands') is False  # trained with zeros there
+    if blind:
+      for name, size in self.spec['obs']:
+        if name == 'command' or name.startswith('cmd:'):
+          parts[name] = lambda size=size: np.zeros(size)
+    obs = observation(self.spec, parts, {} if blind else self.commands, self.command)
     self.qvel = data.qvel[self.dofs].copy()
     return obs
 
   def step(self, data):
     s = self.spec
-    self.action = np.asarray(self.session.run(None, {s['input']: self.observe(data)})[0], np.float32).reshape(-1)
+    skill = self.skill(data)
+    obs = self.observe(data, skill)
+    self.action = np.asarray(self.sessions[skill].run(None, {s['input']: obs})[0], np.float32).reshape(-1)
     self.pending.append((data.time + s['bam']['delay'], self.default + self.action * s['action_scale']))
 
   def describe(self):
@@ -668,9 +704,12 @@ class MicroduckController:
 def load_microduck(directory):
   import onnxruntime as ort
   spec = json.loads((directory / 'policy.json').read_text())
+  spec.setdefault('skills', {'walk': {'onnx': 'walk.onnx', 'label': 'Walk'}})
   opts = ort.SessionOptions()
   opts.intra_op_num_threads = 1
-  return ort.InferenceSession(str(directory / 'walk.onnx'), opts, providers=['CPUExecutionProvider']), spec
+  sessions = {k: ort.InferenceSession(str(directory / sk['onnx']), opts, providers=['CPUExecutionProvider'])
+              for k, sk in spec['skills'].items()}
+  return sessions, spec
 
 
 # ---------------------------------------------------------------------------

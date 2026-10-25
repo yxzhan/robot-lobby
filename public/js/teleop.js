@@ -227,7 +227,7 @@ export class TeleopPanel {
     this.readout = null;
     this.errs = [];          // per chain: the span showing its tracking error
     this.grips = [];         // per chain with a gripper: {chain, slider, label} (its closure, kept up to date)
-    this.cmdViews = [];      // per policy command (or vector dimension): {c, name, i, slider, label, show}, kept up to date
+    this.cmdViews = [];      // per policy command (or vector dimension): {c, name, i, slider, label, show} or {c, name, select}, kept up to date
     this.closedChains = new Set();  // "<prefix><chain name>" folded in the panel
     // Folded sections ('base', 'ik'), kept across robots and page loads.
     try { this.folded = new Set(JSON.parse(localStorage.getItem(FOLDED) ?? '[]')); } catch { this.folded = new Set(); }
@@ -264,6 +264,13 @@ export class TeleopPanel {
     window.addEventListener('keydown', (e) => {
       if (e.key.toLowerCase() !== 'g' || e.ctrlKey || e.metaKey || e.altKey || isTyping(e.target)) return;
       this.toggleGripper();
+    });
+    // K starts the driven robot's policy's first skill (a kick, microduck.js).
+    window.addEventListener('keydown', (e) => {
+      if (e.key.toLowerCase() !== 'k' || e.repeat || e.ctrlKey || e.metaKey || e.altKey || isTyping(e.target)) return;
+      const c = this.active?.use?.policy && this.active.policy, def = c?.commands?.skill;
+      if (!def) return;
+      setCommand(c, 'skill', def.values[1]);
     });
     // The panel's hints mention a gamepad while one is connected.
     window.addEventListener('gamepadconnected', () => this.render());
@@ -839,7 +846,9 @@ export class TeleopPanel {
         });
       } else if (def.type === 'enum') {
         const s = this.select(def.values.map((v) => [v, v]), c.command[name], (v) => set(name, v));
+        this.cmdViews.push({ c, name, select: s });
         box.append(el('div', { className: 'field', title: def.about ?? '' }, el('span', { textContent: label }), el('div', { className: 'ctl' }, s)));
+        if (name === 'skill') box.append(el('div', { className: 'hint', innerHTML: `<kbd>K</kbd> ${def.values[1]}; back to ${def.values[0]} on its own.` }));
       } else if (def.type === 'bool') {
         const b = el('input', { type: 'checkbox', checked: !!c.command[name] });
         b.onchange = () => set(name, b.checked);
@@ -1258,6 +1267,11 @@ export class TeleopPanel {
     // Command sliders follow the values (R/F, the server, other browsers),
     // except one being dragged.
     for (const v of this.cmdViews) {
+      if (v.select) {  // a select (a skill going back to walking)
+        const x = v.c.command[v.name];
+        if (document.activeElement !== v.select && v.select.value !== x) v.select.value = x;
+        continue;
+      }
       if (document.activeElement === v.slider && v.slider.matches(':active')) continue;
       const x = v.c.command[v.name], val = v.i == null ? x : x?.[v.i];
       if (typeof val !== 'number' || Math.abs(Number(v.slider.value) - val) < 1e-9) continue;

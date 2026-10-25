@@ -1,9 +1,14 @@
-"""Exports the Microduck walking policy trained in a microduck_rl clone
+"""Exports the Microduck policies trained in a microduck_rl clone
 (github.com/pollen-robotics/microduck_rl) for the viewer:
 
-  pretrained_policies/microduck_rl/walk.onnx    Mjlab-Velocity-Flat-MicroDuck
-  pretrained_policies/microduck_rl/policy.json  what public/js/microduck.js and
-                                                server/policies.py need
+  pretrained_policies/microduck_rl/walk.onnx        Mjlab-Velocity-Flat-MicroDuck
+  pretrained_policies/microduck_rl/kick_right.onnx  Mjlab-BallKick-Flat-MicroDuck
+  pretrained_policies/microduck_rl/policy.json      what public/js/microduck.js and
+                                                    server/policies.py need
+
+Walking is the policy the duck runs; the others are skills it switches to
+for a while and comes back from (policy.json's "skills"), sharing its
+observation layout, as microduck_rl's daemon swaps them on the robot.
 
 The ONNX file comes from the clone's own scripts/export.py (observation
 normalizer baked in). policy.json has the joints, default pose and 61-D
@@ -13,10 +18,11 @@ microduck_rl's firmware gain, battery and command delay), which the viewer
 runs in place of the model's position actuators.
 
     cd microduck_rl
-    uv run python ../scripts/export_microduck.py --walk logs/rsl_rl/velocity/<run>/model_4999.pt
+    uv run python ../scripts/export_microduck.py --walk logs/rsl_rl/velocity/<run>/model_4999.pt \
+        --kick-right logs/rsl_rl/ball_kick_right/<run>/model_9999.pt
     cd .. && node scripts/vendor.mjs   # re-index public/json/policies.json
 
-Without --walk the ONNX is kept and only policy.json is rewritten.
+A policy left out keeps its ONNX; policy.json is rewritten either way.
 """
 
 import argparse
@@ -26,7 +32,15 @@ import subprocess
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 OUT = ROOT / 'pretrained_policies' / 'microduck_rl'
-TASKS = {'walk': 'Mjlab-Velocity-Flat-MicroDuck'}
+TASKS = {'walk': 'Mjlab-Velocity-Flat-MicroDuck', 'kick_right': 'Mjlab-BallKick-Flat-MicroDuck'}
+# The skills besides walking: run for `duration` seconds, then back to
+# walking (microduck_rl's "episodic" policies). The kick task starts from a
+# stand with the ball at the right toe (it does not see the ball), kicks at
+# once and settles; its command slots are zero in training (commands: false).
+SKILLS = {
+    'kick_right': {'label': 'Kick (right foot)', 'duration': 2.0, 'commands': False,
+                   'about': 'kicks a ball at the right toe forward from a stand, then walking again'},
+}
 
 # microduck_rl's src/mjlab_microduck/robot/microduck_constants.py (HOME_FRAME,
 # _BAM_ACTUATOR_KWARGS) and scripts/infer_policy.py (its deployment rehearsal).
@@ -92,6 +106,10 @@ def spec(sources):
       'obs': [['base_ang_vel', 3], ['projected_gravity', 3], ['joint_pos', 14], ['joint_vel', 14],
               ['last_action', 14], ['command', 3], ['cmd:head', 4], ['cmd:body', 6]],
       'commands': COMMANDS,
+      # Policies by name, the first the one it runs; any other a skill of
+      # SKILLS, offered when its ONNX is there.
+      'skills': {'walk': {'onnx': 'walk.onnx', 'label': 'Walk'},
+                 **{k: {'onnx': f'{k}.onnx', **v} for k, v in SKILLS.items() if (OUT / f'{k}.onnx').exists()}},
       'joint_vel_lag': 1,
       'command_range': {'lin_vel_x': [-0.4, 0.4], 'lin_vel_y': [-0.3, 0.3], 'ang_vel_yaw': [-1.0, 1.0]},
       # The policy's dead band: standing still, it does not start for
@@ -112,7 +130,8 @@ def spec(sources):
 
 def main():
   ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-  ap.add_argument('--walk', type=pathlib.Path, help='checkpoint of Mjlab-Velocity-Flat-MicroDuck')
+  for name, task in TASKS.items():
+    ap.add_argument(f"--{name.replace('_', '-')}", type=pathlib.Path, help=f'checkpoint of {task}')
   args = ap.parse_args()
   OUT.mkdir(parents=True, exist_ok=True)
   index = OUT / 'policy.json'

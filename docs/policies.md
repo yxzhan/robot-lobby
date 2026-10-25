@@ -108,6 +108,27 @@ clone's environment, see its docstring) exports the walking policy to
 `pretrained_policies/microduck_rl/` (`walk.onnx`, `policy.json`). The duck
 starts with `microduck-walk` on (keys and goal marker).
 
+### Skills: more than one policy
+
+`policy.json`'s `skills` lists the duck's policies by name, walking first;
+the others are skills with the same 61-D observation and 14 actions that it
+switches to for a while and comes back from on its own, as microduck_rl's
+daemon swaps its "episodic" policies on the robot. There is one so far,
+`kick_right` (`kick_right.onnx`, the `Mjlab-BallKick-Flat-MicroDuck` task):
+from a stand it kicks a ball lying at its right toe forward at about 1 m/s
+and settles on both feet. It does not see the ball (the robot has no way
+to), so aim the duck first: the ball 9 cm ahead and 4 cm right of the
+trunk, within about 1.5 cm. The library's `objects/custom/microduck_ball` is
+the 70 mm, 15 g ball it was trained with.
+
+The skill is a command, `skill` (an enum of the names: the Policy section's
+Skill select, or <kbd>K</kbd> for the first skill while the duck is
+driven), so it goes to the server and comes back to every browser like the
+others. A skill runs its `duration` (2 s for the kick), then the duck walks
+again and the select goes back to `walk`. One with `"commands": false` sees
+zeros for the twist and the head and body commands, as in its training.
+Export more with `scripts/export_microduck.py` (`TASKS` and `SKILLS`).
+
 It was trained on the BAM model of the XL330 servos (firmware P loop,
 DC motor with back-EMF and battery sag, load-dependent friction), not on
 plain position actuators, and does not stand without it. `public/js/microduck.js`

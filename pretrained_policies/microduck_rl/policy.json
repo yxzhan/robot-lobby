@@ -4,6 +4,10 @@
   "walk": {
    "task": "Mjlab-Velocity-Flat-MicroDuck",
    "checkpoint": "logs/rsl_rl/velocity/2026-10-18_01-24-25_velocity/model_4999.pt"
+  },
+  "kick_right": {
+   "task": "Mjlab-BallKick-Flat-MicroDuck",
+   "checkpoint": "logs/rsl_rl/ball_kick_right/2026-10-24_17-18-14_ball_kick_right/model_9999.pt"
   }
  },
  "ctrl_dt": 0.02,
@@ -170,6 +174,19 @@
     ]
    ],
    "about": "body pose offset: trained only within these few mm and degrees, and barely followed"
+  }
+ },
+ "skills": {
+  "walk": {
+   "onnx": "walk.onnx",
+   "label": "Walk"
+  },
+  "kick_right": {
+   "onnx": "kick_right.onnx",
+   "label": "Kick (right foot)",
+   "duration": 2.0,
+   "commands": false,
+   "about": "kicks a ball at the right toe forward from a stand, then walking again"
   }
  },
  "joint_vel_lag": 1,
