@@ -5,7 +5,7 @@
 // which has the rest:
 //
 // - skills (skills.js): walking, the default, and kick_right, which it
-//   switches to by hand for 2 s (as microduck_rl's daemon swaps its episodic
+//   switches to by hand for 0.3 s (as microduck_rl's daemon swaps its episodic
 //   policies), of the same observation and actions; it sees zeros for the
 //   twist and the commands (commands: false), as in its training. The
 //   SuperMimic walking policy (microduck_supermimic) is a directory and
@@ -193,7 +193,7 @@ export class MicroduckController {
   // Skills (skills.js): what the panel shows and picks.
   get skillMenu() { return this.skills.menu; }
   get skill() { return this.skills.want; }
-  setSkill(name) { this.skills.request(name); }
+  setSkill(name, duration) { this.skills.request(name, duration); }
   get activeSkill() { return this.skills.shown; }
 
   // The policy input from `data` (synchronous) for skill `skill`; keeps qdot

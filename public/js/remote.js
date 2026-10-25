@@ -210,11 +210,11 @@ export class RemotePolicy extends RemoteDriver {
   }
 
   // Skills: the server runs it (a `skill` request); the status brings it back.
-  setSkill(name) {
+  setSkill(name, duration) {
     if (!this.skillMenu?.manual.includes(name)) throw new Error(`no skill ${name} to pick`);
     this.skill = name;
     this.changedAt.skill = performance.now();
-    this.app.net.send('skill', { id: this.robot.netId, name });
+    this.app.net.send('skill', { id: this.robot.netId, name, ...(duration != null && { duration }) });
   }
 
   // commands.js setCommand: the value is already a valid one.

@@ -184,7 +184,7 @@
   "kick_right": {
    "onnx": "kick_right.onnx",
    "label": "Kick (right foot)",
-   "duration": 2.0,
+   "duration": 0.3,
    "commands": false,
    "key": "k",
    "about": "kicks a ball at the right toe forward from a stand, then walking again"

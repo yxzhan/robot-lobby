@@ -42,8 +42,10 @@ SUPERMIMIC = ROOT / 'pretrained_policies' / 'microduck_supermimic'
 # walking (microduck_rl's "episodic" policies). The kick task starts from a
 # stand with the ball at the right toe (it does not see the ball), kicks at
 # once and settles; its command slots are zero in training (commands: false).
+# 0.3 s: the kick itself (the ball is off at ~0.2 s), walking takes over the
+# settling, as tried in the viewer (2 s, the daemon's, stands a while).
 SKILLS = {
-    'kick_right': {'label': 'Kick (right foot)', 'duration': 2.0, 'commands': False, 'key': 'k',
+    'kick_right': {'label': 'Kick (right foot)', 'duration': 0.3, 'commands': False, 'key': 'k',
                    'about': 'kicks a ball at the right toe forward from a stand, then walking again'},
 }
 

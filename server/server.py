@@ -23,8 +23,9 @@ Protocol (client -> server, JSON {op, ...}; `rid` asks for a reply):
   not zero; stops after CMD_TIMEOUT without one; a moving one drops the goal)
   command {name, value}   one of the policy's other commands (its describe()'s
   `commands`, public/js/commands.js), kept until changed
-  skill {name}   the policy's manual skill to run (its describe()'s `skills`,
-  public/js/skills.js): the model, not an input of it
+  skill {name, duration?}   the policy's manual skill to run (its
+  describe()'s `skills`, public/js/skills.js): the model, not an input of
+  it; a timed one for `duration` s instead of its own
   goal {goal: {x, y, yaw} or null} (the robot drives there: goal.py)
   ik_config {config}   ik_target {chain, pos, rot} (in the chain's ref body
   frame)   ik_reset_target {chain or null}   ik_gripper {chain, amount?}
@@ -999,7 +1000,7 @@ class World:
       c = r.policy if r.use['policy'] else None
       if c is None or not hasattr(c, 'set_skill'):
         raise ValueError(f'{r.label}: its policy has no skills')
-      c.set_skill(msg['name'])
+      c.set_skill(msg['name'], msg.get('duration'))
       return
     elif op == 'goal':
       r.set_goal(msg.get('goal'))

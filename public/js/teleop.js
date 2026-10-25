@@ -27,6 +27,7 @@ import { dragPose, markerScale, pickMarker, startDrag } from './marker.js';
 import { BaseController, KINDS } from './base.js';
 import { POLICIES, POLICY_ROOT, defaultPolicy, isInstalled, policyById } from './policy.js';
 import { COMMAND_TYPES, clampCommand, commandDefault, setCommand } from './commands.js';
+import { DURATION_RANGE } from './skills.js';
 import { bodyPose, goalCommand } from './goal.js';
 import { RosLink, bridgeUrl } from './ros.js';
 import { ACTIONS, BINDINGS, GamepadMap, bindingName, gamepad } from './gamepad.js';
@@ -192,6 +193,9 @@ const INPUT = 'mujoco-filament/teleop-input';
 // Keys set for skills in the panel, {policy id: {skill: key, '' for none}},
 // over the keys of the policies' policy.json (skills.js).
 const SKILL_KEYS = 'mujoco-filament/skill-keys';
+// Durations set for timed skills in the panel, {policy id: {skill: seconds}},
+// instead of their policy.json's.
+const SKILL_DURATIONS = 'mujoco-filament/skill-durations';
 // Keys a skill cannot have: driving (WASD, QE), height (R/F), the gripper (G).
 const RESERVED_KEYS = new Set(['w', 'a', 's', 'd', 'q', 'e', 'r', 'f', 'g']);
 const INPUTS = [['keyboard', 'Keyboard'], ['goal', 'Goal marker'], ['gamepad', 'Gamepad']];
@@ -235,6 +239,7 @@ export class TeleopPanel {
     this.cmdViews = [];      // per policy command (or vector dimension): {c, name, i, slider, label, show} or {c, name, select}, kept up to date
     this.skillViews = [];    // the policy's skill controls: {c, select, fallback} or {c, buttons}, kept up to date
     try { this.skillKeySet = JSON.parse(localStorage.getItem(SKILL_KEYS) ?? '{}'); } catch { this.skillKeySet = {}; }
+    try { this.skillDurations = JSON.parse(localStorage.getItem(SKILL_DURATIONS) ?? '{}'); } catch { this.skillDurations = {}; }
     this.learningKey = null;  // {policy, skill} while the next key pressed becomes a skill's
     this.closedChains = new Set();  // "<prefix><chain name>" folded in the panel
     // Folded sections ('base', 'ik'), kept across robots and page loads.
@@ -295,7 +300,7 @@ export class TeleopPanel {
       const skill = menu.manual.find((n) => keys[n] === k);
       if (!skill) return;
       e.preventDefault();
-      c.setSkill(skill);
+      c.setSkill(skill, this.skillDurations[this.active.use.policy]?.[skill]);
     });
     // The panel's hints mention a gamepad while one is connected.
     window.addEventListener('gamepadconnected', () => this.render());
@@ -324,6 +329,14 @@ export class TeleopPanel {
     }
     set[skill] = key;
     try { localStorage.setItem(SKILL_KEYS, JSON.stringify(this.skillKeySet)); } catch { /* no storage */ }
+  }
+
+  // Sets a timed skill's duration (null: its policy.json's).
+  setSkillDuration(policy, skill, seconds) {
+    const set = (this.skillDurations[policy] ??= {});
+    if (seconds == null) delete set[skill];
+    else set[skill] = seconds;
+    try { localStorage.setItem(SKILL_DURATIONS, JSON.stringify(this.skillDurations)); } catch { /* no storage */ }
   }
 
   // The IK of the driven robot and its chain dragged last, if it has one.
@@ -923,16 +936,17 @@ export class TeleopPanel {
 
   // The policy's skills (skills.js: the model it runs, above its commands):
   // a select of those that stay on (walking ones), a button per one that
-  // runs a while (a kick: lit while it runs), and their keys, each set by
-  // clicking it and pressing a key.
+  // runs a while (a kick: lit while it runs) with its duration (empty: its
+  // policy.json's), and their keys, each set by clicking it and pressing a key.
   renderSkills(c, box, policy) {
     const menu = c.skillMenu, sk = menu.skills, label = (n) => sk[n]?.label ?? n;
     const steady = menu.manual.filter((n) => !sk[n]?.duration), timed = menu.manual.filter((n) => sk[n]?.duration);
     const keys = this.skillKeys(policy, menu);
     const kbd = (n) => (keys[n] ? `<kbd>${keys[n].toUpperCase()}</kbd>` : '');
     const err = el('div', { className: 'error', hidden: true });
+    const durations = () => this.skillDurations[policy] ?? {};
     const pick = (n) => {
-      try { c.setSkill(n); err.hidden = true; } catch (e) { err.textContent = e.message ?? `${e}`; err.hidden = false; }
+      try { c.setSkill(n, durations()[n]); err.hidden = true; } catch (e) { err.textContent = e.message ?? `${e}`; err.hidden = false; }
     };
     box.append(el('div', { className: 'sub', textContent: 'Skills' }));
     if (steady.length > 1) {
@@ -942,14 +956,25 @@ export class TeleopPanel {
       box.append(el('div', { className: 'field' }, el('span', { textContent: 'Skill' }), el('div', { className: 'ctl' }, s)));
     }
     if (timed.length) {
-      const buttons = new Map(timed.map((n) => {
-        const b = this.button('', `${sk[n].about ?? label(n)} (${sk[n].duration} s, then ${label(menu.default)} again)`, () => pick(n));
+      const buttons = new Map();
+      for (const n of timed) {
+        const b = this.button('', `${sk[n].about ?? label(n)}, then ${label(menu.default)} again`, () => pick(n));
         b.innerHTML = `${kbd(n)}${label(n)}`;
         b.classList.toggle('on', c.skill === n);
-        return [n, b];
-      }));
+        buttons.set(n, b);
+        // Its duration: empty for policy.json's (the placeholder).
+        const [lo, hi] = DURATION_RANGE;
+        const d = el('input', { type: 'number', className: 'secs', min: lo, max: hi, step: 0.1, value: durations()[n] ?? '',
+          placeholder: `${sk[n].duration}`, title: `How long ${label(n)} runs (s, simulation time; empty: ${sk[n].duration} s, its policy.json's)` });
+        d.onchange = () => {
+          const v = d.value === '' ? null : Math.min(hi, Math.max(lo, Number(d.value)));
+          if (v != null && !Number.isFinite(v)) { d.value = durations()[n] ?? ''; return; }
+          this.setSkillDuration(policy, n, v);
+          d.value = v ?? '';
+        };
+        box.append(el('div', { className: 'bar skills' }, b, d, el('span', { className: 'note', textContent: 's' })));
+      }
       this.skillViews.push({ c, buttons });
-      box.append(el('div', { className: 'bar skills' }, ...buttons.values()));
     }
     // Keys: a chip per skill; click, then press a key (Esc: none).
     const chips = menu.manual.map((n) => {

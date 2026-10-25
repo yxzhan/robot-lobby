@@ -63,7 +63,7 @@ control tick, `public/js/skills.js` in the browser and `Skills` in
 "skills": {
   "walk":       {"onnx": "walk.onnx", "label": "Walk"},
   "balance":    {"onnx": "balance.onnx", "when": {"command_below": 0.05}},
-  "kick_right": {"onnx": "kick_right.onnx", "label": "Kick", "duration": 2.0, "key": "k", "commands": false}
+  "kick_right": {"onnx": "kick_right.onnx", "label": "Kick", "duration": 0.3, "key": "k", "commands": false}
 }
 ```
 
@@ -76,8 +76,11 @@ control tick, `public/js/skills.js` in the browser and `Skills` in
   `key`), the one picked (`skill`) and `setSkill(name)`; in network mode a
   `skill {id, name}` request, and the status brings the pick and the model
   running back to every browser. The Policy section's Skills, above its
-  Commands, has a button for each one with a `duration` (lit while it runs),
-  a Skill select of the others, and a Keys row that binds a key to each,
+  Commands, has a button for each one with a `duration` (lit while it runs;
+  pressed again, the time starts over) and beside it how long it runs (empty:
+  its `duration`; 0.1-60 s, kept in the browser per policy and sent with the
+  pick, `skill {id, name, duration}`), a Skill select of the others, and a
+  Keys row that binds a key to each,
   `key` (policy.json) to start with: click a skill's key, press another
   (<kbd>Esc</kbd>: none; not the drive keys W A S D Q E R F G); the keys set
   are kept in the browser per policy and work while the robot is driven.
@@ -165,7 +168,9 @@ to), so aim the duck first: the ball 9 cm ahead and 4 cm right of the
 trunk, within about 1.5 cm. The library's `objects/custom/microduck_ball` is
 the 70 mm, 15 g ball it was trained with.
 
-The kick runs 2 s (<kbd>K</kbd>), then the duck walks again; it sees zeros
+The kick runs 0.3 s (<kbd>K</kbd>; the ball is off at ~0.2 s), then the
+walking policy takes over the settling; the panel can set another
+duration. It sees zeros
 for the twist and the head and body commands, as in its training. Export
 more with `scripts/export_microduck.py` (`TASKS` and `SKILLS`).
 

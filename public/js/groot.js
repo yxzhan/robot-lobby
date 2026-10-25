@@ -92,7 +92,7 @@ export class GrootController {
   // Skills (skills.js): what the panel shows and picks.
   get skillMenu() { return this.skills.menu; }
   get skill() { return this.skills.want; }
-  setSkill(name) { this.skills.request(name); }
+  setSkill(name, duration) { this.skills.request(name, duration); }
   get activeSkill() { return this.skills.shown; }
 
   // The commanded base height (R/F keys).

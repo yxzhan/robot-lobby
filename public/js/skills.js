@@ -7,7 +7,7 @@
 //   "skills": {
 //     "walk":    {"onnx": "walk.onnx", "label": "Walk"},
 //     "balance": {"onnx": "balance.onnx", "when": {"command_below": 0.05}},
-//     "kick":    {"onnx": "kick.onnx", "label": "Kick", "duration": 2.0, "key": "k", "commands": false}
+//     "kick":    {"onnx": "kick.onnx", "label": "Kick", "duration": 0.3, "key": "k", "commands": false}
 //   }
 //
 // - The first is the default.
@@ -23,7 +23,8 @@
 //   commands (commands.js): those are inputs of the model running; a skill
 //   picks the model.
 //   One with a `duration` runs that long (simulation time: the same physics
-//   steps at any speed) and then the default again, one
+//   steps at any speed; a pick may ask for another, as the panel does) and
+//   then the default again, one
 //   without until another is picked; automatic skills only stand in for the
 //   default.
 // - commands: false: trained with zeros for the twist and the commands (the
@@ -31,8 +32,11 @@
 // - label, about: for the panel.
 // A controller with skills has `skills` (a Skills) and, for the panel and
 // the network: skillMenu (menu), skill (the manual one picked, `want`),
-// setSkill(name) (request), activeSkill (the one running when there is a
-// choice, `shown`).
+// setSkill(name, duration?) (request), activeSkill (the one running when
+// there is a choice, `shown`).
+
+// The durations a pick may ask for (s).
+export const DURATION_RANGE = [0.1, 60];
 
 const CONDITIONS = {
   command_below: (v, c) => Math.hypot(...c.cmd) < v,
@@ -83,15 +87,20 @@ export class Skills {
     return { default: this.default, manual: m, skills };
   }
 
-  // Picks manual skill `name`; it runs from the next tick.
-  request(name) {
+  // Picks manual skill `name`; it runs from the next tick. A timed one runs
+  // `duration` seconds if given (within DURATION_RANGE), else its own.
+  request(name, duration = null) {
     if (!this.manual.includes(name)) throw new Error(`no skill ${name} to pick (${this.manual.join(', ')})`);
     this.want = name;
+    this.wantFor = this.specs[name].duration && Number.isFinite(duration) && duration > 0
+      ? Math.min(DURATION_RANGE[1], Math.max(DURATION_RANGE[0], duration)) : null;
+    if (this.picked?.[0] === name) this.picked = null;  // picked again: from now
   }
 
   // Forget what ran (robot reset): the default again.
   reset() {
     this.want = this.default;
+    this.wantFor = null;     // the duration asked for with it, if any
     this.picked = null;  // the manual skill running, and since when: [name, data.time]
     this.active = this.default;
   }
@@ -102,9 +111,10 @@ export class Skills {
   pick(c, time) {
     const want = this.want;
     if (want !== this.picked?.[0] || time < this.picked[1]) this.picked = [want, time];  // time went back: anew
-    const d = this.specs[want]?.duration;
+    const d = this.specs[want]?.duration && (this.wantFor ?? this.specs[want].duration);
     if (d && time - this.picked[1] >= d - 1e-9) {
       this.want = this.default;
+      this.wantFor = null;
       this.picked = [this.default, time];
     }
     let run = this.picked[0];

@@ -119,6 +119,7 @@ def observation(spec, parts, commands, command):
 # ---------------------------------------------------------------------------
 # Policies of more than one model (public/js/skills.js)
 
+SKILL_DURATION_RANGE = (0.1, 60.0)  # the durations a pick may ask for (s)
 SKILL_CONDITIONS = {
     'command_below': lambda v, c: math.hypot(*c.cmd) < v,
 }
@@ -168,13 +169,19 @@ class Skills:
                   **{k: self.specs[n][k] for k in ('about', 'duration', 'key') if self.specs[n].get(k)}} for n in m}
     return {'default': self.default, 'manual': m, 'skills': skills}
 
-  def request(self, name):
+  def request(self, name, duration=None):
+    """A timed one runs `duration` seconds if given, else its own."""
     if name not in self.manual:
       raise ValueError(f"no skill {name!r} to pick ({', '.join(self.manual)})")
     self.want = name
+    ok = self.specs[name].get('duration') and isinstance(duration, (int, float)) and math.isfinite(duration) and duration > 0
+    self.want_for = min(SKILL_DURATION_RANGE[1], max(SKILL_DURATION_RANGE[0], float(duration))) if ok else None
+    if self.picked is not None and self.picked[0] == name:  # picked again: from now
+      self.picked = None
 
   def reset(self):
     self.want = self.default
+    self.want_for = None  # the duration asked for with it, if any
     self.picked = None  # the manual skill running, and since when: (name, data.time)
     self.active = self.default
 
@@ -182,9 +189,10 @@ class Skills:
     want = self.want
     if self.picked is None or want != self.picked[0] or time < self.picked[1]:  # time went back: anew
       self.picked = (want, time)
-    d = self.specs[want].get('duration')
+    d = self.specs[want].get('duration') and (self.want_for or self.specs[want]['duration'])
     if d and time - self.picked[1] >= d - 1e-9:
       self.want = self.default
+      self.want_for = None
       self.picked = (self.default, time)
     run = self.picked[0]
     if run == self.default:
@@ -318,8 +326,8 @@ class GrootController:
     data.ctrl[self.act[:NA]] = DEFAULT_ANGLES[:NA] + self.action * ACTION_SCALE
 
   # Skills (Skills): what clients show and pick.
-  def set_skill(self, name):
-    self.skills.request(name)
+  def set_skill(self, name, duration=None):
+    self.skills.request(name, duration)
 
   def describe(self):
     return {'name': self.name, 'drive': self.drive, 'commands': self.commands, 'command': self.command,
@@ -762,8 +770,8 @@ class MicroduckController:
     self.pending.append((data.time + s['bam']['delay'], self.default + self.action * s['action_scale']))
 
   # Skills (Skills): what clients show and pick.
-  def set_skill(self, name):
-    self.skills.request(name)
+  def set_skill(self, name, duration=None):
+    self.skills.request(name, duration)
 
   def describe(self):
     return {'name': self.name, 'drive': self.drive, 'commands': self.commands, 'command': self.command,
