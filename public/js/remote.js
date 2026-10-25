@@ -186,7 +186,11 @@ export class RemotePolicy extends RemoteDriver {
     this.drive = desc.drive;
     this.commands = desc.commands ?? {};
     this.command = structuredClone(desc.command ?? {});
-    this.changedAt = {};  // command name -> when it was set here
+    this.changedAt = {};  // command name (or 'skill') -> when it was set here
+    // Skills (skills.js): the menu, the manual one picked, the model running there.
+    this.skillMenu = desc.skills ?? null;
+    this.skill = desc.skill ?? this.skillMenu?.default ?? null;
+    this.activeSkill = desc.active ?? null;
     if ('height' in this.commands) {  // a commanded base height: also the panel's R/F keys, sent with cmd
       Object.defineProperty(this, 'height', {
         get: () => this.heightNow,
@@ -201,7 +205,16 @@ export class RemotePolicy extends RemoteDriver {
   update(desc) {
     this.name = desc.name;
     this.drive = desc.drive;
-    this.status(desc.command);
+    this.skillMenu = desc.skills ?? null;
+    this.status(desc);
+  }
+
+  // Skills: the server runs it (a `skill` request); the status brings it back.
+  setSkill(name) {
+    if (!this.skillMenu?.manual.includes(name)) throw new Error(`no skill ${name} to pick`);
+    this.skill = name;
+    this.changedAt.skill = performance.now();
+    this.app.net.send('skill', { id: this.robot.netId, name });
   }
 
   // commands.js setCommand: the value is already a valid one.
@@ -211,9 +224,12 @@ export class RemotePolicy extends RemoteDriver {
     this.app.net.send('command', { id: this.robot.netId, name, value });
   }
 
-  // The server's values (status, describe), but those just changed here.
-  status(command) {
+  // The server's values ({command, skill, active}: status, describe), but
+  // those just changed here.
+  status({ command, skill, active } = {}) {
     const now = performance.now();
+    if (active !== undefined) this.activeSkill = active;
+    if (skill !== undefined && !(now - (this.changedAt.skill ?? -Infinity) < ECHO_MS)) this.skill = skill;
     for (const [k, v] of Object.entries(command ?? {})) {
       if (!(now - (this.changedAt[k] ?? -Infinity) < ECHO_MS)) this.command[k] = v;
     }

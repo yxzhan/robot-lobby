@@ -1,0 +1,16 @@
+{
+ "source": "https://huggingface.co/nepyope/GR00T-WholeBodyControl_g1",
+ "_comment": "The skills public/js/groot.js and server/policies.py run (public/js/skills.js); the rest of the controller (joints, gains, observation) is in groot.js.",
+ "skills": {
+  "walk": {
+   "onnx": "GR00T-WholeBodyControl-Walk.onnx",
+   "label": "Walk"
+  },
+  "balance": {
+   "onnx": "GR00T-WholeBodyControl-Balance.onnx",
+   "label": "Balance",
+   "when": {"command_below": 0.05},
+   "about": "standing: lerobot's GR00T controller runs it for drive commands under 0.05"
+  }
+ }
+}

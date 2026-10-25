@@ -20,7 +20,7 @@ $PY scripts/eval.py --checkpoint logs/duck-walk/<run>/model_6000.pt             
 $PY scripts/eval.py --onnx ../../pretrained_policies/microduck_rl/walk.onnx        # PPO, same metrics
 $PY scripts/eval.py --checkpoint ... --envs 1 --seconds 15 --video walk.mp4        # MUJOCO_GL=egl headless
 $PY scripts/wm_check.py --checkpoint logs/duck-walk/<run>/model_6000.pt           # world model error
-$PY scripts/export_onnx.py logs/duck-walk/<run>/model_6000.pt walk.onnx
+$PY scripts/export_onnx.py logs/duck-walk/<run>/model_6000.pt ../../pretrained_policies/microduck_supermimic/walk.onnx
 ```
 
 Every field of `TrainCfg` (`smlab/core/trainer.py`) is a flag. The defaults
@@ -95,5 +95,6 @@ after 29 minutes instead of 3.3 hours; it falls more than PPO's (0.49 vs
 But it hardly moves forward: commanded 0.32 m/s (no pushes) it walks at
 0.06 m/s (4000 and 6000 iterations alike), PPO's at 0.19. The tracking
 reward hides it (most commands are slow, and it is lenient: exp(-err²/0.1)).
-The 4000-iteration actor is `pretrained_policies/microduck_rl/walk_supermimic.onnx`,
-the Microduck's skill `walk_supermimic` in the viewer.
+The 4000-iteration actor is `pretrained_policies/microduck_supermimic/walk.onnx`,
+the policy `microduck-supermimic` (Walking · Microduck (SuperMimic)) in the viewer;
+`scripts/export_microduck.py` writes its `policy.json`.

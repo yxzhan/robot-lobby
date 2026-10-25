@@ -33,7 +33,9 @@
 // height, a gait…) is a command it declares in `commands`, with its values
 // in `command` (commands.js): the panel makes a control for each, and a
 // policy.json's observation takes one as its part cmd:<name>. A command
-// named `height` is also `height` on the controller (R/F keys).
+// named `height` is also `height` on the controller (R/F keys). A policy of
+// several models (its policy.json's "skills") picks one each tick with
+// skills.js (Skills) and shows it as `activeSkill`.
 
 import { G1_MODELS, GrootController, loadGrootPolicy } from './groot.js';
 import { PlaygroundController, loadPlaygroundPolicy } from './playground.js';
@@ -88,6 +90,14 @@ export const POLICIES = [
     defaultFor: /(^|\/)custom\/(microduck(_sky|_graphite|_lavender)?)\/\2\.xml$/,  // and its colors
     load: async (file) => loadMicroduckPolicy(await onnxRuntime(), file),
     create: (weights, prefix) => new MicroduckController(weights, prefix, 'Microduck walking policy'),
+  },
+  {
+    id: 'microduck-supermimic',
+    name: 'Walking · Microduck (SuperMimic)',
+    about: 'The same walking task trained in 19 min with SuperMimic (training/supermimic): it steps and stays up, but makes little headway (0.06 m/s for 0.32 commanded).',
+    dir: 'microduck_supermimic',  // training/supermimic export_onnx.py, scripts/export_microduck.py
+    load: async (file) => loadMicroduckPolicy(await onnxRuntime(), file),
+    create: (weights, prefix) => new MicroduckController(weights, prefix, 'Microduck SuperMimic walking policy'),
   },
 ];
 

@@ -2889,7 +2889,7 @@ try {
           if (!r) continue;
           if (s.ik) r.ik?.status(s.ik);
           if (r.base) r.base.measured = s.base?.measured ?? null;
-          if (s.policy) r.policy?.status?.(s.policy.command);
+          if (s.policy) r.policy?.status?.(s.policy);
           r.goalResult = s.goal ?? null;
         }
         for (const r of robots) if (!msg.robots[r.netId]) r.goalResult = null;

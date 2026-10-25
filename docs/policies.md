@@ -50,6 +50,49 @@ pose, up to each joint's reach: the walking task trains it to hold them)
 and `body` (a body pose offset trained only within ±5 mm and ±0.05 rad,
 which the walking task barely follows); GR00T's is `height` (0.5-1 m).
 
+## Skills: policies of more than one model
+
+A policy can run one of several models of the same observation and actions,
+its **skills**, listed in its directory's `policy.json` (GR00T,
+Microduck). A skill is the model, a level above the commands, which are
+inputs of the model running. One shared implementation picks the model every
+control tick, `public/js/skills.js` in the browser and `Skills` in
+`server/policies.py`:
+
+```json
+"skills": {
+  "walk":       {"onnx": "walk.onnx", "label": "Walk"},
+  "balance":    {"onnx": "balance.onnx", "when": {"command_below": 0.05}},
+  "kick_right": {"onnx": "kick_right.onnx", "label": "Kick", "duration": 2.0, "key": "k", "commands": false}
+}
+```
+
+- The first is the default.
+- One with `when` is **automatic**: it runs instead of the default while its
+  condition holds (the first that does). Conditions: `command_below: v`,
+  the drive twist's norm |(vx, vy, yaw rate)| under v.
+- The others (the default too) are **manual**: with two or more, the
+  controller has a `skillMenu` (each skill's `label`, `about`, `duration`,
+  `key`), the one picked (`skill`) and `setSkill(name)`; in network mode a
+  `skill {id, name}` request, and the status brings the pick and the model
+  running back to every browser. The Policy section's Skills, above its
+  Commands, has a button for each one with a `duration` (lit while it runs),
+  a Skill select of the others, and a Keys row that binds a key to each,
+  `key` (policy.json) to start with: click a skill's key, press another
+  (<kbd>Esc</kbd>: none; not the drive keys W A S D Q E R F G); the keys set
+  are kept in the browser per policy and work while the robot is driven.
+  One with a `duration`
+  runs that long in simulation time (as many physics steps at any speed of
+  the Physics panel), then the default again and the select with it; one without
+  until another is picked. Automatic skills only stand in for the default.
+- `"commands": false`: trained with zeros for the twist and the commands,
+  and observed so.
+
+The Teleop panel's readout shows the model running after the command (in
+network mode the server sends it with the status). Every skill keeps the
+controller's state as it is (the observation history, the last action):
+a switch is a hard swap, as on the robots.
+
 `public/js/torchscript.js` reads the tensors of a TorchScript `.pt` (a zip
 of raw storages) in the browser, so small exported MLPs/RNNs need no
 conversion.
@@ -61,8 +104,9 @@ If the GR00T locomotion policies are checked out into `pretrained_policies/`
 pretrained_policies/GR00T-WholeBodyControl_g1`), they load the first time a
 robot runs the `groot-g1` policy. `public/js/groot.js` is a port of lerobot's
 `GrootLocomotionController` running on onnxruntime-web (WASM, one thread,
-~0.2 ms per inference): two MLPs (Balance when the command is ~0, Walk
-otherwise) at 50 Hz on 6 stacked 86-D observations, driving legs and waist,
+~0.2 ms per inference): two MLPs, the skills of its `policy.json` (Walk,
+and Balance, automatic for commands under 0.05, as lerobot switches them)
+at 50 Hz on 6 stacked 86-D observations, driving legs and waist,
 while the arms hold whatever target their actuators have (the default pose
 at spawn; set them with IK chains or the Stage panel's control sliders, as
 in g1_mujoco). The policy's PD gains are written
@@ -110,30 +154,31 @@ starts with `microduck-walk` on (keys and goal marker), and so do its three
 other colors (`custom/microduck_sky`, `_graphite`, `_lavender`: the same model,
 recolored by `import_microduck.py`).
 
-### Skills: more than one policy
+### Skills
 
-`policy.json`'s `skills` lists the duck's policies by name, walking first;
-the others are skills with the same 61-D observation and 14 actions that it
-switches to for a while and comes back from on its own, as microduck_rl's
-daemon swaps its "episodic" policies on the robot; one without a duration
-stays on until another is picked. `walk_supermimic` is the walking task
-trained with SuperMimic (`training/supermimic`): it steps as the PPO
-policy does and stays up, but makes little headway (0.06 m/s for 0.32
-commanded, the PPO policy 0.19). `kick_right` (`kick_right.onnx`, the
-`Mjlab-BallKick-Flat-MicroDuck` task):
+Its `policy.json` has walking and a manual skill (see Skills above), like
+microduck_rl's daemon swapping its "episodic" policies on the robot:
+`kick_right` (`kick_right.onnx`, the `Mjlab-BallKick-Flat-MicroDuck` task):
 from a stand it kicks a ball lying at its right toe forward at about 1 m/s
 and settles on both feet. It does not see the ball (the robot has no way
 to), so aim the duck first: the ball 9 cm ahead and 4 cm right of the
 trunk, within about 1.5 cm. The library's `objects/custom/microduck_ball` is
 the 70 mm, 15 g ball it was trained with.
 
-The skill is a command, `skill` (an enum of the names: the Policy section's
-Skill select, or <kbd>K</kbd> for the first skill while the duck is
-driven), so it goes to the server and comes back to every browser like the
-others. A skill runs its `duration` (2 s for the kick), then the duck walks
-again and the select goes back to `walk`. One with `"commands": false` sees
-zeros for the twist and the head and body commands, as in its training.
-Export more with `scripts/export_microduck.py` (`TASKS` and `SKILLS`).
+The kick runs 2 s (<kbd>K</kbd>), then the duck walks again; it sees zeros
+for the twist and the head and body commands, as in its training. Export
+more with `scripts/export_microduck.py` (`TASKS` and `SKILLS`).
+
+### Trained with SuperMimic
+
+`microduck-supermimic` (Walking · Microduck (SuperMimic),
+`pretrained_policies/microduck_supermimic/`) is the same walking task trained
+with SuperMimic in 19 minutes (`training/supermimic`), a policy of its own
+picked in the Policy section: the same controller, servo model and
+observation (its `policy.json` is written by `scripts/export_microduck.py`
+beside microduck_rl's), its `walk.onnx` from `training/supermimic`'s
+`export_onnx.py`. It steps as the PPO policy does and stays up, but makes
+little headway (0.06 m/s for 0.32 commanded, the PPO policy 0.19).
 
 It was trained on the BAM model of the XL330 servos (firmware P loop,
 DC motor with back-EMF and battery sag, load-dependent friction), not on

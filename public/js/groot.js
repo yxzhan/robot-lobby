@@ -5,8 +5,9 @@
 // (src/lerobot/robots/unitree_g1/controllers/gr00t_locomotion.py) plus the
 // parts of its sim that the policy depends on (lerobot/unitree-g1-mujoco):
 //
-// - Two ONNX MLPs (516 -> 15), Balance for |cmd| < 0.05 and Walk otherwise,
-//   run at 50 Hz on 6 stacked 86-D observation frames.
+// - Two ONNX MLPs (516 -> 15), run at 50 Hz on 6 stacked 86-D observation
+//   frames: the skills of the directory's policy.json (skills.js), Walk and
+//   Balance, which stands in for it while |cmd| < 0.05, as lerobot switches.
 // - The policy outputs targets for joints 0-14 (legs + waist) only. The arm
 //   actuators keep whatever target they have (the default pose from pose(),
 //   or what the Stage panel's control sliders set), PD-held with the
@@ -23,6 +24,7 @@
 
 import { runBatched } from './batch.js';
 import { commandDefaults } from './commands.js';
+import { Skills, loadSessions, loadSpec } from './skills.js';
 
 export const CONTROL_DT = 0.02;
 
@@ -65,14 +67,11 @@ export const GROOT_COMMANDS = {
 // Teleop panel; bind() fails if the G1's joints and actuators are not there.
 export const G1_MODELS = /(^|\/)mujoco_menagerie\/unitree_g1\/[^/]+\.xml$/;
 
-// {balance, walk} sessions. `source(name)` returns the .onnx bytes or a URL.
+// {ort, sessions: {skill: session}, spec} from the directory's policy.json.
+// `source(name)` returns a file's URL (or bytes).
 export async function loadGrootPolicy(ort, source) {
-  const open = async (name) => ort.InferenceSession.create(await source(name));
-  const [balance, walk] = await Promise.all([
-    open('GR00T-WholeBodyControl-Balance.onnx'),
-    open('GR00T-WholeBodyControl-Walk.onnx'),
-  ]);
-  return { ort, balance, walk };
+  const spec = await loadSpec(source);
+  return { ort, sessions: await loadSessions(ort, source, spec.skills), spec };
 }
 
 export class GrootController {
@@ -84,10 +83,17 @@ export class GrootController {
     this.name = 'GR00T locomotion policy';
     this.drive = { forward: 0.5, back: 0.3, side: 0.3, turn: 0.6 };  // keyboard speeds
     this.cmd = [0, 0, 0];  // vx, vy (m/s), yaw rate (rad/s)
+    this.skills = new Skills(policy.spec.skills);
     this.commands = GROOT_COMMANDS;
     this.command = commandDefaults(GROOT_COMMANDS);
     this.reset();
   }
+
+  // Skills (skills.js): what the panel shows and picks.
+  get skillMenu() { return this.skills.menu; }
+  get skill() { return this.skills.want; }
+  setSkill(name) { this.skills.request(name); }
+  get activeSkill() { return this.skills.shown; }
 
   // The commanded base height (R/F keys).
   get height() { return this.command.height; }
@@ -96,6 +102,7 @@ export class GrootController {
   reset() {
     this.action = new Float32Array(NA);
     this.history = new Float32Array(FRAME * HISTORY);
+    this.skills.reset();
   }
 
   // Finds the robot's joints and actuators in `model` and gives the actuators
@@ -183,11 +190,10 @@ export class GrootController {
     return this.history.slice();
   }
 
-  // Runs the policy on an observed input; resolves to the new action.
-  async infer(obs) {
-    const { ort, balance, walk } = this.policy;
-    const session = Math.hypot(...this.cmd) < 0.05 ? balance : walk;
-    this.action = await runBatched(ort, session, obs);
+  // Runs the skill for `time` on an observed input; resolves to the new action.
+  async infer(obs, time) {
+    const session = this.policy.sessions[this.skills.pick(this, time)];
+    this.action = await runBatched(this.policy.ort, session, obs);
     return this.action;
   }
 
@@ -200,7 +206,7 @@ export class GrootController {
   // One control tick: observe, infer, apply. `valid()` is checked after the
   // inference so a world swapped in meanwhile is not written to.
   async step(data, valid = () => true) {
-    const action = await this.infer(this.observe(data));
+    const action = await this.infer(this.observe(data), data.time);
     if (valid()) this.apply(data, action);
   }
 }

@@ -1,8 +1,8 @@
 """Exports a checkpoint's actor to ONNX: observation -> action, the observation
 normalizer baked in, input "obs" and output "actions" like rsl_rl's exports
-(so it drops in where pretrained_policies/microduck_rl/walk.onnx goes).
+(as the viewer's Microduck policies take it).
 
-    python scripts/export_onnx.py logs/duck-walk/<run>/model_6000.pt walk_supermimic.onnx
+    python scripts/export_onnx.py logs/duck-walk/<run>/model_6000.pt ../../pretrained_policies/microduck_supermimic/walk.onnx
 """
 
 import argparse

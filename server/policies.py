@@ -6,6 +6,10 @@ also cmd, drive; any of them commands and command, see
 public/js/commands.js, of which command_default, clamp_command and
 command_vector here are ports), with a synchronous step.
 
+Skills is public/js/skills.js: the models of a policy directory's
+policy.json ("skills") and which one runs each tick, for GrootController and
+MicroduckController alike.
+
 GrootController is a port of public/js/groot.js (see there for the
 observation, the two MLPs and the PD gains); PlaygroundController of
 public/js/playground.js (policies from training/: policy.onnx + policy.json);
@@ -113,6 +117,90 @@ def observation(spec, parts, commands, command):
 
 
 # ---------------------------------------------------------------------------
+# Policies of more than one model (public/js/skills.js)
+
+SKILL_CONDITIONS = {
+    'command_below': lambda v, c: math.hypot(*c.cmd) < v,
+}
+
+
+def load_skills(directory):
+  """(sessions {skill: InferenceSession}, spec): a policy directory's
+  policy.json and the ONNX files of its skills."""
+  import onnxruntime as ort
+  spec = json.loads((directory / 'policy.json').read_text())
+  if not spec.get('skills'):
+    raise ValueError(f'{directory / "policy.json"}: no skills')
+  opts = ort.SessionOptions()
+  opts.intra_op_num_threads = 1  # tiny MLPs, many robots: no thread pools
+  sessions = {k: ort.InferenceSession(str(directory / s['onnx']), opts, providers=['CPUExecutionProvider'])
+              for k, s in spec['skills'].items()}
+  return sessions, spec
+
+
+class Skills:
+  """Which skill runs (see public/js/skills.js): the default (the first);
+  an automatic one (`when`) instead of it while its condition holds; a
+  manual one picked with request() (a client's `skill` request), for its
+  `duration` if any. Not commands: a skill picks the model."""
+
+  def __init__(self, skills):
+    self.specs = skills
+    names = list(skills)
+    self.default = names[0]
+    for name, s in skills.items():
+      for k in s.get('when', {}):
+        if k not in SKILL_CONDITIONS:
+          raise ValueError(f"skill {name}: no condition {k} ({', '.join(SKILL_CONDITIONS)})")
+    if skills[self.default].get('when'):
+      raise ValueError(f'skill {self.default}: the default cannot be automatic')
+    self.manual = [n for n in names if not skills[n].get('when')]
+    self.auto = [n for n in names if skills[n].get('when')]
+    self.reset()
+
+  @property
+  def menu(self):
+    """What a client needs to pick, or None without a choice."""
+    m = self.manual
+    if len(m) < 2:
+      return None
+    skills = {n: {'label': self.specs[n].get('label', n),
+                  **{k: self.specs[n][k] for k in ('about', 'duration', 'key') if self.specs[n].get(k)}} for n in m}
+    return {'default': self.default, 'manual': m, 'skills': skills}
+
+  def request(self, name):
+    if name not in self.manual:
+      raise ValueError(f"no skill {name!r} to pick ({', '.join(self.manual)})")
+    self.want = name
+
+  def reset(self):
+    self.want = self.default
+    self.picked = None  # the manual skill running, and since when: (name, data.time)
+    self.active = self.default
+
+  def pick(self, c, time):
+    want = self.want
+    if self.picked is None or want != self.picked[0] or time < self.picked[1]:  # time went back: anew
+      self.picked = (want, time)
+    d = self.specs[want].get('duration')
+    if d and time - self.picked[1] >= d - 1e-9:
+      self.want = self.default
+      self.picked = (self.default, time)
+    run = self.picked[0]
+    if run == self.default:
+      run = next((n for n in self.auto if all(SKILL_CONDITIONS[k](v, c) for k, v in self.specs[n]['when'].items())), run)
+    self.active = run
+    return run
+
+  @property
+  def shown(self):
+    return self.active if len(self.specs) > 1 else None
+
+  def blind(self, name):
+    return self.specs.get(name, {}).get('commands') is False
+
+
+# ---------------------------------------------------------------------------
 # GR00T locomotion, Unitree G1
 
 JOINTS = [f'{n}_joint' for n in (
@@ -142,12 +230,13 @@ GROOT_COMMANDS = {  # as groot.js
 
 
 class GrootController:
-  def __init__(self, sessions, prefix):
-    self.balance, self.walk = sessions
+  def __init__(self, policy, prefix):
+    self.sessions, spec = policy
     self.prefix = prefix
     self.name = 'GR00T locomotion policy'
     self.drive = {'forward': 0.5, 'back': 0.3, 'side': 0.3, 'turn': 0.6}
     self.cmd = [0.0, 0.0, 0.0]
+    self.skills = Skills(spec['skills'])
     self.commands = GROOT_COMMANDS
     self.command = command_defaults(GROOT_COMMANDS)
     self.model = None
@@ -166,6 +255,7 @@ class GrootController:
   def reset(self):
     self.action = np.zeros(NA, np.float32)
     self.history = np.zeros(FRAME * HISTORY, np.float32)
+    self.skills.reset()
 
   def bind(self, model):
     def find(obj, name):
@@ -222,21 +312,22 @@ class GrootController:
     return self.history[None, :].copy()
 
   def step(self, data):
-    session = self.balance if math.hypot(*self.cmd) < 0.05 else self.walk
+    session = self.sessions[self.skills.pick(self, data.time)]
     out = session.run(None, {session.get_inputs()[0].name: self.observe(data)})
     self.action = np.asarray(out[0], np.float32).reshape(-1)[:NA]
     data.ctrl[self.act[:NA]] = DEFAULT_ANGLES[:NA] + self.action * ACTION_SCALE
 
+  # Skills (Skills): what clients show and pick.
+  def set_skill(self, name):
+    self.skills.request(name)
+
   def describe(self):
-    return {'name': self.name, 'drive': self.drive, 'commands': self.commands, 'command': self.command}
+    return {'name': self.name, 'drive': self.drive, 'commands': self.commands, 'command': self.command,
+            'skills': self.skills.menu, 'skill': self.skills.want, 'active': self.skills.shown}
 
 
 def load_groot(directory):
-  import onnxruntime as ort
-  opts = ort.SessionOptions()
-  opts.intra_op_num_threads = 1  # tiny MLPs, many robots: no thread pools
-  open_ = lambda n: ort.InferenceSession(str(directory / n), opts, providers=['CPUExecutionProvider'])
-  return open_('GR00T-WholeBodyControl-Balance.onnx'), open_('GR00T-WholeBodyControl-Walk.onnx')
+  return load_skills(directory)
 
 
 # ---------------------------------------------------------------------------
@@ -549,17 +640,6 @@ class Substeps:
       bank.split([c.servos for c in g])
 
 
-def skill_command(skills):
-  """The command that switches skills, if there is more than one (see
-  public/js/microduck.js)."""
-  names = list(skills)
-  if len(names) < 2:
-    return None
-  about = ' · '.join(f"{k}: {skills[k].get('about') or skills[k].get('label') or k}" for k in names[1:])
-  return {'type': 'enum', 'label': 'Skill', 'values': names, 'default': names[0],
-          'about': f'{about} (a timed one goes back to {names[0]}; K: {names[1]})'}
-
-
 class MicroduckController:
   """See public/js/microduck.js: the microduck_rl policies on the BAM servo
   model, walking and the skills it switches to for a while."""
@@ -570,9 +650,8 @@ class MicroduckController:
     self.name = name
     self.drive = drive_of(self.spec['command_range'], self.spec.get('min_command'))
     self.cmd = [0.0, 0.0, 0.0]
-    self.skills = self.spec['skills']
-    skill = skill_command(self.skills)
-    self.commands = {**self.spec.get('commands', {}), **({'skill': skill} if skill else {})}
+    self.skills = Skills(self.spec['skills'])
+    self.commands = self.spec.get('commands', {})
     self.command = command_defaults(self.commands)
     self.model = None
     self.saved = None
@@ -585,9 +664,7 @@ class MicroduckController:
     self.action = np.zeros(n, np.float32)
     self.qvel = np.zeros(n)  # the joint velocities of the last tick: the observation's
     self.pending = []        # [(time, targets)]: commands reach the servos after the delay
-    self.running = None      # the skill of the last tick, and since when: (name, data.time)
-    if 'skill' in self.commands:
-      self.command['skill'] = self.commands['skill']['default']
+    self.skills.reset()
 
   def bind(self, model):
     s, b = self.spec, self.spec['bam']
@@ -657,19 +734,6 @@ class MicroduckController:
       self.servos.target = t
     self.servos.update(data)
 
-  def skill(self, data):
-    """The skill to run at data.time: the one asked for, back to the first
-    once it has run its duration."""
-    first = next(iter(self.skills))
-    want = self.command.get('skill', first)
-    if self.running is None or want != self.running[0]:
-      self.running = (want, data.time)
-    d = self.skills[want].get('duration')
-    if d and data.time - self.running[1] >= d - 1e-9:
-      self.command['skill'] = first
-      self.running = (first, data.time)
-    return self.running[0]
-
   def observe(self, data, skill=None):
     R = data.xmat[self.root].reshape(3, 3)
     v = self.free_v
@@ -681,7 +745,7 @@ class MicroduckController:
         'last_action': lambda: self.action,
         'command': lambda: self.cmd,
     }
-    blind = bool(skill) and self.skills[skill].get('commands') is False  # trained with zeros there
+    blind = bool(skill) and self.skills.blind(skill)  # trained with zeros there
     if blind:
       for name, size in self.spec['obs']:
         if name == 'command' or name.startswith('cmd:'):
@@ -692,24 +756,22 @@ class MicroduckController:
 
   def step(self, data):
     s = self.spec
-    skill = self.skill(data)
+    skill = self.skills.pick(self, data.time)
     obs = self.observe(data, skill)
     self.action = np.asarray(self.sessions[skill].run(None, {s['input']: obs})[0], np.float32).reshape(-1)
     self.pending.append((data.time + s['bam']['delay'], self.default + self.action * s['action_scale']))
 
+  # Skills (Skills): what clients show and pick.
+  def set_skill(self, name):
+    self.skills.request(name)
+
   def describe(self):
-    return {'name': self.name, 'drive': self.drive, 'commands': self.commands, 'command': self.command}
+    return {'name': self.name, 'drive': self.drive, 'commands': self.commands, 'command': self.command,
+            'skills': self.skills.menu, 'skill': self.skills.want, 'active': self.skills.shown}
 
 
 def load_microduck(directory):
-  import onnxruntime as ort
-  spec = json.loads((directory / 'policy.json').read_text())
-  spec.setdefault('skills', {'walk': {'onnx': 'walk.onnx', 'label': 'Walk'}})
-  opts = ort.SessionOptions()
-  opts.intra_op_num_threads = 1
-  sessions = {k: ort.InferenceSession(str(directory / sk['onnx']), opts, providers=['CPUExecutionProvider'])
-              for k, sk in spec['skills'].items()}
-  return sessions, spec
+  return load_skills(directory)
 
 
 # ---------------------------------------------------------------------------
@@ -731,6 +793,9 @@ POLICIES = [
      'defaultFor': re.compile(r'(^|/)custom/(microduck(_sky|_graphite|_lavender)?)/\2\.xml$'),  # and its colors
      'load': load_microduck,
      'create': MicroduckController},
+    {'id': 'microduck-supermimic', 'name': 'Walking · Microduck (SuperMimic)', 'dir': 'microduck_supermimic',
+     'load': load_microduck,
+     'create': lambda policy, prefix: MicroduckController(policy, prefix, 'Microduck SuperMimic walking policy')},
 ]
 
 _loaded = {}

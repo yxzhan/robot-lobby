@@ -4,13 +4,12 @@
 // ONNX files, with the observation normalizer baked in, and policy.json,
 // which has the rest:
 //
-// - skills: the policies by name, the first (walking) the one it runs. The
-//   others are skills of the same observation and action (kick_right,
-//   walk_supermimic): the command `skill` (an enum, the Teleop panel's
-//   select, K for the first) switches to one, for its `duration` and then
-//   back to walking, as microduck_rl's daemon swaps them, or without one
-//   until another is picked; one with commands: false sees zeros for the
-//   twist and the commands, as in its training. Without skills, just walk.onnx;
+// - skills (skills.js): walking, the default, and kick_right, which it
+//   switches to by hand for 2 s (as microduck_rl's daemon swaps its episodic
+//   policies), of the same observation and actions; it sees zeros for the
+//   twist and the commands (commands: false), as in its training. The
+//   SuperMimic walking policy (microduck_supermimic) is a directory and
+//   policy of its own, run by this controller too;
 // - joints / actuators, default_pose, action_scale: the 14 servos in action
 //   order; target = default + action * scale (no clipping, as in training);
 // - obs: mjlab's actor observation, 61 values, its parts in order: the root
@@ -40,30 +39,14 @@
 
 import { runBatched } from './batch.js';
 import { commandDefaults, commandVector } from './commands.js';
+import { Skills, loadSessions, loadSpec } from './skills.js';
 
 const FRICTION_DOF = 3;  // mjCNSTR_FRICTION_DOF
 
 // {ort, sessions: {skill: session}, spec}. `source(name)` returns a file's URL.
 export async function loadMicroduckPolicy(ort, source) {
-  const spec = await fetch(source('policy.json')).then((r) => {
-    if (!r.ok) throw new Error(`policy.json: ${r.status} ${r.statusText}`);
-    return r.json();
-  });
-  spec.skills ??= { walk: { onnx: 'walk.onnx', label: 'Walk' } };
-  const sessions = Object.fromEntries(await Promise.all(Object.entries(spec.skills).map(
-    async ([k, sk]) => [k, await ort.InferenceSession.create(source(sk.onnx))])));
-  return { ort, sessions, spec };
-}
-
-// The command that switches skills (commands.js), if there is more than one.
-function skillCommand(skills) {
-  const names = Object.keys(skills);
-  if (names.length < 2) return null;
-  return {
-    type: 'enum', label: 'Skill', values: names, default: names[0],
-    about: names.slice(1).map((k) => `${k}: ${skills[k].about ?? skills[k].label ?? k}`).join(' · ')
-      + ` (a timed one goes back to ${names[0]}; K: ${names[1]})`,
-  };
+  const spec = await loadSpec(source);
+  return { ort, sessions: await loadSessions(ort, source, spec.skills), spec };
 }
 
 // Key speeds a bit inside the trained command ranges, and the dead band
@@ -87,15 +70,14 @@ export class MicroduckController {
     this.name = name;
     this.drive = driveOf(this.spec.command_range, this.spec.min_command);
     this.cmd = [0, 0, 0];
-    const skill = skillCommand(this.spec.skills);
-    this.commands = { ...this.spec.commands, ...(skill && { skill }) };
+    this.skills = new Skills(this.spec.skills);
+    this.commands = this.spec.commands ?? {};
     this.command = commandDefaults(this.commands);
     this.reset();
   }
 
   reset() {
-    this.running = null;  // the skill of the last tick, and since when: [name, data.time]
-    if (this.commands.skill) this.command.skill = this.commands.skill.default;
+    this.skills.reset();
     const n = this.spec.joints.length;
     this.action = new Float32Array(n);
     this.qvel = new Float64Array(n);  // the joint velocities of the last tick: the observation's
@@ -208,22 +190,15 @@ export class MicroduckController {
     }
   }
 
-  // The skill to run at data.time: the one asked for (command `skill`),
-  // back to the first once it has run its duration.
-  skill(data) {
-    const names = Object.keys(this.spec.skills), want = this.command.skill ?? names[0];
-    if (want !== this.running?.[0]) this.running = [want, data.time];
-    const d = this.spec.skills[want]?.duration;
-    if (d && data.time - this.running[1] >= d - 1e-9) {
-      this.command.skill = names[0];
-      this.running = [names[0], data.time];
-    }
-    return this.running[0];
-  }
+  // Skills (skills.js): what the panel shows and picks.
+  get skillMenu() { return this.skills.menu; }
+  get skill() { return this.skills.want; }
+  setSkill(name) { this.skills.request(name); }
+  get activeSkill() { return this.skills.shown; }
 
   // The policy input from `data` (synchronous) for skill `skill`; keeps qdot
   // for the next tick.
-  observe(data, skill = Object.keys(this.spec.skills)[0]) {
+  observe(data, skill = this.skills.default) {
     const { qpos, qvel, xmat } = data, s = this.spec;
     const R = xmat.subarray(9 * this.root, 9 * this.root + 9), v = this.freeV;
     const parts = {
@@ -234,7 +209,7 @@ export class MicroduckController {
       last_action: () => this.action,
       command: () => this.cmd,
     };
-    const blind = s.skills[skill]?.commands === false;  // trained with zeros there
+    const blind = this.skills.blind(skill);  // trained with zeros there
     const obs = new Float32Array(s.obs.reduce((t, [, k]) => t + k, 0));
     let o = 0;
     for (const [name, size] of s.obs) {
@@ -250,7 +225,7 @@ export class MicroduckController {
   }
 
   async step(data, valid = () => true) {
-    const skill = this.skill(data), obs = this.observe(data, skill), { ort } = this.policy, s = this.spec;
+    const skill = this.skills.pick(this, data.time), obs = this.observe(data, skill), { ort } = this.policy, s = this.spec;
     const action = await runBatched(ort, this.sessions[skill], obs, s.input, s.output);
     if (!valid()) return;
     this.action = action;

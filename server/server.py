@@ -23,6 +23,8 @@ Protocol (client -> server, JSON {op, ...}; `rid` asks for a reply):
   not zero; stops after CMD_TIMEOUT without one; a moving one drops the goal)
   command {name, value}   one of the policy's other commands (its describe()'s
   `commands`, public/js/commands.js), kept until changed
+  skill {name}   the policy's manual skill to run (its describe()'s `skills`,
+  public/js/skills.js): the model, not an input of it
   goal {goal: {x, y, yaw} or null} (the robot drives there: goal.py)
   ik_config {config}   ik_target {chain, pos, rot} (in the chain's ref body
   frame)   ik_reset_target {chain or null}   ik_gripper {chain, amount?}
@@ -41,7 +43,9 @@ Server -> client:
                               (item.use, item.errors, item.ik / base / policy:
                               their describe())
   {type: 'status', robots: {id: {ik: {targets, err}, base: {measured},
-                              goal: {phase, dist, dyaw}, policy: {command}}}}
+                              goal: {phase, dist, dyaw}, policy: {command,
+                              skill, active}}}} (skill: the manual one
+                              picked; active: the model running)
                               STATUS_HZ times a second
   {type: 'goal', id, goal, arrived?}  a robot's goal changed (null: none;
                               arrived: the goal it reached, let go)
@@ -383,8 +387,15 @@ class Robot:
       out['ik'] = self.ik.status()
     if self.use['base'] and self.base.ready:
       out['base'] = {'measured': self.base.measured}
-    if self.use['policy'] and self.policy is not None and getattr(self.policy, 'commands', None):
-      out['policy'] = {'command': self.policy.command}
+    if self.use['policy'] and self.policy is not None:
+      policy = {}
+      if getattr(self.policy, 'commands', None):
+        policy['command'] = self.policy.command
+      skills = getattr(self.policy, 'skills', None)
+      if skills is not None and skills.shown:  # policies.Skills: the one picked, the one running
+        policy['skill'], policy['active'] = skills.want, skills.shown
+      if policy:
+        out['policy'] = policy
     return out
 
 
@@ -951,7 +962,7 @@ class World:
       self.set_perturb(ws, msg)
     elif op == 'ray':
       return self.ray(msg['eye'], msg['dir'])
-    elif op in ('use', 'cmd', 'command', 'goal', 'ik_config', 'ik_target', 'ik_reset_target', 'ik_gripper', 'ik_save', 'ik_defaults',
+    elif op in ('use', 'cmd', 'command', 'skill', 'goal', 'ik_config', 'ik_target', 'ik_reset_target', 'ik_gripper', 'ik_save', 'ik_defaults',
                 'base_config', 'base_save', 'base_defaults'):
       await self.controller_op(ws, op, self.robot(msg['id']), msg)
     else:
@@ -983,6 +994,12 @@ class World:
       if not d:
         raise ValueError(f"{r.label}: no policy command {msg['name']!r}")
       c.command[msg['name']] = POL.clamp_command(d, msg['value'])
+      return
+    elif op == 'skill':  # the policy's manual skill (the panel's skill controls): everyone sees it in the status
+      c = r.policy if r.use['policy'] else None
+      if c is None or not hasattr(c, 'set_skill'):
+        raise ValueError(f'{r.label}: its policy has no skills')
+      c.set_skill(msg['name'])
       return
     elif op == 'goal':
       r.set_goal(msg.get('goal'))

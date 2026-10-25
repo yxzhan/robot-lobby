@@ -5,6 +5,10 @@
   pretrained_policies/microduck_rl/kick_right.onnx  Mjlab-BallKick-Flat-MicroDuck
   pretrained_policies/microduck_rl/policy.json      what public/js/microduck.js and
                                                     server/policies.py need
+  pretrained_policies/microduck_supermimic/policy.json
+      the same for the walking policy trained with SuperMimic
+      (training/supermimic: its export_onnx.py writes walk.onnx there), if
+      it is there: a policy of its own, run by the same controller
 
 Walking is the policy the duck runs; the others are skills it switches to
 for a while and comes back from (policy.json's "skills"), sharing its
@@ -33,18 +37,14 @@ import subprocess
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 OUT = ROOT / 'pretrained_policies' / 'microduck_rl'
 TASKS = {'walk': 'Mjlab-Velocity-Flat-MicroDuck', 'kick_right': 'Mjlab-BallKick-Flat-MicroDuck'}
+SUPERMIMIC = ROOT / 'pretrained_policies' / 'microduck_supermimic'
 # The skills besides walking: run for `duration` seconds, then back to
-# walking (microduck_rl's "episodic" policies), or without one until another
-# is picked. The kick task starts from a stand with the ball at the right toe
-# (it does not see the ball), kicks at once and settles; its command slots are
-# zero in training (commands: false). walk_supermimic is the same walking task
-# trained with SuperMimic (training/supermimic, its export_onnx.py writes the
-# ONNX; this script does not make it).
+# walking (microduck_rl's "episodic" policies). The kick task starts from a
+# stand with the ball at the right toe (it does not see the ball), kicks at
+# once and settles; its command slots are zero in training (commands: false).
 SKILLS = {
-    'kick_right': {'label': 'Kick (right foot)', 'duration': 2.0, 'commands': False,
+    'kick_right': {'label': 'Kick (right foot)', 'duration': 2.0, 'commands': False, 'key': 'k',
                    'about': 'kicks a ball at the right toe forward from a stand, then walking again'},
-    'walk_supermimic': {'label': 'Walk (SuperMimic)',
-                        'about': 'walking trained with SuperMimic in 19 min (training/supermimic), until another skill is picked'},
 }
 
 # microduck_rl's src/mjlab_microduck/robot/microduck_constants.py (HOME_FRAME,
@@ -149,6 +149,15 @@ def main():
       sources[name] = {'task': task, 'checkpoint': str(ckpt)}
   index.write_text(json.dumps(spec(sources), indent=1) + '\n')
   print(f'{index.relative_to(ROOT)}: {", ".join(sorted(sources)) or "no checkpoints"}')
+  if (SUPERMIMIC / 'walk.onnx').exists():
+    # The same task, robot and servo model; walking alone.
+    index = SUPERMIMIC / 'policy.json'
+    old = json.loads(index.read_text()) if index.exists() else {}
+    sm = spec(old.get('checkpoints', {}))
+    sm['source'] = 'training/supermimic (SuperMimic: world model + back-propagation through imagined rollouts)'
+    sm['skills'] = {'walk': {'onnx': 'walk.onnx', 'label': 'Walk'}}
+    index.write_text(json.dumps(sm, indent=1) + '\n')
+    print(f'{index.relative_to(ROOT)}')
 
 
 if __name__ == '__main__':
