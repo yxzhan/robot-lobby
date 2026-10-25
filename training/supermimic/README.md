@@ -67,7 +67,9 @@ randomization, pushes, velocity / head / body commands, curricula). The
 env's curricula count env steps; the trainer sets the step counter to
 iteration x 24, as rsl_rl's PPO would. The world model predicts the contact
 sensor's flags (a foot height threshold misjudged 6% of samples); the
-air-time window starts 0.06 s soft and narrows to 0.01 s over 4000 iterations.
+air-time window starts 0.08 s soft and narrows to 0.01 s over 5000 iterations,
+and a gait hint of imagination's own (one foot down, the other up for less
+than the window's end) starts at 3 per second and is gone by iteration 5000.
 
 Check against the env (PPO walking policy driving, no pushes): observation
 within the env's noise; reward terms with per-sample correlation 0.91-1.00,
@@ -76,14 +78,22 @@ landing velocities the env takes one physics substep earlier.
 
 Deterministic evaluation, 128 envs x 20 s with pushes (RTX 3080):
 
-| Policy | Falls / robot-min | track_linear | track_angular | air_time | Reward / s |
-|---|---|---|---|---|---|
-| zero actions (default pose) | 46.5 | 1.01 | 0.67 | - | 5.36 |
-| SuperMimic, 6000 it (29 min), hard air-time window | 3.19 | 1.12 | 1.35 | 0.003 | 7.23 |
-| SuperMimic, 6000 it (29 min), annealed window | 0.023 | 1.13 | 1.31 | 0.005 | 7.30 |
-| PPO (rsl_rl, 5000 it, 3.3 h; `walk.onnx`) | 0.12-0.21 | 1.28 | 1.25 | 1.35 | 8.37 |
+| Policy | Falls / robot-min | track_lin | track_ang | air_time | Single support | Air time per step | Reward / s |
+|---|---|---|---|---|---|---|---|
+| zero actions (default pose) | 46.5 | 1.01 | 0.67 | - | - | - | 5.36 |
+| 6000 it (29 min), hard air-time window | 3.19 | 1.12 | 1.35 | 0.003 | - | - | 7.23 |
+| 6000 it, annealed window | 0.023 | 1.13 | 1.31 | 0.005 | 4% | 0.05 s | 7.30 |
+| 4000 it (19 min), annealed window + gait hint | 0.16 | 1.12 | 1.54 | 0.63 | 93% | 0.16 s | 7.84 |
+| 6000 it (29 min), annealed window + gait hint | 0.49 | 1.09 | 1.48 | 1.11 | 95% | 0.20 s | 8.03 |
+| PPO (rsl_rl, 5000 it, 3.3 h; `walk.onnx`) | 0.09-0.21 | 1.28 | 1.25 | 1.35 | 90% | 0.23 s | 8.36 |
 
-It stands and follows the velocity commands (PPO's training run was at a
-similar point after the same 29 minutes) but shuffles: its feet hardly
-leave the ground, which is nearly all of the gap in reward to PPO. Not yet
-tried: a gait shaping term, a longer run, a warm start from PPO.
+Without the gait hint it stands and follows the commands but shuffles (both
+feet down 96% of the time, 0.05 s lifts). With it, it walks as PPO's policy
+does, alternating single support with 0.2 s swings, at 96% of its reward
+after 29 minutes instead of 3.3 hours; it falls more than PPO's (0.49 vs
+0.1-0.2 a robot-minute), more as the hint fades (0.16 at 4000 iterations).
+But it hardly moves forward: commanded 0.32 m/s (no pushes) it walks at
+0.06 m/s (4000 and 6000 iterations alike), PPO's at 0.19. The tracking
+reward hides it (most commands are slow, and it is lenient: exp(-err²/0.1)).
+The 4000-iteration actor is `pretrained_policies/microduck_rl/walk_supermimic.onnx`,
+the Microduck's skill `walk_supermimic` in the viewer.

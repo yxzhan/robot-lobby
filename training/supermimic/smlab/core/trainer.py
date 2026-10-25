@@ -337,7 +337,8 @@ class Trainer:
       pose1 = apply_pose_delta(pose, dpose) if self.task.planar else pose
       values, rec1 = self.task.terms(s, s1, a, a_prev, rec, k)
       for n, v in values.items():
-        sums[n] = sums.get(n, 0.0) + float((surv * w.get(n, 0.0) * v).sum())
+        weight = w[n] if n in w else float(k[n]) if n in k else 0.0  # a task's own term: its weight in k
+        sums[n] = sums.get(n, 0.0) + float((surv * weight * v).sum())
       total += float(surv.sum())
       _, d, obs, rec = self.task.imagine_step(s, s1, pose1, a, a_prev, rec, xi, k,
                                               {n: torch.tensor(float(x), device=self.dev) for n, x in w.items()})

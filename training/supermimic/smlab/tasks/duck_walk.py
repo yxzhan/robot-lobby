@@ -29,7 +29,8 @@ Rewards: every term of the env with its live weight, as smooth functions of
 the imagined state (the predicted contact, a smooth air-time window), so air
 time, landings and slip have gradients. The air-time window starts wide (see
 AIR_SOFTNESS): with the env's hard window, standing feet get no gradient to
-step and the policy shuffles instead. self_collisions (rare, unmodelled) is
+step and the policy shuffles instead. A gait hint of imagination's own
+(GAIT_HINT, annealed to zero) rewards the feet taking turns early on. self_collisions (rare, unmodelled) is
 left out; body_pose_tracking has weight 0 in this task.
 """
 
@@ -62,8 +63,15 @@ OBS_NOISE = {"ang_vel": 0.03, "gravity": 0.01, "joint_pos": 0.001, "joint_vel": 
 # ground (air time 0) has a gradient towards lifting, narrowing to nearly the
 # env's hard window as training goes on (iterations: the env's step counter
 # over the steps per PPO iteration it stands for).
-AIR_SOFTNESS = (0.06, 0.01)
-AIR_SOFTNESS_ITERATIONS = 4000
+AIR_SOFTNESS = (0.08, 0.01)
+AIR_SOFTNESS_ITERATIONS = 5000
+# Gait hint (imagination only, like go2-supermimic's dodge hint): reward per
+# second for one foot down and the other up, while the raised one has been up
+# less than the air-time window's end (so standing on one leg earns nothing:
+# the feet have to take turns). Without it the policy keeps both feet down 96%
+# of the time and lifts them for 0.05 s, out of reach of the 0.125 s window.
+GAIT_HINT = (3.0, 0.0)
+GAIT_HINT_ITERATIONS = 5000
 STEPS_PER_ITERATION = 24
 FALL_SOFTNESS = math.radians(5.0)
 
@@ -208,13 +216,14 @@ class DuckWalk(Task):
       "enc_bias": self.robot.data.encoder_bias[env_ids],
       "imu_q": self.env._imu_misalign_quat[env_ids],
       "imu_late": (torch.rand(B, 1, device=env_ids.device) < 0.5).float(),
-      "air_softness": torch.tensor(self.air_softness(), device=env_ids.device),
+      "air_softness": torch.tensor(self.anneal(AIR_SOFTNESS, AIR_SOFTNESS_ITERATIONS), device=env_ids.device),
+      "gait_hint": torch.tensor(self.anneal(GAIT_HINT, GAIT_HINT_ITERATIONS), device=env_ids.device),
     }
 
-  def air_softness(self) -> float:
-    it = self.env.common_step_counter / STEPS_PER_ITERATION
-    f = min(1.0, it / AIR_SOFTNESS_ITERATIONS)
-    return AIR_SOFTNESS[0] + f * (AIR_SOFTNESS[1] - AIR_SOFTNESS[0])
+  def anneal(self, ends: tuple[float, float], iterations: int) -> float:
+    """From ends[0] to ends[1] linearly over the first `iterations`."""
+    f = min(1.0, self.env.common_step_counter / STEPS_PER_ITERATION / iterations)
+    return ends[0] + f * (ends[1] - ends[0])
 
   def observe(self, s0, s1, a, cmd, k) -> torch.Tensor:
     late = k["imu_late"]
@@ -271,6 +280,7 @@ class DuckWalk(Task):
       "foot_slip": (fv_xy * c1).sum(-1) * active,
       "head_pose_tracking": torch.exp(-(head_err / self.head_std).square()).mean(-1),
       "head_pose_bias": -ema.abs().mean(-1),
+      "gait_hint": ((1 - c1) * c1.flip(-1) * torch.sigmoid((self.air_max - air) / soft)).sum(-1) * active,
     }
     rec1 = {"cmd": cmd, "air": air, "peak": peak, "ema": ema}
     return values, rec1
@@ -282,7 +292,7 @@ class DuckWalk(Task):
 
   def imagine_step(self, s0, s1, pose1, a, a_prev, rec, xi, k, w):
     values, rec1 = self.terms(s0, s1, a, a_prev, rec, k)
-    r = sum(w[n] * v for n, v in values.items()) * self.dt
+    r = (sum(w[n] * v for n, v in values.items() if n in w) + k["gait_hint"] * values["gait_hint"]) * self.dt
     obs = self.observe(s0, s1, a, rec["cmd"], k)
     return r, self.fall_prob(s1), obs, rec1
 

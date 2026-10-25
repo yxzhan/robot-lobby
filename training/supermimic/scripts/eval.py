@@ -75,6 +75,9 @@ def main():
   sums = torch.zeros(len(names), device=env.device)
   falls, steps, frames = 0, int(args.seconds / env.step_dt), []
   vel_err = 0.0
+  sensor = env.scene.sensors.get("feet_ground_contact")
+  feet_down = torch.zeros(3, device=env.device)  # steps with 0, 1, 2 feet down
+  lifts, lift_air = 0, 0.0
   for _ in range(steps):
     cmd = env.command_manager.get_command("twist").clone()
     obs, _, term, trunc, _ = env.step(policy(obs["actor"]))
@@ -82,12 +85,24 @@ def main():
     falls += int(term.sum())  # terminations other than time-outs: falls (or a NaN state)
     v = env.scene["robot"].data.root_link_lin_vel_b[:, :2]
     vel_err += float((v - cmd[:, :2]).norm(dim=-1).mean())
+    if sensor is not None:
+      contact = sensor.data  # a fresh snapshot each step
+      down = (contact.found > 0).sum(-1)
+      feet_down += torch.bincount(down, minlength=3)[:3].float()
+      landed = sensor.compute_first_contact(dt=env.step_dt)
+      lifts += int(landed.sum())
+      lift_air += float((contact.last_air_time * landed).sum())
     if args.video:
       frames.append(env.render())
   minutes = args.envs * args.seconds / 60
   print(f"{args.checkpoint or args.onnx or 'zero actions'}: {args.envs} envs x {args.seconds:.0f} s")
   print(f"  falls per robot-minute   {falls / minutes:.3f}")
   print(f"  mean |v_xy - cmd|        {vel_err / steps:.3f} m/s")
+  if sensor is not None:
+    f = (feet_down / feet_down.sum()).tolist()
+    print(f"  feet down 2 / 1 / 0      {f[2]:.2f} / {f[1]:.2f} / {f[0]:.2f} of the time")
+    print(f"  landings per foot-second {lifts / (2 * args.envs * args.seconds):.2f}, "
+          f"mean air time before one {lift_air / max(lifts, 1):.3f} s")
   print(f"  total reward per second  {float(sums.sum()) / (steps * args.envs):.3f}")
   for n, v in zip(names, sums.tolist()):
     if v:
