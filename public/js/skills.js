@@ -27,6 +27,10 @@
 //   then the default again, one
 //   without until another is picked; automatic skills only stand in for the
 //   default.
+// - reset_action: true: trained from episodes whose action history starts
+//   at zero; the controller's last action is zeroed when it starts (`started`),
+//   or it reads the previous model's last action as its own (the kick then
+//   stood still after the walking policy's stand).
 // - commands: false: trained with zeros for the twist and the commands (the
 //   controller observes it so).
 // - label, about: for the panel.
@@ -110,7 +114,11 @@ export class Skills {
   // many physics steps at any speed of the Physics panel.
   pick(c, time) {
     const want = this.want;
-    if (want !== this.picked?.[0] || time < this.picked[1]) this.picked = [want, time];  // time went back: anew
+    this.started = null;     // the manual skill that starts this tick, if one does
+    if (want !== this.picked?.[0] || time < this.picked[1]) {  // time went back: anew
+      if (want !== this.picked?.[0] && want !== this.default) this.started = want;
+      this.picked = [want, time];
+    }
     const d = this.specs[want]?.duration && (this.wantFor ?? this.specs[want].duration);
     if (d && time - this.picked[1] >= d - 1e-9) {
       this.want = this.default;
@@ -127,6 +135,11 @@ export class Skills {
 
   get shown() {
     return Object.keys(this.specs).length > 1 ? this.active : null;
+  }
+
+  // Whether the skill starting this tick starts from a zero action history.
+  get freshStart() {
+    return !!(this.started && this.specs[this.started].reset_action);
   }
 
   blind(name) {

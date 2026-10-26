@@ -187,7 +187,10 @@ class Skills:
 
   def pick(self, c, time):
     want = self.want
+    self.started = None  # the manual skill that starts this tick, if one does
     if self.picked is None or want != self.picked[0] or time < self.picked[1]:  # time went back: anew
+      if (self.picked is None or want != self.picked[0]) and want != self.default:
+        self.started = want
       self.picked = (want, time)
     d = self.specs[want].get('duration') and (self.want_for or self.specs[want]['duration'])
     if d and time - self.picked[1] >= d - 1e-9:
@@ -203,6 +206,11 @@ class Skills:
   @property
   def shown(self):
     return self.active if len(self.specs) > 1 else None
+
+  @property
+  def fresh_start(self):
+    """Whether the skill starting this tick starts from a zero action history (reset_action)."""
+    return bool(self.started and self.specs[self.started].get('reset_action'))
 
   def blind(self, name):
     return self.specs.get(name, {}).get('commands') is False
@@ -765,6 +773,8 @@ class MicroduckController:
   def step(self, data):
     s = self.spec
     skill = self.skills.pick(self, data.time)
+    if self.skills.fresh_start:  # trained from a zero action history
+      self.action[:] = 0
     obs = self.observe(data, skill)
     self.action = np.asarray(self.sessions[skill].run(None, {s['input']: obs})[0], np.float32).reshape(-1)
     self.pending.append((data.time + s['bam']['delay'], self.default + self.action * s['action_scale']))

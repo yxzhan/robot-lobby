@@ -90,6 +90,9 @@ control tick, `public/js/skills.js` in the browser and `Skills` in
   until another is picked. Automatic skills only stand in for the default.
 - `"commands": false`: trained with zeros for the twist and the commands,
   and observed so.
+- `"reset_action": true`: trained from episodes whose action history starts
+  at zero; the controller's last action is zeroed when the skill starts
+  (otherwise it reads the previous model's as its own).
 
 The Teleop panel's readout shows the model running after the command (in
 network mode the server sends it with the status). Every skill keeps the
@@ -170,7 +173,15 @@ iterations) with 70% of its episodes starting from 4000 stances the walking
 policy settles into, after walking, kicking and with head commands
 (`scripts/microduck_stances.py`, run in the viewer's physics; the task's
 `set_stance_from_library` event, the ball in front of the stance's right
-foot): now it kicks every time, also after a kick and with the head turned. It does not see the ball (the robot has no way
+foot). It then kicked only with the feet at most ~85 mm apart: a kick leaves
+them wider for ~2 s while they slide back (for good with the solver's
+noslip, which was on by default then), so it was trained on again (3000
+iterations) from 6000 states, also 0-2 s after a kick (with their
+velocities, feet up to 160 mm apart) and with noslip (~95 mm). Its episodes
+start with a zero action history, so it has `reset_action`: reading the
+walking policy's last action as its own, it did not kick at all. Now it
+kicks with the feet 84-100 mm apart, from 0.3 s after the last kick on
+(not at the very end of one, its foot still up). It does not see the ball (the robot has no way
 to), so aim the duck first: the ball 9 cm ahead and 4 cm right of the
 trunk, within about 1.5 cm. The library's `objects/custom/microduck_ball` is
 the 70 mm, 15 g ball it was trained with.

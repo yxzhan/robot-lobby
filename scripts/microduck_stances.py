@@ -1,20 +1,32 @@
-"""Stances the Microduck's walking policy settles into, for training its
-skills from them: run in the viewer's own physics (server/policies.py:
+"""States the Microduck is in under its walking policy, for training its
+skills to start from them: run in the viewer's own physics (server/policies.py:
 MicroduckController on the BAM servo model, the robot file of the library),
 each sample walks with random commands, kicks once or more (the walking
-policy taking over after each kick), with random head commands in some, then
-stands under the walking policy with a zero command until it has settled,
-and is recorded. microduck_rl's BallKick task starts episodes from them
-(its kick only kicked from HOME: after one kick, the walking policy's stand,
-neck 0.15 rad down and the legs a few hundredths off, made it stand still).
+policy taking over after each kick), with random head commands in some,
+and is recorded in one of three ways:
+
+  settled    standing under the walking policy with a zero command until
+             it has settled (1.5-3 s), feet ~84 mm apart
+  after_kick 0-2 s after a kick, while the feet slide back together from
+             as much as ~150 mm apart, still moving (velocities recorded)
+  noslip     settled, but with the solver's noslip on (100 iterations): the
+             feet cannot slide back and stay ~95 mm apart
+
+microduck_rl's BallKick task starts episodes from them. Its kick first only
+kicked from HOME (after one kick, the walking policy's stand, neck 0.15 rad
+down and the legs a few hundredths off, made it stand still); trained on
+settled stances, it kicked only with the feet at most ~85 mm apart (after a
+kick they are wider for 2 s, and for good with noslip).
 
     python3 scripts/microduck_stances.py --out kick_stances.npz [--samples 3000 --workers 16]
 
-The .npz holds, per sample: joint_pos (14, the policy's joint order,
-absolute), root_z (trunk height), root_tilt (the trunk's quaternion w x y z
-with its yaw taken out), right_foot / left_foot (the feet sites relative to
-the trunk in its yaw frame, x y z), head_cmd (the head command it stood
-with).
+The .npz holds, per sample: joint_pos and joint_vel (14, the policy's joint
+order, absolute), root_z (trunk height), root_tilt (the trunk's quaternion
+w x y z with its yaw taken out), root_lin_vel (the trunk's velocity in its
+yaw frame), root_ang_vel (its angular velocity in its own frame, as a free
+joint's qvel has it), right_foot / left_foot (the feet sites relative to the
+trunk in its yaw frame, x y z), head_cmd (the head command it stood with),
+mode (0 settled, 1 after_kick, 2 noslip).
 """
 
 import argparse
@@ -30,7 +42,10 @@ sys.path.insert(0, str(ROOT / 'server'))
 ROBOT = ROOT / 'mjcf_assets' / 'robots' / 'custom' / 'microduck' / 'microduck.xml'
 PREFIX = 'r/'
 SETTLE = (1.5, 3.0)        # s standing before the record
+AFTER_KICK = (0.0, 2.0)    # s after a kick's end, for after_kick
 HEAD_RANGE = 0.5           # of the head command's trained range, when one is drawn
+MODES = {'settled': 0.4, 'after_kick': 0.4, 'noslip': 0.2}  # how often each
+KICK = 0.3                 # s, the kick's duration in the viewer (policy.json): 70% of the kicks, the rest up to 1 s
 
 
 def quat_mul(a, b):
@@ -45,8 +60,12 @@ def sample(seed):
   import policies as POL
 
   rng = np.random.default_rng(seed)
+  mode = rng.choice(list(MODES), p=np.array(list(MODES.values())) / sum(MODES.values()))
   spec = mujoco.MjSpec()
   spec.option.timestep = 0.005
+  spec.option.integrator = mujoco.mjtIntegrator.mjINT_IMPLICITFAST  # the viewer's defaults
+  if mode == 'noslip':
+    spec.option.noslip_iterations, spec.option.noslip_tolerance = 100, 1e-10
   spec.worldbody.add_geom(type=mujoco.mjtGeom.mjGEOM_PLANE, size=[50, 50, 0.1])
   robot = mujoco.MjSpec.from_file(str(ROBOT))
   spec.worldbody.add_frame().attach_body(robot.worldbody.first_body(), PREFIX, '')
@@ -71,6 +90,13 @@ def sample(seed):
   head = c.commands['head']
   if rng.random() < 0.3:
     c.command['head'] = [float(rng.uniform(lo, hi) * HEAD_RANGE) for lo, hi in head['range']]
+  def kick():
+    c.cmd = [0.0, 0.0, 0.0]
+    run(rng.uniform(0.3, 1.5))
+    t = KICK if rng.random() < 0.7 else float(rng.uniform(KICK, 1.0))
+    c.set_skill('kick_right', t)
+    run(t)
+
   run(0.5)
   for _ in range(rng.integers(1, 4)):  # a few things in a row
     if rng.random() < 0.6:  # walk
@@ -80,12 +106,12 @@ def sample(seed):
       c.cmd = [0.0, 0.0, 0.0]
       run(rng.uniform(0.0, 1.5))
     else:  # kick (the walking policy takes over after it)
-      c.cmd = [0.0, 0.0, 0.0]
-      run(rng.uniform(0.3, 1.5))
-      c.set_skill('kick_right', float(rng.uniform(0.3, 1.0)))
+      kick()
       run(1.2)
   c.cmd = [0.0, 0.0, 0.0]
-  run(rng.uniform(*SETTLE))
+  if mode != 'settled':  # the last thing a kick: its wide stance
+    kick()
+  run(rng.uniform(*(AFTER_KICK if mode == 'after_kick' else SETTLE)))
   root = m.body(PREFIX + 'trunk_base').id
   R, p = d.xmat[root].reshape(3, 3), d.xpos[root]
   if R[2, 2] < 0.9 or p[2] < 0.09:
@@ -98,9 +124,14 @@ def sample(seed):
   def foot(name):
     r = d.site(PREFIX + name).xpos - p
     return np.array([cy * r[0] + sy * r[1], -sy * r[0] + cy * r[1], r[2]])
+  free = m.body_jntadr[root]
+  v = d.qvel[m.jnt_dofadr[free]:m.jnt_dofadr[free] + 6]
   return {
-    'joint_pos': d.qpos[c.qadr].copy(), 'root_z': float(p[2]), 'root_tilt': tilt / np.linalg.norm(tilt),
+    'joint_pos': d.qpos[c.qadr].copy(), 'joint_vel': d.qvel[c.dofs].copy(),
+    'root_z': float(p[2]), 'root_tilt': tilt / np.linalg.norm(tilt),
+    'root_lin_vel': np.array([cy * v[0] + sy * v[1], -sy * v[0] + cy * v[1], v[2]]), 'root_ang_vel': v[3:6].copy(),
     'right_foot': foot('right_foot'), 'left_foot': foot('left_foot'), 'head_cmd': np.array(c.command['head']),
+    'mode': list(MODES).index(mode),
   }
 
 
@@ -123,6 +154,13 @@ def main():
     print(f'  {name:8s} {np.percentile(col, 50):.3f} {np.percentile(col, 95):.3f} {col.max():.3f}')
   print(f"  root z {out['root_z'].min():.3f}-{out['root_z'].max():.3f}; right foot x {out['right_foot'][:, 0].min()*1000:.0f}"
         f"..{out['right_foot'][:, 0].max()*1000:.0f} mm, y {out['right_foot'][:, 1].min()*1000:.0f}..{out['right_foot'][:, 1].max()*1000:.0f} mm")
+  width = (out['left_foot'][:, 1] - out['right_foot'][:, 1]) * 1000
+  for k, name in enumerate(MODES):
+    w = width[out['mode'] == k]
+    if len(w):
+      print(f'  {name:10s} {len(w):5d}: feet {w.min():.0f}-{w.max():.0f} mm apart (p5 {np.percentile(w, 5):.0f}, p50 '
+            f'{np.percentile(w, 50):.0f}, p95 {np.percentile(w, 95):.0f}), max |joint vel| p50 '
+            f'{np.percentile(np.abs(out["joint_vel"][out["mode"] == k]).max(1), 50):.2f} rad/s')
 
 
 if __name__ == '__main__':

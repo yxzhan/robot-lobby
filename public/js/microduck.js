@@ -225,7 +225,9 @@ export class MicroduckController {
   }
 
   async step(data, valid = () => true) {
-    const skill = this.skills.pick(this, data.time), obs = this.observe(data, skill), { ort } = this.policy, s = this.spec;
+    const skill = this.skills.pick(this, data.time);
+    if (this.skills.freshStart) this.action = new Float32Array(this.action.length);  // trained from a zero action history
+    const obs = this.observe(data, skill), { ort } = this.policy, s = this.spec;
     const action = await runBatched(ort, this.sessions[skill], obs, s.input, s.output);
     if (!valid()) return;
     this.action = action;

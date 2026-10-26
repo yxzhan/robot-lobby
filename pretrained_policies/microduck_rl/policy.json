@@ -7,7 +7,7 @@
   },
   "kick_right": {
    "task": "Mjlab-BallKick-Flat-MicroDuck",
-   "checkpoint": "logs/rsl_rl/ball_kick_right/2026-10-26_14-51-10_ball_kick_right/model_12998.pt"
+   "checkpoint": "logs/rsl_rl/ball_kick_right/2026-10-26_18-46-43_ball_kick_right/model_15997.pt"
   }
  },
  "ctrl_dt": 0.02,
@@ -187,6 +187,7 @@
    "duration": 0.3,
    "commands": false,
    "key": "k",
+   "reset_action": true,
    "about": "kicks a ball at the right toe forward from a stand, then walking again"
   }
  },
