@@ -26,9 +26,9 @@
 //   mode the server makes the bundle of its world (/api/stages/capture).
 // - Community, read-only: the published ones, in the library's
 //   saved_stage/<id>/. On a server, its shared library (ServerStages):
-//   Publish (network mode only) writes a stage there and the server commits
-//   it in the library's git repository, with its author's name and email
-//   if given (server.py publish_stage). In local mode, the stages of the
+//   Publish (network mode only) writes a stage there, with its author's
+//   name if given (server.py publish_stage; not committed: the library's
+//   git repository is kept by hand). In local mode, the stages of the
 //   library next to the page, listed in public/json/stages.json by
 //   scripts/vendor.mjs (LibraryStages).
 // Download exports a stage as one JSON file, a bundle: {stage, files:
@@ -222,8 +222,8 @@ export class LibraryStages {
 // library. The server has the world: `capture(extra)` gets it as a new
 // bundle (not kept there) with what only the page knows (name, thumbnail,
 // view, cameras, on), see server.py api_capture_stage; `publish(bundle,
-// author)` writes one and commits it ({name, email}, both optional), and
-// resolves with its summary ({id, …, commit: its id or null, commit_error}).
+// author)` writes one (author: {name}, optional) and resolves with its
+// summary ({id, …}).
 export class ServerStages {
   where = 'community';
   deletable = false;  // for now (the server has DELETE /api/stages/<id>)
@@ -245,7 +245,7 @@ export class ServerStages {
   remove(id) { return this.request(`api/stages/${id}`, { method: 'DELETE' }); }
 }
 
-const AUTHOR_KEY = 'mujoco-filament/author';  // localStorage: {name, email} last published with
+const AUTHOR_KEY = 'mujoco-filament/author';  // localStorage: {name} last published with
 
 const PARTS_KEY = 'mujoco-filament/stage-parts';  // localStorage: the parts last chosen, {key: bool}
 
@@ -281,7 +281,7 @@ export function withParts(bundle, parts) {
 }
 
 // Asks what to save or publish a stage as (`publish`: with an author):
-// {name, parts: {key: bool}, author: {name, email}}, or null (cancelled).
+// {name, parts: {key: bool}, author: {name}}, or null (cancelled).
 // The author and the parts are remembered for next time.
 export function askStage(name, { publish = false } = {}) {
   let saved = {}, parts = {};
@@ -292,14 +292,12 @@ export function askStage(name, { publish = false } = {}) {
   dlg.innerHTML = `<form method="dialog">
     <h3>${publish ? 'Publish' : 'Save'} stage</h3>
     <label>Name <input name="name" required maxlength="200"></label>
-    ${publish ? `<label>Author <input name="author" maxlength="100" placeholder="optional" autocomplete="name"></label>
-    <label>Email <input name="email" type="email" maxlength="200" placeholder="optional" autocomplete="email"></label>` : ''}
+    ${publish ? '<label>Author <input name="author" maxlength="100" placeholder="optional" autocomplete="name"></label>' : ''}
     <fieldset class="parts"><legend>Keep, besides the models and where they stand</legend>
       ${STAGE_PARTS.map(([k, label, title]) => `<label title="${title}"><input type="checkbox" name="part-${k}"> ${label}</label>`).join('')}
     </fieldset>
     <p class="hint">${publish
-      ? `Published stages are listed for everyone on this server (Community) and committed to the
-    model library's public git repository, with this name and email as its author.`
+      ? 'Published stages are listed for everyone on this server (Community), with this name as their author.'
       : 'Saved in this browser (My stages). What is left out stays as it is when the stage is loaded.'}</p>
     <div class="buttons"><button value="cancel" formnovalidate>Cancel</button><button value="ok" class="primary">${publish ? 'Publish' : 'Save'}</button></div>
   </form>`;
@@ -307,7 +305,6 @@ export function askStage(name, { publish = false } = {}) {
   f.name.value = name ?? '';
   if (publish) {
     f.author.value = saved.name ?? '';
-    f.email.value = saved.email ?? '';
   }
   for (const [k] of STAGE_PARTS) f[`part-${k}`].checked = parts[k] !== false;
   document.body.append(dlg);
@@ -319,7 +316,7 @@ export function askStage(name, { publish = false } = {}) {
       try { localStorage.setItem(PARTS_KEY, JSON.stringify(chosen)); } catch { /* no storage */ }
       let author = null;
       if (publish) {
-        author = { name: f.author.value.trim(), email: f.email.value.trim() };
+        author = { name: f.author.value.trim() };
         try { localStorage.setItem(AUTHOR_KEY, JSON.stringify(author)); } catch { /* no storage */ }
       }
       resolve({ name: f.name.value.trim() || 'Stage', parts: chosen, author });

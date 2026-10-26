@@ -2400,7 +2400,7 @@ try {
       const bundle = withParts(e ? await e.store.get(e.id) : await sceneBundle(asked.name), asked.parts);
       bundle.stage = { ...bundle.stage, name: asked.name };
       const out = await community.publish(bundle, asked.author);
-      status.textContent = `stage "${asked.name}" published${out.commit ? ` (commit ${out.commit.slice(0, 8)})` : `, not committed: ${out.commit_error}`} · ${hint()}`;
+      status.textContent = `stage "${asked.name}" published (${out.id.slice(0, 8)}) · ${hint()}`;
     } catch (err) {
       status.textContent = `could not publish the stage: ${err.message ?? err}`;
     }

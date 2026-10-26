@@ -50,8 +50,9 @@ which it loads no MuJoCo at all:
   world's items, state and controller setups into a stage, the page adds
   the name, picture, view and camera setups (`/api/stages/capture`) and
   keeps it. Published ones (Community) are the server's, in its library's
-  `mjcf_assets/saved_stage/<id>/`, each committed to the library's git
-  repository with its author (`/api/stages/publish`, see spawning.md).
+  `mjcf_assets/saved_stage/<id>/`, with its author's name
+  (`/api/stages/publish`, see spawning.md; not committed: the library's
+  git repository is kept by hand).
   Loading one replaces the world for everyone (`stage_load`, by id or the
   whole stage); `?stage=<id>` asks first.
 - **Network meter.** Bottom right, next to the frame meter: round trip

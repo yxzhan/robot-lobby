@@ -78,8 +78,8 @@ ik.json, base.json, cameras.json. GET /api/stages lists them, GET
 /api/stages/<id> reads one as a bundle, POST /api/stages/capture returns the
 world as a new bundle without keeping it (the page sends its name,
 thumbnail, view and cameras; it saves it in the browser), POST
-/api/stages/publish {bundle, author: {name, email}} writes a bundle and
-commits it in the library's git repository (git_commit_stage), DELETE
+/api/stages/publish {bundle, author: {name}} writes a bundle (not
+committed: the library's git repository is kept by hand), DELETE
 /api/stages/<id> deletes one; the stage_load request loads one of them, or a
 bundle the page sends.
 """
@@ -94,7 +94,6 @@ import math
 import os
 import pathlib
 import re
-import subprocess
 import sys
 import time
 import traceback
@@ -592,56 +591,18 @@ def write_stage(bundle):
 
 
 AUTHOR_NAME = re.compile(r'[<>\n\r\t]')
-AUTHOR_EMAIL = re.compile(r'^[^\s<>@]+@[^\s<>@]+$')
-COMMITTER = {'GIT_COMMITTER_NAME': 'Robot Lobby', 'GIT_COMMITTER_EMAIL': 'robot-lobby@localhost'}
-
-
 def publish_stage(bundle, author):
   """Writes a bundle as a new published stage (a new id if one of that id
   is there: a stage is never written over another's) with its author's
-  name, and commits it (git_commit_stage); returns its summary with
-  `commit` (the commit's id, or null and `commit_error`)."""
+  name; returns its summary. It is not committed: the library's git
+  repository is kept by hand (a new saved_stage/<id>/ folder to commit there)."""
   stage = dict(check_bundle(bundle))
   name = AUTHOR_NAME.sub(' ', str((author or {}).get('name') or '')).strip()[:100]
-  email = str((author or {}).get('email') or '').strip()[:200]
-  if email and not AUTHOR_EMAIL.match(email):
-    raise ValueError(f'not an email address: {email!r}')
   if not (isinstance(stage.get('id'), str) and STAGE_ID.match(stage['id'])) or stage_path(stage['id']).exists():
     stage['id'] = str(uuid.uuid4())
   stage['author'] = name
   stage['published'] = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
-  out = write_stage({**bundle, 'stage': stage})
-  try:
-    out['commit'] = git_commit_stage(stage, name, email)
-  except (OSError, RuntimeError, subprocess.SubprocessError) as err:
-    print(f'stage {stage["id"]}: written, not committed: {err}')
-    out['commit'], out['commit_error'] = None, str(err)
-  return out
-
-
-def git_commit_stage(stage, name, email):
-  """Commits the stage's folder alone in the library's git repository,
-  authored by `name` <`email`> (Anonymous if none), committed by the
-  server; returns the commit's id. Another server on the same library may
-  be committing too: a held index lock is waited for a little."""
-  lib = stages_dir().parent
-  rel = f'saved_stage/{stage["id"]}'
-  env = {**os.environ, **COMMITTER}
-
-  def git(*args):
-    for _ in range(10):
-      p = subprocess.run(['git', '-C', str(lib), *args], capture_output=True, text=True, timeout=60, env=env)
-      if p.returncode == 0:
-        return p.stdout.strip()
-      if 'index.lock' not in p.stderr:
-        raise RuntimeError(f'git {args[0]}: {p.stderr.strip() or p.stdout.strip()}')
-      time.sleep(0.5)
-    raise RuntimeError(f'git {args[0]}: the index stayed locked')
-  if git('rev-parse', '--is-inside-work-tree') != 'true':
-    raise RuntimeError(f'{lib} is not a git repository')
-  git('add', '--', rel)
-  git('commit', '--quiet', '-m', f'Stage: {stage.get("name") or stage["id"]}', f'--author={name or "Anonymous"} <{email}>', '--', rel)
-  return git('rev-parse', 'HEAD')
+  return write_stage({**bundle, 'stage': stage})
 
 
 def delete_stage(sid):

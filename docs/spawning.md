@@ -59,13 +59,11 @@ stages**: an IndexedDB record of those files in this browser, in either
 mode (on a server, the server makes the stage of its world and the page
 keeps it). **Publish** (on a server only) shares what is spawned, or one of
 My stages, as a **Community** stage: it asks for the name and, optionally,
-an author and email, and the server writes it into its library,
-`mjcf_assets/saved_stage/<id>/` (a new id: never over another's), and
-commits that folder alone in the library's git repository, authored by
-them (Anonymous without a name), committed by "Robot Lobby"
-(`server.py` `publish_stage`; written even if the commit fails, which the
-status line says). The server only commits: pushing the commits to the
-library repository's remote is done from there by hand. In local mode
+an author, and the server writes it into its library,
+`mjcf_assets/saved_stage/<id>/` (a new id: never over another's), with the
+author's name (`server.py` `publish_stage`). It is not committed: a new
+`saved_stage/<id>/` folder in the library's checkout, committed (and
+pushed) from there by hand. In local mode
 Community is the library's own `saved_stage/` (read-only;
 `scripts/vendor.mjs` indexes it into `public/json/stages.json`). Either list
 loads a stage (it replaces what is spawned, in one compile, each item in
