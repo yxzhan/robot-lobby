@@ -128,7 +128,7 @@ export class WorldPanel {
       if (!ok) status.textContent = 'busy, try again';
       else this.render();
     };
-    const reset = el('button', { type: 'button', textContent: 'Defaults', title: 'Every setting back to its default (MuJoCo\'s, but for sleep and noslip)' });
+    const reset = el('button', { type: 'button', textContent: 'Defaults', title: 'Every setting back to its default (MuJoCo\'s, but for sleep)' });
     reset.onclick = async () => {
       this.draft = structuredClone(PHYSICS_DEFAULTS.geom);
       await this.app.setPhysics(structuredClone(PHYSICS_DEFAULTS));

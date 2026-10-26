@@ -14,9 +14,10 @@ follows the selection, are the Render panel's: rendering.md):
   and a Panda's fingers let a 100 g box creep out within seconds; for
   grasping, elliptic with impratio 10 holds the box through a lift and a
   swing to within 2 mm.
-- **Noslip** (Contacts; on by default, unlike MuJoCo: 100 iterations,
-  tolerance 1e-10): a post-pass of the solver that takes the slip out of
-  frictional contacts. MuJoCo's friction is soft: it pushes back only
+- **Noslip** (Contacts; off by default, as in MuJoCo and in the policies'
+  training: with it the Microduck's kick did not kick again after a first
+  one; for grasping, 100 iterations, tolerance 1e-10): a post-pass of the
+  solver that takes the slip out of frictional contacts. MuJoCo's friction is soft: it pushes back only
   while things slide, so under a steady load (a held box's weight) they
   creep at a constant rate whatever the friction coefficient. Without
   noslip, a Panda holding a 100 g box lets it creep 8 mm in 20 000 steps

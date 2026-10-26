@@ -10,11 +10,14 @@
 //   seconds; elliptic with impratio 10 holds it, swinging, within 2 mm),
 //   so grasping may want those back in the Physics panel. Noslip (a
 //   post-pass of the solver that takes the slip out of frictional contacts)
-//   is on here, unlike MuJoCo's default: without it soft friction creeps
-//   steadily (a held box drops out after some 10^5 steps even with elliptic
-//   and impratio 10; with noslip it moves 0.1 mm in 2·10^5). Its tolerance,
-//   not its iterations, decides: at MuJoCo's 1e-6 it stops early and the
-//   creep is barely smaller. It costs step time with many contacts.
+//   is off by default, as in MuJoCo (and in the training of the policies:
+//   with it the Microduck's kick did not kick after a first one), and costs
+//   step time with many contacts. For grasping, turn it on (100 iterations,
+//   tolerance 1e-10): without it soft friction creeps steadily (a held box
+//   drops out after some 10^5 steps even with elliptic and impratio 10;
+//   with noslip it moves 0.1 mm in 2·10^5). Its tolerance, not its
+//   iterations, decides: at MuJoCo's 1e-6 it stops early and the creep is
+//   barely smaller.
 //   Solver (Newton, CG, PGS), its iterations and tolerance, and the
 //   integrator are global options too. They go into
 //   the world spec at every rebuild (world.js) and are also set on the live
@@ -43,7 +46,7 @@
 //   MuJoCo's default; it is set when the model is compiled, so a change
 //   rebuilds the world.
 
-// MuJoCo's own defaults, but for sleep and noslip.
+// MuJoCo's own defaults, but for sleep.
 export const PHYSICS_DEFAULTS = Object.freeze({
   gravity: [0, 0, -9.81],
   wind: [0, 0, 0],
@@ -52,7 +55,7 @@ export const PHYSICS_DEFAULTS = Object.freeze({
   viscosity: 0,
   impratio: 1,
   cone: 'pyramidal',
-  noslip_iterations: 100,
+  noslip_iterations: 0,
   noslip_tolerance: 1e-10,
   integrator: 'implicitfast',  // the menagerie models' (MuJoCo's own is Euler)
   solver: 'Newton',

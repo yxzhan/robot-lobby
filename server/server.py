@@ -137,12 +137,13 @@ def cpus():
 PHYSICS_THREADS = int(os.environ.get('PHYSICS_THREADS') or min(8, cpus()))
 
 # As in the browser (physics.js): MuJoCo's pyramidal cones and impratio 1
-# (elliptic and 10 made friction too strong), noslip on (soft friction
-# creeps: held things slide out of a grasp without it).
+# (elliptic and 10 made friction too strong), noslip off as in MuJoCo and in
+# the policies' training (on, the Microduck's kick did not kick after a
+# first one, and it costs step time; grasping may want it: soft friction creeps).
 PHYSICS_DEFAULTS = {
     'gravity': [0, 0, -9.81], 'wind': [0, 0, 0], 'magnetic': [0, -0.5, 0],
     'density': 0, 'viscosity': 0, 'impratio': 1, 'cone': 'pyramidal',
-    'noslip_iterations': 100, 'noslip_tolerance': 1e-10,
+    'noslip_iterations': 0, 'noslip_tolerance': 1e-10,
     'integrator': 'implicitfast', 'solver': 'Newton', 'iterations': 100, 'tolerance': 1e-8,
     'timestep': 0.005,  # s, live
     'speed': 1,         # the most sim seconds per wall second; 0: as fast as it goes
