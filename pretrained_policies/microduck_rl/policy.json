@@ -7,7 +7,7 @@
   },
   "kick_right": {
    "task": "Mjlab-BallKick-Flat-MicroDuck",
-   "checkpoint": "logs/rsl_rl/ball_kick_right/2026-10-24_17-18-14_ball_kick_right/model_9999.pt"
+   "checkpoint": "logs/rsl_rl/ball_kick_right/2026-10-26_14-51-10_ball_kick_right/model_12998.pt"
   }
  },
  "ctrl_dt": 0.02,

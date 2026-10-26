@@ -163,7 +163,14 @@ Its `policy.json` has walking and a manual skill (see Skills above), like
 microduck_rl's daemon swapping its "episodic" policies on the robot:
 `kick_right` (`kick_right.onnx`, the `Mjlab-BallKick-Flat-MicroDuck` task):
 from a stand it kicks a ball lying at its right toe forward at about 1 m/s
-and settles on both feet. It does not see the ball (the robot has no way
+and settles on both feet. Trained from HOME only, it kicked once and then
+no more: the walking policy's stand (neck ~0.15 rad down, the legs a few
+hundredths off) was not a start it knew. It was trained on (3000 more
+iterations) with 70% of its episodes starting from 4000 stances the walking
+policy settles into, after walking, kicking and with head commands
+(`scripts/microduck_stances.py`, run in the viewer's physics; the task's
+`set_stance_from_library` event, the ball in front of the stance's right
+foot): now it kicks every time, also after a kick and with the head turned. It does not see the ball (the robot has no way
 to), so aim the duck first: the ball 9 cm ahead and 4 cm right of the
 trunk, within about 1.5 cm. The library's `objects/custom/microduck_ball` is
 the 70 mm, 15 g ball it was trained with.
