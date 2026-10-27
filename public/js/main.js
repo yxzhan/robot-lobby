@@ -28,6 +28,7 @@ import { IkController } from './ik.js';
 import { applyOptions, geomOverrides, geomSignature, injectGeomDefaults, loadPhysics, needsRebuild, PHYSICS_DEFAULTS } from './physics.js';
 import { WorldPanel } from './worldpanel.js';
 import { BehaviorPanel } from './btpanel.js';
+import { AgentPanel } from './agent.js';
 import { RenderPanel, loadQuality } from './render.js';
 import { addSwarm } from './swarm.js';
 import { FLOOR_STYLES, floorTexture, hexRgb, loadFloor, saveFloor } from './floor.js';
@@ -2617,7 +2618,43 @@ try {
   // For devtools and scripts/render_previews.mjs.
   window.spawnAsset = (rel, pos = [0, 0, 0], yaw = 0) => spawn(assets.find((a) => a.rel === rel) ?? { rel, name: rel }, pos, yaw);
   window.clearAssets = () => respawn([]);
-
+  // What the toolbar and the asset panel do, for the Agent panel's tools
+  // (agent.js) and scripts: in local and network mode alike, each resolving
+  // once done (in network mode: once the server's world shows it).
+  const settled = async (done, timeout = 120) => {
+    const t0 = performance.now();
+    while (!(done() && !busy && busyEl.hidden)) {
+      if (performance.now() - t0 > timeout * 1000) throw new Error(`not done in ${timeout} s`);
+      await new Promise((r) => setTimeout(r, 100));
+    }
+  };
+  window.lobby = {
+    assets: () => assets,
+    robots: () => robots,
+    busy: () => busy || !busyEl.hidden,
+    // Spawns library model `rel` at [x, y, z], turned `yaw`: the new robot.
+    async spawn(rel, pos, yaw = 0) {
+      const asset = assets.find((a) => a.rel === rel);
+      if (!asset) throw new Error(`no model ${rel} in the library`);
+      const before = new Set(robots);
+      await settled(() => true);
+      await spawn(asset, pos, yaw);
+      await settled(() => robots.some((r) => !before.has(r)));
+      return robots.find((r) => !before.has(r));
+    },
+    // Removes the robots of `list` (the others stay as they are).
+    async remove(list) {
+      await settled(() => true);
+      await respawn(robots.filter((r) => !list.includes(r)));
+      await settled(() => !robots.some((r) => list.includes(r)));
+    },
+    reset: () => app.model && app.reset(),
+    async setPaused(paused) {
+      if (!!app.paused !== !!paused) document.getElementById('pause').click();
+      await settled(() => !!app.paused === !!paused, 10);
+    },
+    capture: (size) => app.capture(size),
+  };
 
   // Goal markers from a script (the devtools console, page automation), as
   // the Teleop panel sets them, in local and network mode alike (the server
@@ -2665,6 +2702,7 @@ try {
   };
   addSwarm(window.goals);  // goals.randomWalk, goals.chase, goals.stop (swarm.js)
   app.behavior = new BehaviorPanel(app, document.getElementById('behavior'), window.goals);  // window.bt
+  app.agent = new AgentPanel(app, document.getElementById('agent'));  // Claude with the tools of the panels
 
   // Assets are spawned by dragging them from the asset panel onto the floor.
   new AssetPanel(app, document.getElementById('assets'), assets, {

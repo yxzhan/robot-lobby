@@ -76,6 +76,7 @@ The model library is `mjcf_assets/` next to `package.json`
 - [Physics](docs/world.md) — the Physics panel: options, timestep,
   floor, lighting, sleep
 - [Teleop](docs/teleop.md) — driving, the goal marker, gamepads, scripted goals
+- [Agent](docs/agent.md) — the Agent panel: Claude (your API key) or an Ollama model working the lobby with tools
 - [Policies](docs/policies.md) — GR00T (G1), Playground (Spot, Go2), Microduck
 - [Mobile bases](docs/mobile-bases.md) and [IK chains](docs/ik.md)
 - [ROS bridge](docs/ros.md) — joint states, TF, commands, cameras over rosbridge

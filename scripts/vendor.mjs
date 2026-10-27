@@ -32,6 +32,9 @@ const { build } = await import('esbuild');
 await build({ entryPoints: ['scripts/codemirror.mjs'], bundle: true, format: 'esm', minify: true,
               outfile: 'public/vendor/codemirror/codemirror.mjs', logLevel: 'warning' });
 console.log('bundled CodeMirror into public/vendor/codemirror/codemirror.mjs');
+await build({ entryPoints: ['scripts/anthropic.mjs'], bundle: true, format: 'esm', minify: true, platform: 'browser',
+              outfile: 'public/vendor/anthropic/anthropic.mjs', logLevel: 'warning' });
+console.log('bundled the Anthropic SDK into public/vendor/anthropic/anthropic.mjs');
 
 // py_trees (pure Python, BSD), for Pyodide: its wheel from PyPI, checked
 // against its hash, fetched once.

@@ -133,7 +133,7 @@
     .views button[hidden] { display: none; }
     .views button[aria-pressed=true] { color: #fff; background: #3d5a73; border-color: #5a85a8; }
     .views button[aria-pressed=true]::before { background: #7fd1ff; box-shadow: 0 0 6px #7fd1ff; }
-    /* Right column: Behavior, Teleop, Cameras, Render, Share, Server. */
+    /* Right column: Agent, Behavior, Teleop, Cameras, Render, Share, Server. */
     #side { position: absolute; top: 60px; right: 12px; width: 420px; max-height: calc(100% - 72px); z-index: 1;
             display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
     #side > * { pointer-events: auto; box-sizing: border-box; color: #ddd; background: rgba(0,0,0,.6);
@@ -196,16 +196,16 @@
     #teleop .joints label.off { color: #777; }
     #teleop .joints .why { margin-left: auto; color: #888; font-style: italic; }
     #teleop .error { color: #f88; margin: 4px 0; }
-    :is(#world, #cameras, #render, #server, #share, #behavior) { overflow: hidden auto; min-height: 0; flex: 0 5 auto; font-size: 12px; }
-    :is(#world, #cameras, #render, #server, #share, #behavior) h3 { margin: 0 0 6px; font-size: 13px; }
-    :is(#world, #cameras, #render, #server, #share, #behavior) .field { display: grid; grid-template-columns: 64px 1fr 38px; align-items: center; gap: 6px; margin: 3px 0; }
-    :is(#world, #cameras, #render, #server, #share, #behavior) .ctl { display: flex; gap: 4px; min-width: 0; }
-    :is(#world, #cameras, #render, #server, #share, #behavior) .unit { color: #888; font-size: 11px; }
-    :is(#world, #cameras, #render, #server, #share, #behavior) input[type=number] { width: 0; flex: 1; min-width: 0; font: inherit; color: #eee; background: #222;
+    :is(#world, #cameras, #render, #server, #share, #behavior, #agent) { overflow: hidden auto; min-height: 0; flex: 0 5 auto; font-size: 12px; }
+    :is(#world, #cameras, #render, #server, #share, #behavior, #agent) h3 { margin: 0 0 6px; font-size: 13px; }
+    :is(#world, #cameras, #render, #server, #share, #behavior, #agent) .field { display: grid; grid-template-columns: 64px 1fr 38px; align-items: center; gap: 6px; margin: 3px 0; }
+    :is(#world, #cameras, #render, #server, #share, #behavior, #agent) .ctl { display: flex; gap: 4px; min-width: 0; }
+    :is(#world, #cameras, #render, #server, #share, #behavior, #agent) .unit { color: #888; font-size: 11px; }
+    :is(#world, #cameras, #render, #server, #share, #behavior, #agent) input[type=number] { width: 0; flex: 1; min-width: 0; font: inherit; color: #eee; background: #222;
                                 border: 1px solid #555; border-radius: 4px; padding: 1px 3px; }
-    :is(#world, #cameras, #render, #server, #share, #behavior) select { flex: 1; min-width: 0; font: inherit; color: #eee; background: #222; border: 1px solid #555; border-radius: 4px; }
-    :is(#world, #cameras, #render, #server, #share, #behavior) .hint { color: #999; margin: 4px 0; line-height: 1.5; }
-    :is(#world, #cameras, #render, #server, #share, #behavior) .sub { margin-top: 8px; padding-top: 6px; border-top: 1px solid #3a3d44; font-weight: 600; }
+    :is(#world, #cameras, #render, #server, #share, #behavior, #agent) select { flex: 1; min-width: 0; font: inherit; color: #eee; background: #222; border: 1px solid #555; border-radius: 4px; }
+    :is(#world, #cameras, #render, #server, #share, #behavior, #agent) .hint { color: #999; margin: 4px 0; line-height: 1.5; }
+    :is(#world, #cameras, #render, #server, #share, #behavior, #agent) .sub { margin-top: 8px; padding-top: 6px; border-top: 1px solid #3a3d44; font-weight: 600; }
     #cameras > .body > .field { grid-template-columns: 42px 1fr; }
     #cameras details.camera { border: 1px solid #3a3d44; border-radius: 5px; padding: 2px 6px; margin: 6px 0; }
     #cameras details.camera > summary { cursor: pointer; display: flex; align-items: center; gap: 4px; padding: 3px 0; list-style: none; }
@@ -230,6 +230,26 @@
     #behavior textarea { box-sizing: border-box; width: 100%; resize: vertical; font: 11px/1.45 ui-monospace, Menlo, Consolas, monospace; color: #eee;
                          background: #222; border: 1px solid #555; border-radius: 4px; padding: 4px 6px; tab-size: 2; white-space: pre; }
     #behavior .note.bad { color: #e88; }
+    #agent .agent-log { display: flex; flex-direction: column; gap: 6px; max-height: 46vh; min-height: 60px; overflow: auto; margin: 6px 0; padding-right: 2px; }
+    #agent .agent-log > div { line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
+    #agent .agent-user { align-self: flex-end; max-width: 85%; background: #2b4a66; border-radius: 8px 8px 2px 8px; padding: 4px 8px; color: #eef; }
+    #agent .agent-assistant { color: #e6e6e6; }
+    #agent .agent-thinking, #agent .agent-tool { font-size: 11px; color: #999; }
+    #agent .agent-tool details, #agent .agent-thinking details { border-left: 2px solid #3a3d44; padding-left: 6px; }
+    #agent .agent-tool summary, #agent .agent-thinking summary { cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    #agent .agent-tool .name { color: #8fc1ff; font-family: ui-monospace, Menlo, Consolas, monospace; }
+    #agent .agent-tool .args { font-family: ui-monospace, Menlo, Consolas, monospace; }
+    #agent .agent-tool.failed .name { color: #e88; }
+    #agent .agent-tool .result { font: 10px/1.4 ui-monospace, Menlo, Consolas, monospace; color: #aaa; max-height: 200px; overflow: auto; margin-top: 2px; }
+    #agent .agent-tool .shot { display: block; width: 160px; margin: 4px 0; border-radius: 4px; }
+    #agent .agent-error { color: #e88; }
+    #agent .agent-provider { margin-top: 4px; }
+    #agent .agent-provider input { flex: 1; min-width: 0; font: inherit; color: #eee; background: #222; border: 1px solid #555; border-radius: 4px; padding: 2px 6px; }
+    #agent .agent-provider .note.ok { color: #8a8; flex: 1; }
+    #agent .agent-provider a { color: #6bf; }
+    #agent .agent-note { color: #888; font-size: 11px; font-style: italic; }
+    #agent .agent-ask { display: flex; align-items: center; gap: 4px; color: #aaa; font-size: 11px; margin: 4px 0; }
+    #agent textarea { box-sizing: border-box; width: 100%; resize: vertical; font: inherit; color: #eee; background: #222; border: 1px solid #555; border-radius: 4px; padding: 4px 6px; }
     #behavior .bar button svg { width: 9px; height: 9px; margin-right: 4px; fill: currentColor; vertical-align: -1px; }
     #behavior .cm-editor { resize: vertical; overflow: hidden; min-height: 120px; }
     #behavior .cm-editor.cm-focused { outline: none; border-color: #5a85a8; }
@@ -245,13 +265,13 @@
     #behavior .bt-tree [data-status=failure] { color: #d99; }
     #world input[type=range] { flex: 1; min-width: 0; margin: 0; }
     #world input[type=color] { flex: 1; min-width: 0; height: 20px; padding: 0 2px; background: #222; border: 1px solid #555; border-radius: 4px; }
-    :is(#world, #cameras, #render, #server, #share, #behavior) .sub.minor { border-top: 0; margin-top: 4px; padding-top: 0; color: #aaa; font-weight: 400; }
-    :is(#world, #cameras, #render, #server, #share, #behavior) .bar { display: flex; align-items: center; gap: 4px; margin-top: 6px; }
-    :is(#world, #cameras, #render, #server, #share, #behavior) button { cursor: pointer; font: inherit; font-size: 11px; color: #ddd; background: #333;
+    :is(#world, #cameras, #render, #server, #share, #behavior, #agent) .sub.minor { border-top: 0; margin-top: 4px; padding-top: 0; color: #aaa; font-weight: 400; }
+    :is(#world, #cameras, #render, #server, #share, #behavior, #agent) .bar { display: flex; align-items: center; gap: 4px; margin-top: 6px; }
+    :is(#world, #cameras, #render, #server, #share, #behavior, #agent) button { cursor: pointer; font: inherit; font-size: 11px; color: #ddd; background: #333;
                     border: 1px solid #555; border-radius: 4px; padding: 2px 8px; }
-    :is(#world, #cameras, #render, #server, #share, #behavior) button.primary { background: #2f5a3c; border-color: #4d8a5f; }
-    :is(#world, #cameras, #render, #server, #share, #behavior) button:disabled { opacity: .5; cursor: default; }
-    :is(#world, #cameras, #render, #server, #share, #behavior) .note { color: #c9a; font-size: 11px; }
+    :is(#world, #cameras, #render, #server, #share, #behavior, #agent) button.primary { background: #2f5a3c; border-color: #4d8a5f; }
+    :is(#world, #cameras, #render, #server, #share, #behavior, #agent) button:disabled { opacity: .5; cursor: default; }
+    :is(#world, #cameras, #render, #server, #share, #behavior, #agent) .note { color: #c9a; font-size: 11px; }
     #server input[type=url] { flex: 1; min-width: 0; font: inherit; color: #eee; background: #222; border: 1px solid #555;
                               border-radius: 4px; padding: 2px 4px; }
     #server .log { margin-top: 6px; font: 11px ui-monospace, monospace; color: #9cd; overflow-wrap: anywhere; }
@@ -421,6 +441,7 @@
     <button data-panel="world" title="Physics: gravity, medium, contacts, timestep, speed, default geom properties">Physics</button>
   </div>
   <div id="views" class="views" role="group" aria-label="Right panels">
+    <button data-panel="agent" title="Agent: tell Claude what to do in the lobby (it spawns, drives and arranges robots with the panels' tools)">Agent</button>
     <button data-panel="behavior" title="Behaviour tree: one tree drives a team of robots (goal markers), a py_trees script or text, shown live">Behavior</button>
     <button data-panel="teleop" title="Teleoperate a robot: controller and input">Teleop</button>
     <button data-panel="cameras" title="The robots' cameras: picture-in-picture windows, looking through one">Cameras</button>
@@ -462,6 +483,10 @@
   </div>
   </div>
   <div id="side">
+  <div id="agent" hidden>
+    <h3>Agent</h3>
+    <div class="body"></div>
+  </div>
   <div id="behavior" hidden>
     <h3>Behavior</h3>
     <div class="body"></div>
