@@ -7,6 +7,18 @@
   <style>
     html, body { margin: 0; height: 100%; overflow: hidden; background: #1b1d22; font: 13px system-ui, sans-serif; }
     canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+    /* Scrollbars: thin and the same everywhere, over a transparent track (the
+       platform's own differ, and classic ones take 15-17 px of a panel).
+       Chrome, Edge and Safari take the ::-webkit-scrollbar rules (and ignore
+       them once scrollbar-width is set, hence only where those are not
+       supported: Firefox). */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #5a5f69; border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: #7a808b; }
+    @supports not selector(::-webkit-scrollbar) {
+      * { scrollbar-width: thin; scrollbar-color: #5a5f69 transparent; }
+    }
     /* The toolbar, top middle: centred in the room the two groups of panel
        toggles leave on both sides (360 px each), as wide as its buttons,
        300 px at least while there is room. */
