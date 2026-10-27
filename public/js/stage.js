@@ -280,6 +280,43 @@ export function withParts(bundle, parts) {
   return { ...bundle, stage, files };
 }
 
+// A modal form (the Save stage dialog's look): `fields` the HTML between the
+// title and the hint; resolves to read(form elements) on OK, null on Cancel.
+function formDialog({ title, fields, hint, ok, init, read }) {
+  const dlg = document.createElement('dialog');
+  dlg.className = 'publish';
+  dlg.innerHTML = `<form method="dialog">
+    <h3></h3>
+    ${fields}
+    <p class="hint"></p>
+    <div class="buttons"><button value="cancel" formnovalidate>Cancel</button><button value="ok" class="primary"></button></div>
+  </form>`;
+  dlg.querySelector('h3').textContent = title;
+  dlg.querySelector('.hint').textContent = hint;
+  dlg.querySelector('button.primary').textContent = ok;
+  const f = dlg.querySelector('form').elements;
+  init?.(f);
+  document.body.append(dlg);
+  return new Promise((resolve) => {
+    dlg.onclose = () => {
+      dlg.remove();
+      resolve(dlg.returnValue === 'ok' ? read(f) : null);
+    };
+    dlg.showModal();
+  });
+}
+
+// Asks for a name (the Save stage dialog without the stage's parts): the
+// name, or null (cancelled). E.g. the Behavior panel's Save.
+export function askName(title, name, { hint = '', ok = 'Save' } = {}) {
+  return formDialog({
+    title, hint, ok,
+    fields: '<label>Name <input name="name" required maxlength="200"></label>',
+    init: (f) => { f.name.value = name ?? ''; },
+    read: (f) => f.name.value.trim() || null,
+  });
+}
+
 // Asks what to save or publish a stage as (`publish`: with an author):
 // {name, parts: {key: bool}, author: {name}}, or null (cancelled).
 // The author and the parts are remembered for next time.
@@ -287,31 +324,23 @@ export function askStage(name, { publish = false } = {}) {
   let saved = {}, parts = {};
   try { saved = JSON.parse(localStorage.getItem(AUTHOR_KEY)) ?? {}; } catch { /* none */ }
   try { parts = JSON.parse(localStorage.getItem(PARTS_KEY)) ?? {}; } catch { /* none */ }
-  const dlg = document.createElement('dialog');
-  dlg.className = 'publish';
-  dlg.innerHTML = `<form method="dialog">
-    <h3>${publish ? 'Publish' : 'Save'} stage</h3>
-    <label>Name <input name="name" required maxlength="200"></label>
+  return formDialog({
+    title: `${publish ? 'Publish' : 'Save'} stage`,
+    ok: publish ? 'Publish' : 'Save',
+    hint: publish
+      ? 'Published stages are listed for everyone on this server (Community), with this name as their author.'
+      : 'Saved in this browser (My stages). What is left out stays as it is when the stage is loaded.',
+    fields: `<label>Name <input name="name" required maxlength="200"></label>
     ${publish ? '<label>Author <input name="author" maxlength="100" placeholder="optional" autocomplete="name"></label>' : ''}
     <fieldset class="parts"><legend>Keep, besides the models and where they stand</legend>
       ${STAGE_PARTS.map(([k, label, title]) => `<label title="${title}"><input type="checkbox" name="part-${k}"> ${label}</label>`).join('')}
-    </fieldset>
-    <p class="hint">${publish
-      ? 'Published stages are listed for everyone on this server (Community), with this name as their author.'
-      : 'Saved in this browser (My stages). What is left out stays as it is when the stage is loaded.'}</p>
-    <div class="buttons"><button value="cancel" formnovalidate>Cancel</button><button value="ok" class="primary">${publish ? 'Publish' : 'Save'}</button></div>
-  </form>`;
-  const f = dlg.querySelector('form').elements;
-  f.name.value = name ?? '';
-  if (publish) {
-    f.author.value = saved.name ?? '';
-  }
-  for (const [k] of STAGE_PARTS) f[`part-${k}`].checked = parts[k] !== false;
-  document.body.append(dlg);
-  return new Promise((resolve) => {
-    dlg.onclose = () => {
-      dlg.remove();
-      if (dlg.returnValue !== 'ok') { resolve(null); return; }
+    </fieldset>`,
+    init: (f) => {
+      f.name.value = name ?? '';
+      if (publish) f.author.value = saved.name ?? '';
+      for (const [k] of STAGE_PARTS) f[`part-${k}`].checked = parts[k] !== false;
+    },
+    read: (f) => {
       const chosen = Object.fromEntries(STAGE_PARTS.map(([k]) => [k, f[`part-${k}`].checked]));
       try { localStorage.setItem(PARTS_KEY, JSON.stringify(chosen)); } catch { /* no storage */ }
       let author = null;
@@ -319,9 +348,8 @@ export function askStage(name, { publish = false } = {}) {
         author = { name: f.author.value.trim() };
         try { localStorage.setItem(AUTHOR_KEY, JSON.stringify(author)); } catch { /* no storage */ }
       }
-      resolve({ name: f.name.value.trim() || 'Stage', parts: chosen, author });
-    };
-    dlg.showModal();
+      return { name: f.name.value.trim() || 'Stage', parts: chosen, author };
+    },
   });
 }
 

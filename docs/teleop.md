@@ -96,6 +96,33 @@ Goals can also come from a script, for several robots at once:
   one. The full reference is at the top of `bt.js`; from the console
   `bt.run(text)`, `bt.stop()`, `bt.status()`.
   The tree runs in the page that started it (in network mode too).
+
+  The panel's first menu says what the editor holds: a **py_trees**
+  script (the default), the text form above, or BehaviorTree.CPP XML; it
+  is highlighted, checked and run as that (examples and saved trees bring
+  their own). A py_trees script runs real py_trees 2.6 in Pyodide (CPython in WASM, `public/vendor/pyodide`,
+  some 13 MB loaded the first time Python is picked), with the
+  `lobby` module (`public/py/lobby.py`) for the robots: behaviours `GoTo`,
+  `Move`, `Approach`, `Follow`, `Stop` (the moves above) and `Wait`
+  (simulated time; py_trees' own `Timer` counts wall time), and
+  `robots()`, `pose(name)`, `distance(a, b)`, `time()` for conditions of
+  one's own. The script defines `root` (a behaviour) or `tree` (a
+  `BehaviourTree`):
+
+  ```python
+  import py_trees
+  from lobby import GoTo, Wait
+
+  root = py_trees.composites.Sequence("Patrol", memory=True, children=[
+      GoTo("r1", x=1, y=0), Wait(1), GoTo("r1", x=-1, y=0),
+  ])
+  ```
+
+  The editor is CodeMirror 6 (`public/vendor/codemirror`, bundled by
+  `scripts/vendor.mjs` from `scripts/codemirror.mjs`): it highlights
+  Python, the text form or XML, completes node names, and marks errors as one
+  types (the text form's and XML's as bt.js parses them, Python's syntax
+  once Pyodide is loaded, and the line a run failed at). Ctrl+Enter runs.
 - **On the server** (HTTP): `GET /api/robots` lists the robots
   (`name`, `pose`, `goal`, `drives`, `arrived`); `POST /api/goal` with JSON
   `{robots, forward, left, turn}` or `{robots, goal: {x, y, yaw}}` sets

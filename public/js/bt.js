@@ -75,7 +75,9 @@ const PARAMS = {
   Follow: [['robot', 'robots'], ['target', 'name'], ['distance', 'num', 0.4]],
   Stop: [['robot', 'robots']],
 };
-const TYPES = [...COMPOSITES, ...DECORATORS, ...Object.keys(PARAMS).filter((t) => !COMPOSITES.includes(t) && !DECORATORS.includes(t))];
+// The leaves (moves, Wait) and every node type, for the editor.
+export const LEAVES = Object.keys(PARAMS).filter((t) => !COMPOSITES.includes(t) && !DECORATORS.includes(t));
+export const TYPES = [...COMPOSITES, ...DECORATORS, ...LEAVES];
 const ALIASES = { selector: 'Fallback', sleep: 'Wait', retryuntilsuccessful: 'Retry', goto: 'GoTo', invert: 'Inverter' };
 // BehaviorTree.CPP's attribute names: [ours, scale].
 const XML_PARAMS = {
@@ -89,11 +91,15 @@ const typeOf = (word) => {
   return TYPES.find((t) => t.toLowerCase() === w) ?? ALIASES[w];
 };
 
-// A node: {type, params, children, line, text, status, state}.
-function makeNode(type, raw, children, where, text) {
+// An error of the tree's text; `line` (1-based) where it is, if known (the
+// editor marks it).
+const parseError = (msg, line = null) => Object.assign(new Error(msg), { line });
+
+// A node: {type, params, children, where, line, text, status, state}.
+function makeNode(type, raw, children, where, text, line = null) {
   const specs = PARAMS[type] ?? [];
   const params = {};
-  const fail = (msg) => { throw new Error(`${where}: ${type}: ${msg}`); };
+  const fail = (msg) => { throw parseError(`${where}: ${type}: ${msg}`, line); };
   for (const [k, v] of Object.entries(raw)) {
     const spec = specs.find(([p]) => p === k);
     if (!spec) fail(`no parameter ${k}${specs.length ? ` (${specs.map(([p]) => p).join(', ')})` : ''}`);
@@ -109,7 +115,7 @@ function makeNode(type, raw, children, where, text) {
   if (children.length < n[0] || children.length > n[1]) {
     fail(n[1] === 0 ? 'has no children' : n[1] === 1 ? 'needs one child' : 'needs children');
   }
-  return { type, params, children, where, text, status: IDLE, state: {} };
+  return { type, params, children, where, line, text, status: IDLE, state: {} };
 }
 
 function value(kind, v, fail) {
@@ -127,9 +133,9 @@ function value(kind, v, fail) {
   return deg ? x * Math.PI / 180 : x;
 }
 
-// The text form or BehaviorTree.CPP XML -> the root node.
-export function parse(text) {
-  return text.trimStart().startsWith('<') ? parseXml(text) : parseText(text);
+// The text form (`format` 'text') or BehaviorTree.CPP XML ('xml') -> the root node.
+export function parse(text, format = 'text') {
+  return format === 'xml' ? parseXml(text) : parseText(text);
 }
 
 function parseText(text) {
@@ -141,7 +147,7 @@ function parseText(text) {
     const [word, ...args] = line.trim().match(/"[^"]*"|'[^']*'|\S+/g);
     const where = `line ${i + 1}`;
     const type = typeOf(word);
-    if (!type) throw new Error(`${where}: no node ${word} (${TYPES.join(', ')})`);
+    if (!type) throw parseError(`${where}: no node ${word} (${TYPES.join(', ')})`, i + 1);
     const raw2 = {}, specs = PARAMS[type] ?? [];
     let pos = 0;
     for (const a of args) {
@@ -149,30 +155,33 @@ function parseText(text) {
       const unq = (s) => s.replace(/^(["'])(.*)\1$/, '$2');
       if (m) raw2[m[1]] = unq(m[2]);
       else {
-        if (pos >= specs.length) throw new Error(`${where}: ${type}: too many parameters (${specs.map(([p]) => p).join(', ') || 'none'})`);
+        if (pos >= specs.length) throw parseError(`${where}: ${type}: too many parameters (${specs.map(([p]) => p).join(', ') || 'none'})`, i + 1);
         raw2[specs[pos++][0]] = unq(a);
       }
     }
-    items.push({ indent, type, raw: raw2, where, text: raw.trim().replace(/\s*#.*/, ''), children: [] });
+    items.push({ indent, type, raw: raw2, where, line: i + 1, text: raw.trim().replace(/\s*#.*/, ''), children: [] });
   });
-  if (!items.length) throw new Error('no nodes');
+  if (!items.length) throw parseError('no nodes', 1);
   // Indentation -> children: a stack of the open nodes.
   const top = items[0];
   const stack = [top];
   for (const it of items.slice(1)) {
     while (stack.length && stack.at(-1).indent >= it.indent) stack.pop();
-    if (!stack.length) throw new Error(`${it.where}: a second root (indent it under ${top.type})`);
+    if (!stack.length) throw parseError(`${it.where}: a second root (indent it under ${top.type})`, it.line);
     stack.at(-1).children.push(it);
     stack.push(it);
   }
-  const build = (it) => makeNode(it.type, it.raw, it.children.map(build), it.where, it.text);
+  const build = (it) => makeNode(it.type, it.raw, it.children.map(build), it.where, it.text, it.line);
   return build(top);
 }
 
 function parseXml(text) {
   const doc = new DOMParser().parseFromString(text, 'application/xml');
   const err = doc.querySelector('parsererror');
-  if (err) throw new Error(`XML: ${err.textContent.split('\n')[0]}`);
+  if (err) {
+    const msg = err.querySelector('div')?.textContent ?? err.textContent;  // (Chrome: "error on line 3 at column 5: …")
+    throw parseError(`XML: ${msg.trim().split('\n')[0]}`, Number(msg.match(/line (\d+)/)?.[1]) || null);
+  }
   const root = doc.documentElement;
   const trees = root.tagName === 'BehaviorTree' ? [root] : [...root.children].filter((e) => e.tagName === 'BehaviorTree');
   const main = root.getAttribute('main_tree_to_execute');
@@ -393,6 +402,47 @@ function clearOwn(n, ctx) {
   if (names.length) ctx.goals.clear(names);
 }
 
+// What a tick sees, on `app` (its data.time) with `goals` (main.js's
+// window.goals): goals.list() entries (as they are now: a goal just set
+// shows) by name, robots by which.
+export function context(app, goals) {
+  const byName = (w) => {
+    const list = goals.list(), part = w.toLowerCase();
+    return list.find((r) => r.name === w) ?? list.find((r) => r.label === w)
+      ?? list.find((r) => r.label.toLowerCase().includes(part));
+  };
+  return {
+    time: app.data.time,
+    goals,
+    robot: (name) => goals.list().find((r) => r.name === name),
+    thing: byName,
+    robots: (which) => {
+      const list = goals.list();
+      if (which.length === 1 && which[0] === 'all') return list.filter((r) => r.drives);
+      return [...new Set(which.flatMap((w) => {
+        const rs = list.filter((r) => r.name === w || r.label === w);  // a label: all of them
+        if (!rs.length) throw new Error(`no robot ${w}`);
+        const off = rs.find((r) => !r.drives);
+        if (off) throw new Error(`${off.name} cannot drive (no walking policy or base on)`);
+        return rs;
+      }))];
+    },
+  };
+}
+
+// One leaf (a move or Wait) on its own, for py_trees (pybt.js): params as
+// in the text form (validated alike); tick() and halt() take a context().
+export function leaf(type, params) {
+  const t = typeOf(type);
+  if (!t || COMPOSITES.includes(t) || DECORATORS.includes(t)) throw new Error(`no leaf ${type}`);
+  const n = makeNode(t, params, [], t, t);
+  return {
+    tick: (ctx) => tick(n, ctx),
+    halt: (ctx) => halt(n, ctx),
+    get info() { return n.info ?? ''; },
+  };
+}
+
 // A tree run on `app` (its data.time, paused) with `goals` (main.js's
 // window.goals); `onTick(runner)` after each tick.
 export class Runner {
@@ -408,31 +458,19 @@ export class Runner {
     this.step();
   }
 
-  // What a tick sees: goals.list() entries (as they are now: a goal just
-  // set shows) by name, robots by which.
   context() {
-    const byName = (w) => {
-      const list = this.goals.list(), part = w.toLowerCase();
-      return list.find((r) => r.name === w) ?? list.find((r) => r.label === w)
-        ?? list.find((r) => r.label.toLowerCase().includes(part));
+    return context(this.app, this.goals);
+  }
+
+  // The tree view's rows, depth first: [{depth, text, title, status, info}].
+  rows() {
+    const out = [];
+    const add = (n, depth) => {
+      out.push({ depth, text: n.text, title: n.where, status: n.status, info: n.status === IDLE ? '' : n.info ?? '' });
+      n.children.forEach((c) => add(c, depth + 1));
     };
-    return {
-      time: this.app.data.time,
-      goals: this.goals,
-      robot: (name) => this.goals.list().find((r) => r.name === name),
-      thing: byName,
-      robots: (which) => {
-        const list = this.goals.list();
-        if (which.length === 1 && which[0] === 'all') return list.filter((r) => r.drives);
-        return [...new Set(which.flatMap((w) => {
-          const rs = list.filter((r) => r.name === w || r.label === w);  // a label: all of them
-          if (!rs.length) throw new Error(`no robot ${w}`);
-          const off = rs.find((r) => !r.drives);
-          if (off) throw new Error(`${off.name} cannot drive (no walking policy or base on)`);
-          return rs;
-        }))];
-      },
-    };
+    add(this.root, 0);
+    return out;
   }
 
   step() {

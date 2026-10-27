@@ -1,10 +1,15 @@
-# r1 walks back and forth, r2 follows it, r3 follows r2, for 60 s
+# r1 walks and turns, r2 follows it, r3 follows r2..., for 60 s
 ForceSuccess
   Timeout 600
     Parallel
       Repeat
         Sequence
           Move r1 forward=1.5
-          Move r1 turn=180deg
-      Follow r2 r1 distance=0.4
-      Follow r3 r2 distance=0.4
+          Move r1 turn=30deg
+      Follow r2 r1 distance=1.2
+      Follow r3 r2 distance=1.2
+      Follow r4 r3 distance=1.2
+      Follow r5 r4 distance=1.2
+      Follow r6 r5 distance=1.2
+      Follow r7 r6 distance=1.2
+

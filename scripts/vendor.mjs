@@ -1,5 +1,6 @@
 // Copies the MuJoCo and Filament runtime files out of node_modules so that
 // public/ is a self-contained static site (no bundler needed).
+import { createHash } from 'node:crypto';
 import { cpSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 
 const copies = {
@@ -15,12 +16,43 @@ const copies = {
   'node_modules/stats.js/src/Stats.js': 'public/vendor/stats/Stats.js',
   // QR codes for the Share panel (ES module).
   'node_modules/qrcode-generator/dist/qrcode.mjs': 'public/vendor/qrcode/qrcode.mjs',
+  // Pyodide, CPython in WASM, for py_trees behaviour trees (public/js/pybt.js; loaded only when one runs).
+  ...Object.fromEntries(['pyodide.mjs', 'pyodide.asm.mjs', 'pyodide.asm.wasm', 'python_stdlib.zip', 'pyodide-lock.json']
+    .map((f) => [`node_modules/pyodide/${f}`, `public/vendor/pyodide/${f}`])),
 };
 for (const [from, to] of Object.entries(copies)) {
   mkdirSync(to.slice(0, to.lastIndexOf('/')), { recursive: true });
   cpSync(from, to);
 }
 console.log('vendored', Object.keys(copies).length, 'files into public/vendor');
+
+// CodeMirror 6, the Behavior panel's editor: its modules bundled into one
+// (scripts/codemirror.mjs says which parts).
+const { build } = await import('esbuild');
+await build({ entryPoints: ['scripts/codemirror.mjs'], bundle: true, format: 'esm', minify: true,
+              outfile: 'public/vendor/codemirror/codemirror.mjs', logLevel: 'warning' });
+console.log('bundled CodeMirror into public/vendor/codemirror/codemirror.mjs');
+
+// py_trees (pure Python, BSD), for Pyodide: its wheel from PyPI, checked
+// against its hash, fetched once.
+const PY_TREES = {
+  url: 'https://files.pythonhosted.org/packages/d2/10/3b618ece6a776e7b7fac3dcfd0f4e2e52006c0e49d0f63fc35c5bfef3566/py_trees-2.6.0-py2.py3-none-any.whl',
+  sha256: '78155ffaf02f49de0c4bfb458488a1f766ded5b35bf1254980d8f49e6fb89837',
+  to: 'public/vendor/pyodide/py_trees-2.6.0-py2.py3-none-any.whl',
+};
+const sha = (buf) => createHash('sha256').update(buf).digest('hex');
+if (!existsSync(PY_TREES.to) || sha(readFileSync(PY_TREES.to)) !== PY_TREES.sha256) {
+  try {
+    const res = await fetch(PY_TREES.url);
+    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (sha(buf) !== PY_TREES.sha256) throw new Error('hash mismatch');
+    writeFileSync(PY_TREES.to, buf);
+    console.log('fetched', PY_TREES.to);
+  } catch (err) {
+    console.warn(`could not fetch py_trees (${err.message}): Python behaviour trees will not run`);
+  }
+}
 
 // The model library: mjcf_assets/<category>/<source>/<model>/, exposed as
 // public/mjcf_assets (symlink; the server follows it) and indexed into
