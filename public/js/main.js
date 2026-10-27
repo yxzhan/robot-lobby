@@ -2618,6 +2618,7 @@ try {
   window.spawnAsset = (rel, pos = [0, 0, 0], yaw = 0) => spawn(assets.find((a) => a.rel === rel) ?? { rel, name: rel }, pos, yaw);
   window.clearAssets = () => respawn([]);
 
+
   // Goal markers from a script (the devtools console, page automation), as
   // the Teleop panel sets them, in local and network mode alike (the server
   // has the same as an HTTP API: /api/goal). `which`: 'all' (every robot
@@ -2678,8 +2679,26 @@ try {
   // from the simulation controls.
   // On a phone they start hidden and show one at a time (index.html's
   // narrow layout puts each across the width).
+  const PANELS_KEY = 'mujoco-filament/panels';  // localStorage: {panel id: open}
   const narrow = matchMedia('(max-width: 700px)');
+  // The toolbar's room between the two groups of toggles (index.html's #ui).
+  const ui = document.getElementById('ui'), leftViews = document.getElementById('views-left'), rightViews = document.getElementById('views');
+  const room = () => {
+    ui.style.setProperty('--room-left', `${Math.ceil(leftViews.getBoundingClientRect().right) + 12}px`);
+    ui.style.setProperty('--room-right', `${Math.ceil(innerWidth - rightViews.getBoundingClientRect().left) + 12}px`);
+  };
+  new ResizeObserver(room).observe(leftViews);
+  new ResizeObserver(room).observe(rightViews);
+  addEventListener('resize', room);
+  // Which are open is kept in the browser ({panel id: open}); the first
+  // time, the left ones (index.html: the right ones start hidden).
   const toggles = [...document.querySelectorAll('.views button')].map((b) => [b, document.getElementById(b.dataset.panel)]);
+  let opened = {};
+  try { opened = JSON.parse(localStorage.getItem(PANELS_KEY)) ?? {}; } catch { /* none */ }
+  const keepOpen = () => {
+    if (narrow.matches) return;  // (a phone shows one at a time: not kept)
+    try { localStorage.setItem(PANELS_KEY, JSON.stringify(Object.fromEntries(toggles.map(([, p]) => [p.id, !p.hidden])))); } catch { /* no storage */ }
+  };
   const showPanel = (panel, on) => {
     panel.hidden = !on;
     toggles.find(([, p]) => p === panel)[0].setAttribute('aria-pressed', String(on));
@@ -2687,11 +2706,13 @@ try {
   };
   for (const [b, panel] of toggles) {
     if (narrow.matches) panel.hidden = true;
+    else if (typeof opened[panel.id] === 'boolean') panel.hidden = !opened[panel.id];
     b.setAttribute('aria-pressed', String(!panel.hidden));
     b.onclick = () => {
       const on = panel.hidden;
       if (on && narrow.matches) for (const [, p] of toggles) if (p !== panel && !p.hidden) showPanel(p, false);
       showPanel(panel, on);
+      keepOpen();
     };
   }
   if (TOUCH) {  // the hints name mouse gestures

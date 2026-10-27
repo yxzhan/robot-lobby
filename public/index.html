@@ -20,11 +20,12 @@
       * { scrollbar-width: thin; scrollbar-color: #5a5f69 transparent; }
     }
     /* The toolbar, top middle: centred in the room the two groups of panel
-       toggles leave on both sides (360 px each), as wide as its buttons,
-       300 px at least while there is room. */
-    #ui { position: absolute; top: 12px; left: 360px; right: 360px; margin: 0 auto; width: fit-content; z-index: 2;
+       toggles leave (--room-left, --room-right: main.js measures them), as
+       wide as its buttons, 300 px at least while there is room; with less,
+       its buttons wrap. */
+    #ui { position: absolute; top: 12px; left: var(--room-left, 270px); right: var(--room-right, 540px); margin: 0 auto; width: fit-content; z-index: 2;
           display: flex; flex-wrap: wrap; justify-content: center; gap: 4px; align-items: center; box-sizing: border-box;
-          min-width: min(300px, calc(100% - 720px));
+          min-width: min(300px, calc(100% - var(--room-left, 270px) - var(--room-right, 540px)));
           color: #ddd; background: rgba(0,0,0,.45); padding: 4px; border-radius: 8px; --c: #8a94a6; }
     /* The status on its own line under the buttons, as wide as they are (or
        the toolbar's least width): its text never widens the toolbar into the
@@ -132,7 +133,7 @@
     .views button[hidden] { display: none; }
     .views button[aria-pressed=true] { color: #fff; background: #3d5a73; border-color: #5a85a8; }
     .views button[aria-pressed=true]::before { background: #7fd1ff; box-shadow: 0 0 6px #7fd1ff; }
-    /* Right column: Teleop, Cameras, Render, Share, Server. */
+    /* Right column: Behavior, Teleop, Cameras, Render, Share, Server. */
     #side { position: absolute; top: 60px; right: 12px; width: 420px; max-height: calc(100% - 72px); z-index: 1;
             display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
     #side > * { pointer-events: auto; box-sizing: border-box; color: #ddd; background: rgba(0,0,0,.6);
@@ -420,8 +421,8 @@
     <button data-panel="world" title="Physics: gravity, medium, contacts, timestep, speed, default geom properties">Physics</button>
   </div>
   <div id="views" class="views" role="group" aria-label="Right panels">
+    <button data-panel="behavior" title="Behaviour tree: one tree drives a team of robots (goal markers), a py_trees script or text, shown live">Behavior</button>
     <button data-panel="teleop" title="Teleoperate a robot: controller and input">Teleop</button>
-    <button data-panel="behavior" title="Behaviour tree: one tree drives a team of robots (goal markers), written as text, shown live">Behavior</button>
     <button data-panel="cameras" title="The robots' cameras: picture-in-picture windows, looking through one">Cameras</button>
     <button data-panel="render" title="Rendering quality: resolution, anti-aliasing, occlusion, shadows, textures">Render</button>
     <button data-panel="share" title="Open this page on another device: a short code or a QR code">Share</button>
@@ -461,12 +462,12 @@
   </div>
   </div>
   <div id="side">
-  <div id="teleop">
-    <h3>Teleop</h3>
-    <div class="body"></div>
-  </div>
   <div id="behavior" hidden>
     <h3>Behavior</h3>
+    <div class="body"></div>
+  </div>
+  <div id="teleop" hidden>
+    <h3>Teleop</h3>
     <div class="body"></div>
   </div>
   <div id="cameras" hidden>
