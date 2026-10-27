@@ -33,12 +33,12 @@ follows the selection, are the Render panel's: rendering.md):
 - **Timestep and speed** (Simulation): the physics step (0.005 s by default,
   changed live; larger steps cost less per simulated second but are less
   stable, and walking policies were trained at 0.002–0.005 s) and the most
-  simulated time per second of wall time: 0.1× to 10× or **max**, as fast as
-  the computer goes (in the browser up to 20 ms of stepping per frame; on the
-  server without a pause between rounds). A world that cannot keep up runs
-  slower whatever the setting; the meter next to the frame meter shows the
-  speed reached (`sim 1.00× · 500 steps/s`). In network mode the page's
-  interpolation follows the server's rate.
+  simulated time per second of wall time, a slider of steps: 0.1× to 10×
+  or **max**, as fast as the computer goes (in the browser up to 20 ms of
+  stepping per frame; on the server without a pause between rounds). A
+  world that cannot keep up runs slower whatever the setting; the meter next
+  to the frame meter shows the speed reached (`sim 1.00× · 500 steps/s`).
+  In network mode the page's interpolation follows the server's rate.
 - **Sync rate** (network mode only): the server's state broadcasts per
   second, 10–60 Hz (30 by default): more is smoother and fresher, and more
   traffic for every page.

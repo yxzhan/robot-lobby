@@ -85,6 +85,15 @@ export class WorldPanel {
         const box = el('input', { type: 'checkbox', checked: !!s[k], title });
         box.onchange = () => set(0)(box.checked);
         inputs = [box];
+      } else if (k === 'speed') {  // a slider over the steps, the value in the unit's place
+        const tag = (v) => (v === 0 ? 'max' : `${v}×`);
+        const at = n.indexOf(s[k]);
+        const inp = el('input', { type: 'range', min: 0, max: n.length - 1, step: 1, value: at < 0 ? n.indexOf(1) : at, title });
+        const out = el('span', { className: 'unit', textContent: tag(s[k]) });
+        inp.oninput = () => { out.textContent = tag(n[inp.value]); };
+        inp.onchange = () => set(0)(n[inp.value]);
+        this.body.append(el('div', { className: 'field', title }, el('span', { textContent: label }), el('div', { className: 'ctl' }, inp), out));
+        continue;
       } else if (Array.isArray(n)) {
         const sel = el('select', { title });
         const label = (v) => (typeof v !== 'number' ? v : k === 'stateHz' ? String(v) : v === 0 ? 'max' : `${v}×`);
