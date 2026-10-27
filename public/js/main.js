@@ -2186,6 +2186,7 @@ try {
       await rebuild(list, [], (msg) => { status.textContent = msg; setBusy(msg); });
       for (const r of removed) app.removeEntities(r.entities);
       robots.splice(0, robots.length, ...list);
+      if (!robots.length) nextId = 1;  // cleared: numbered from r1 again
       dropUnused();
       status.textContent = hint();
     } catch (err) {

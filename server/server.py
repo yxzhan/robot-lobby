@@ -721,6 +721,9 @@ class World:
         await self.broadcast_scene(stage=stage.get('id'))
         await self.send_all(json.dumps({'type': 'reset', 'id': None}))
 
+  def renumber(self):
+    self.next_id = 1
+
   async def set_scene(self, robots, fresh=(), after=None):
     async with self.lock:
       model = await asyncio.to_thread(compile_world, robots, self.physics)
@@ -865,7 +868,8 @@ class World:
         await self.load_stage(await asyncio.to_thread(read_stage, msg['id']))
     elif op == 'remove':
       ids = set(msg['ids'])
-      await self.set_scene([r for r in self.robots if r.id not in ids])
+      kept = [r for r in self.robots if r.id not in ids]
+      await self.set_scene(kept, after=None if kept else self.renumber)  # cleared: numbered from r1 again
     elif op == 'move':
       await self.move_fixed(self.robot(msg['id']), msg['pos'], msg['yaw'])
     elif op == 'place':
