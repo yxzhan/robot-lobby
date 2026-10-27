@@ -1,0 +1,5 @@
+# r1 goes to the ball (a spawned thing labelled ball), or gives up after 20 s
+Fallback
+  Timeout 20
+    Approach r1 ball distance=0.25
+  Stop r1

@@ -1,0 +1,6 @@
+[
+  {"name": "Square", "file": "square.bt"},
+  {"name": "Swap places", "file": "swap_places.bt"},
+  {"name": "Follow the leader", "file": "follow_the_leader.bt"},
+  {"name": "To the ball", "file": "to_the_ball.bt"}
+]

@@ -66,6 +66,36 @@ Goals can also come from a script, for several robots at once:
   `goals.running()` lists them, `goals.stop(id)` (or `goals.stop()` for all)
   stops them and clears their goals. A robot two behaviours take follows the
   one started last; the other options are at the top of `swarm.js`.
+- **A behaviour tree** (the **Behavior** panel, `public/js/bt.js`): one
+  tree drives the team, every move naming its robots, written as indented
+  text (or pasted as BehaviorTree.CPP XML, as Groot2 saves it), run and
+  stopped there, each node's status shown live:
+
+  ```
+  Repeat
+    Sequence
+      Parallel
+        GoTo r1 x=1 y=0 yaw=180deg
+        GoTo r2 x=-1 y=0
+      Wait 2
+      Move all forward=0.5
+  ```
+
+  Control nodes: Sequence, Fallback, ReactiveSequence, ReactiveFallback,
+  Parallel (`success`, `failure` counts), Repeat / Retry (`times`, -1
+  forever), Timeout (s), Inverter, ForceSuccess, ForceFailure, Wait (s of
+  simulated time). Moves: GoTo (x, y, yaw), Move (forward, left, turn,
+  from where each robot is), Approach / Follow (a target: any spawned
+  thing, e.g. `ball`, to a distance; Follow keeps following), Stop.
+  Robots: a name, a label (every robot of it), `all`, or `r1,r2`. A move
+  succeeds when its goals are reached and fails when one is taken from it
+  (the marker dragged, another behaviour); a halted one (a Timeout, Stop)
+  clears its goals. **Open…** puts an example (`public/behaviors/`, listed
+  in its `index.json`) or a saved tree in the editor; **Save** keeps the
+  editor's tree in the browser under a name (My trees), **Delete** forgets
+  one. The full reference is at the top of `bt.js`; from the console
+  `bt.run(text)`, `bt.stop()`, `bt.status()`.
+  The tree runs in the page that started it (in network mode too).
 - **On the server** (HTTP): `GET /api/robots` lists the robots
   (`name`, `pose`, `goal`, `drives`, `arrived`); `POST /api/goal` with JSON
   `{robots, forward, left, turn}` or `{robots, goal: {x, y, yaw}}` sets

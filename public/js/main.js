@@ -27,6 +27,7 @@ import { BaseController } from './base.js';
 import { IkController } from './ik.js';
 import { applyOptions, geomOverrides, geomSignature, injectGeomDefaults, loadPhysics, needsRebuild, PHYSICS_DEFAULTS } from './physics.js';
 import { WorldPanel } from './worldpanel.js';
+import { BehaviorPanel } from './btpanel.js';
 import { RenderPanel, loadQuality } from './render.js';
 import { addSwarm } from './swarm.js';
 import { FLOOR_STYLES, floorTexture, hexRgb, loadFloor, saveFloor } from './floor.js';
@@ -2662,6 +2663,7 @@ try {
     },
   };
   addSwarm(window.goals);  // goals.randomWalk, goals.chase, goals.stop (swarm.js)
+  app.behavior = new BehaviorPanel(app, document.getElementById('behavior'), window.goals);  // window.bt
 
   // Assets are spawned by dragging them from the asset panel onto the floor.
   new AssetPanel(app, document.getElementById('assets'), assets, {

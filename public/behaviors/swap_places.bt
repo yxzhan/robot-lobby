@@ -1,0 +1,11 @@
+# r1 and r2 change places, over and over
+Repeat
+  Sequence
+    Parallel
+      GoTo r1 x=1 y=0 yaw=180deg
+      GoTo r2 x=-1 y=0 yaw=0
+    Wait 1
+    Parallel
+      GoTo r1 x=-1 y=0 yaw=0
+      GoTo r2 x=1 y=0 yaw=180deg
+    Wait 1

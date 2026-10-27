@@ -121,7 +121,7 @@
     .views button[aria-pressed=true] { color: #fff; background: #3d5a73; border-color: #5a85a8; }
     .views button[aria-pressed=true]::before { background: #7fd1ff; box-shadow: 0 0 6px #7fd1ff; }
     /* Right column: Teleop, Cameras, Render, Share, Server. */
-    #side { position: absolute; top: 60px; right: 12px; width: 320px; max-height: calc(100% - 72px); z-index: 1;
+    #side { position: absolute; top: 60px; right: 12px; width: 420px; max-height: calc(100% - 72px); z-index: 1;
             display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
     #side > * { pointer-events: auto; box-sizing: border-box; color: #ddd; background: rgba(0,0,0,.6);
                 padding: 8px 10px; border-radius: 6px; }
@@ -183,16 +183,16 @@
     #teleop .joints label.off { color: #777; }
     #teleop .joints .why { margin-left: auto; color: #888; font-style: italic; }
     #teleop .error { color: #f88; margin: 4px 0; }
-    :is(#world, #cameras, #render, #server, #share) { overflow: hidden auto; min-height: 0; flex: 0 5 auto; font-size: 12px; }
-    :is(#world, #cameras, #render, #server, #share) h3 { margin: 0 0 6px; font-size: 13px; }
-    :is(#world, #cameras, #render, #server, #share) .field { display: grid; grid-template-columns: 64px 1fr 38px; align-items: center; gap: 6px; margin: 3px 0; }
-    :is(#world, #cameras, #render, #server, #share) .ctl { display: flex; gap: 4px; min-width: 0; }
-    :is(#world, #cameras, #render, #server, #share) .unit { color: #888; font-size: 11px; }
-    :is(#world, #cameras, #render, #server, #share) input[type=number] { width: 0; flex: 1; min-width: 0; font: inherit; color: #eee; background: #222;
+    :is(#world, #cameras, #render, #server, #share, #behavior) { overflow: hidden auto; min-height: 0; flex: 0 5 auto; font-size: 12px; }
+    :is(#world, #cameras, #render, #server, #share, #behavior) h3 { margin: 0 0 6px; font-size: 13px; }
+    :is(#world, #cameras, #render, #server, #share, #behavior) .field { display: grid; grid-template-columns: 64px 1fr 38px; align-items: center; gap: 6px; margin: 3px 0; }
+    :is(#world, #cameras, #render, #server, #share, #behavior) .ctl { display: flex; gap: 4px; min-width: 0; }
+    :is(#world, #cameras, #render, #server, #share, #behavior) .unit { color: #888; font-size: 11px; }
+    :is(#world, #cameras, #render, #server, #share, #behavior) input[type=number] { width: 0; flex: 1; min-width: 0; font: inherit; color: #eee; background: #222;
                                 border: 1px solid #555; border-radius: 4px; padding: 1px 3px; }
-    :is(#world, #cameras, #render, #server, #share) select { flex: 1; min-width: 0; font: inherit; color: #eee; background: #222; border: 1px solid #555; border-radius: 4px; }
-    :is(#world, #cameras, #render, #server, #share) .hint { color: #999; margin: 4px 0; line-height: 1.5; }
-    :is(#world, #cameras, #render, #server, #share) .sub { margin-top: 8px; padding-top: 6px; border-top: 1px solid #3a3d44; font-weight: 600; }
+    :is(#world, #cameras, #render, #server, #share, #behavior) select { flex: 1; min-width: 0; font: inherit; color: #eee; background: #222; border: 1px solid #555; border-radius: 4px; }
+    :is(#world, #cameras, #render, #server, #share, #behavior) .hint { color: #999; margin: 4px 0; line-height: 1.5; }
+    :is(#world, #cameras, #render, #server, #share, #behavior) .sub { margin-top: 8px; padding-top: 6px; border-top: 1px solid #3a3d44; font-weight: 600; }
     #cameras > .body > .field { grid-template-columns: 42px 1fr; }
     #cameras details.camera { border: 1px solid #3a3d44; border-radius: 5px; padding: 2px 6px; margin: 6px 0; }
     #cameras details.camera > summary { cursor: pointer; display: flex; align-items: center; gap: 4px; padding: 3px 0; list-style: none; }
@@ -214,15 +214,28 @@
     .pip .bar span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .pip .bar button { padding: 0 5px; font-size: 11px; line-height: 16px; }
     .pip canvas { display: block; width: 240px; height: auto; }
+    #behavior textarea { box-sizing: border-box; width: 100%; resize: vertical; font: 11px/1.45 ui-monospace, Menlo, Consolas, monospace; color: #eee;
+                         background: #222; border: 1px solid #555; border-radius: 4px; padding: 4px 6px; tab-size: 2; white-space: pre; }
+    #behavior .note.bad { color: #e88; }
+    #behavior .bt-tree { margin-top: 6px; font: 11px/1.6 ui-monospace, Menlo, Consolas, monospace; }
+    #behavior .bt-tree .node { display: flex; align-items: center; gap: 5px; white-space: nowrap; overflow: hidden; color: #aaa; }
+    #behavior .bt-tree .node > span:nth-child(2) { overflow: hidden; text-overflow: ellipsis; }
+    #behavior .bt-tree .dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: #555; }
+    #behavior .bt-tree .info { color: #888; margin-left: auto; padding-left: 6px; }
+    #behavior .bt-tree [data-status=running] { color: #eee; }
+    #behavior .bt-tree [data-status=running] .dot { background: #e0b040; }
+    #behavior .bt-tree [data-status=success] .dot { background: #4caf6a; }
+    #behavior .bt-tree [data-status=failure] .dot { background: #e05555; }
+    #behavior .bt-tree [data-status=failure] { color: #d99; }
     #world input[type=range] { flex: 1; min-width: 0; margin: 0; }
     #world input[type=color] { flex: 1; min-width: 0; height: 20px; padding: 0 2px; background: #222; border: 1px solid #555; border-radius: 4px; }
-    :is(#world, #cameras, #render, #server, #share) .sub.minor { border-top: 0; margin-top: 4px; padding-top: 0; color: #aaa; font-weight: 400; }
-    :is(#world, #cameras, #render, #server, #share) .bar { display: flex; align-items: center; gap: 4px; margin-top: 6px; }
-    :is(#world, #cameras, #render, #server, #share) button { cursor: pointer; font: inherit; font-size: 11px; color: #ddd; background: #333;
+    :is(#world, #cameras, #render, #server, #share, #behavior) .sub.minor { border-top: 0; margin-top: 4px; padding-top: 0; color: #aaa; font-weight: 400; }
+    :is(#world, #cameras, #render, #server, #share, #behavior) .bar { display: flex; align-items: center; gap: 4px; margin-top: 6px; }
+    :is(#world, #cameras, #render, #server, #share, #behavior) button { cursor: pointer; font: inherit; font-size: 11px; color: #ddd; background: #333;
                     border: 1px solid #555; border-radius: 4px; padding: 2px 8px; }
-    :is(#world, #cameras, #render, #server, #share) button.primary { background: #2f5a3c; border-color: #4d8a5f; }
-    :is(#world, #cameras, #render, #server, #share) button:disabled { opacity: .5; cursor: default; }
-    :is(#world, #cameras, #render, #server, #share) .note { color: #c9a; font-size: 11px; }
+    :is(#world, #cameras, #render, #server, #share, #behavior) button.primary { background: #2f5a3c; border-color: #4d8a5f; }
+    :is(#world, #cameras, #render, #server, #share, #behavior) button:disabled { opacity: .5; cursor: default; }
+    :is(#world, #cameras, #render, #server, #share, #behavior) .note { color: #c9a; font-size: 11px; }
     #server input[type=url] { flex: 1; min-width: 0; font: inherit; color: #eee; background: #222; border: 1px solid #555;
                               border-radius: 4px; padding: 2px 4px; }
     #server .log { margin-top: 6px; font: 11px ui-monospace, monospace; color: #9cd; overflow-wrap: anywhere; }
@@ -393,6 +406,7 @@
   </div>
   <div id="views" class="views" role="group" aria-label="Right panels">
     <button data-panel="teleop" title="Teleoperate a robot: controller and input">Teleop</button>
+    <button data-panel="behavior" title="Behaviour tree: one tree drives a team of robots (goal markers), written as text, shown live">Behavior</button>
     <button data-panel="cameras" title="The robots' cameras: picture-in-picture windows, looking through one">Cameras</button>
     <button data-panel="render" title="Rendering quality: resolution, anti-aliasing, occlusion, shadows, textures">Render</button>
     <button data-panel="share" title="Open this page on another device: a short code or a QR code">Share</button>
@@ -434,6 +448,10 @@
   <div id="side">
   <div id="teleop">
     <h3>Teleop</h3>
+    <div class="body"></div>
+  </div>
+  <div id="behavior" hidden>
+    <h3>Behavior</h3>
     <div class="body"></div>
   </div>
   <div id="cameras" hidden>
