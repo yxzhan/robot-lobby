@@ -1,10 +1,7 @@
 [
  {"name": "microduck_football", "file": "microduck_football.py" },
- {"name": "Square", "file": "square.bt" },
  {"name": "Swap places", "file": "swap_places.bt" },
  {"name": "Follow the leader (py_trees)", "file": "follow.py" },
- {"name": "To the ball", "file": "to_the_ball.bt" },
  {"name": "Patrol (py_trees)", "file": "patrol.py" },
- {"name": "Near the ball (py_trees)", "file": "near_ball.py" },
  {"name": "Microduck skills test (py_trees)", "file": "microduck_skills.py" }
 ]

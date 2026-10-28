@@ -1,5 +1,0 @@
-# every robot walks a square, each from where it is
-Repeat 4
-  Sequence
-    Move all forward=0.6
-    Move all turn=90deg
