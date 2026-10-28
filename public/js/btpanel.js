@@ -30,6 +30,7 @@ const icon = (paths) => {
 
 const TEXT = 'mujoco-filament/behavior-tree';      // the editor's text
 const FORMAT = 'mujoco-filament/behavior-format';  // and its format
+const FOLDED = 'mujoco-filament/behavior-folded';  // '1': the editor folded away
 const SAVED = 'mujoco-filament/behavior-trees';    // {name: {text, format}}, the user's trees
 const EXAMPLES = new URL('../behaviors/', import.meta.url);  // index.json: [{name, file}]
 
@@ -99,8 +100,21 @@ export class BehaviorPanel {
     this.note = el('span', { className: 'note' });
     this.tree = el('div', { className: 'bt-tree' });
     const editorBox = el('div', { className: 'bt-editor' });
+    // Folds the editor away (the tree view and Run / Stop stay), kept in this browser.
+    const fold = el('button', { type: 'button', className: 'bt-fold' });
+    const setFolded = (folded) => {
+      editorBox.hidden = folded;
+      fold.textContent = folded ? '▸' : '▾';
+      fold.title = folded ? 'Show the editor' : 'Fold the editor away (the tree and Run / Stop stay)';
+      fold.setAttribute('aria-expanded', String(!folded));
+      try { localStorage.setItem(FOLDED, folded ? '1' : ''); } catch { /* no storage */ }
+    };
+    fold.onclick = () => { setFolded(!editorBox.hidden); fold.blur(); };
+    let folded = false;
+    try { folded = localStorage.getItem(FOLDED) === '1'; } catch { /* no storage */ }
+    setFolded(folded);
     this.body.append(
-      el('div', { className: 'bar' }, this.formatPicker, this.picker, save, this.deleteButton),
+      el('div', { className: 'bar' }, fold, this.formatPicker, this.picker, save, this.deleteButton),
       editorBox,
       el('div', { className: 'bar' }, this.runButton, this.stopButton, this.note),
       this.tree);
