@@ -109,6 +109,12 @@ function tools(agent) {
     }, () => state()],
 
     [{
+      name: 'inspect',
+      description: "What a spawned thing is made of: its bodies as a tree (name, parent, world pos and rpy, mass, joints with type, qpos (rad or m), qvel and range, size: the extent of its collision geoms in the body's own frame [x, y, z] m around center, and those geoms: type and MuJoCo size), its actuators (ctrl, range), its total mass and its bounds in the world (collision geoms, min / max). For heights to put things on, reach, what a joint is at. `bodies`: only bodies whose name has this text (a big robot lists many).",
+      input_schema: { type: 'object', properties: { name: { type: 'string' }, bodies: { type: 'string' } }, required: ['name'] },
+    }, ({ name, bodies }) => lobby().describe(robotOf(name), bodies || undefined)],
+
+    [{
       name: 'search_assets',
       description: 'Searches the model library by words of a name (case-insensitive; empty: everything of the category). Returns up to `limit` models: {rel (what spawn takes), name, category (robot, object, environment), source, group}.',
       input_schema: {
@@ -538,9 +544,10 @@ export class AgentPanel {
     this.body.append(
       el('div', { className: 'bar' }, provider, fresh),
       this.claudeBox, this.ollamaBox,
-      el('label', { className: 'agent-ask', title: 'Remove, clear and reset ask you first' }, ask, ' Ask before removing or resetting'),
       this.log, this.input,
-      el('div', { className: 'bar' }, this.sendButton, this.note));
+      el('div', { className: 'bar' }, this.sendButton,
+        el('label', { className: 'agent-ask', title: 'Remove, clear and reset ask you first' }, ask, ' Ask before removing or resetting'),
+        this.note));
     this.tools = tools(this);
     this.update();
     if (this.settings.provider === 'ollama') this.refreshOllama();

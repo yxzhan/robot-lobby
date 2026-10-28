@@ -52,6 +52,7 @@ The tools (`tools()` in `agent.js`):
 | Tool | Does |
 |---|---|
 | `get_world_state` | every spawned thing (name, label, pose, drives, goal, controllers, policy, skills), sim time, physics, the behaviour tree, the view |
+| `inspect` | one spawned thing's bodies as a tree: world pose, mass, joints (type, position, velocity, range), collision geoms' size; its actuators, total mass and world bounds (`describeRobot` in `inspect.js`; `lobby.inspect` in a tree) |
 | `search_assets` | the model library by name words (and category) |
 | `spawn`, `remove`, `clear_scene` | as the asset panel and Clear / ✕ (`window.lobby` in `main.js`) |
 | `reset_scene`, `set_paused` | Reset, Pause |

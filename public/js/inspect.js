@@ -23,6 +23,89 @@ function rpyToQuat([roll, pitch, yaw]) {
 const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
 
+// What a spawned robot (or object) is made of, for the Agent and the lobby
+// module: its bodies as a tree (each: its parent, world pose, mass, joints
+// with their positions, the extent of its collision geoms in its own frame
+// (the visual-only ones: not in the browser's physics world), its
+// actuators' controls, and its bounds in the world. `only`: bodies whose
+// name has it. In network mode joint velocities are not known (null).
+const JOINT_TYPES = ['free', 'ball', 'slide', 'hinge'];
+const GEOM_TYPES = ['plane', 'hfield', 'sphere', 'capsule', 'ellipsoid', 'cylinder', 'box', 'mesh', 'sdf'];
+const GEOM_SIZES = [2, 3, 1, 2, 3, 2, 3, 3, 3];  // the size numbers that mean something, by type
+export function describeRobot(app, r, only) {
+  const { mujoco, model: m, data: d } = app;
+  const T = mujoco.mjtObj, rnd = (v, n = 4) => Number(v.toFixed(n));
+  const name = (type, i) => mujoco.mj_id2name(m, type, i) || '';
+  const short = (n) => (n.startsWith(r.prefix) ? n.slice(r.prefix.length) : n);
+  const first = r.bodyOffset, end = first + r.visual.inertia.nbody - 1;
+  const rotate = (q, v) => {  // quaternion (w, x, y, z) applied to v
+    const [w, x, y, z] = q, t = cross([x, y, z], v).map((k) => 2 * k);
+    return [0, 1, 2].map((i) => v[i] + w * t[i] + cross([x, y, z], t)[i]);
+  };
+  const geomsOf = new Map();
+  for (let g = 0; g < (m.ngeom ?? 0); g++) {
+    const b = m.geom_bodyid?.[g];
+    if (b >= first && b < end) (geomsOf.get(b) ?? geomsOf.set(b, []).get(b)).push(g);
+  }
+  const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+  const bodies = [];
+  let mass = 0;
+  for (let b = first; b < end; b++) {
+    mass += m.body_mass[b];
+    const bodyName = short(name(T.mjOBJ_BODY.value, b)) || `body ${b - first + 1}`;
+    const parent = m.body_parentid[b];
+    const xq = [...d.xquat.subarray(4 * b, 4 * b + 4)], xp = [...d.xpos.subarray(3 * b, 3 * b + 3)];
+    // The geoms' boxes (geom_aabb: centre, half sizes in the geom's frame) in the body's frame.
+    const blo = [Infinity, Infinity, Infinity], bhi = [-Infinity, -Infinity, -Infinity];
+    const geoms = [];
+    for (const g of geomsOf.get(b) ?? []) {
+      const type = m.geom_type[g];
+      if (!(m.geom_contype[g] || m.geom_conaffinity[g])) continue;  // visual only (the server's model has them)
+      geoms.push({ type: GEOM_TYPES[type] ?? type, size: [...m.geom_size.subarray(3 * g, 3 * g + (GEOM_SIZES[type] ?? 3))].map((v) => rnd(v)) });
+      if (type === 0 || !m.geom_aabb) continue;  // a plane has no extent
+      const box = m.geom_aabb.subarray(6 * g, 6 * g + 6), gp = m.geom_pos.subarray(3 * g, 3 * g + 3), gq = [...m.geom_quat.subarray(4 * g, 4 * g + 4)];
+      for (let k = 0; k < 8; k++) {
+        const corner = [0, 1, 2].map((i) => box[i] + ((k >> i) & 1 ? 1 : -1) * box[3 + i]);
+        const p = rotate(gq, corner).map((v, i) => v + gp[i]);
+        p.forEach((v, i) => { blo[i] = Math.min(blo[i], v); bhi[i] = Math.max(bhi[i], v); });
+        rotate(xq, p).forEach((v, i) => { lo[i] = Math.min(lo[i], v + xp[i]); hi[i] = Math.max(hi[i], v + xp[i]); });
+      }
+    }
+    const joints = [];
+    for (let j = m.body_jntadr[b]; j >= 0 && j < m.body_jntadr[b] + m.body_jntnum[b]; j++) {
+      const type = m.jnt_type[j], adr = m.jnt_qposadr[j], dof = m.jnt_dofadr[j];
+      const n = [7, 4, 1, 1][type], nv = [6, 3, 1, 1][type];
+      const q = [...d.qpos.subarray(adr, adr + n)].map((v) => rnd(v)), v = app.net ? null : [...d.qvel.subarray(dof, dof + nv)].map((k) => rnd(k));
+      joints.push({
+        name: short(name(T.mjOBJ_JOINT.value, j)) || `joint ${j}`, type: JOINT_TYPES[type],
+        qpos: n === 1 ? q[0] : q, qvel: v && (nv === 1 ? v[0] : v),
+        ...(m.jnt_limited[j] && n === 1 && { range: [rnd(m.jnt_range[2 * j]), rnd(m.jnt_range[2 * j + 1])] }),
+      });
+    }
+    if (only && !bodyName.includes(only)) continue;
+    bodies.push({
+      name: bodyName, parent: parent >= first && parent < end ? short(name(T.mjOBJ_BODY.value, parent)) || `body ${parent - first + 1}` : null,
+      pos: xp.map((v) => rnd(v)), rpy: quatToRpy(xq).map((v) => rnd(v, 3)),
+      mass: rnd(m.body_mass[b]), ...(joints.length && { joints }),
+      ...(Number.isFinite(blo[0]) && { size: bhi.map((v, i) => rnd(v - blo[i])), center: bhi.map((v, i) => rnd((v + blo[i]) / 2)) }),
+      ...(geoms.length && { geoms }),
+    });
+  }
+  const actuators = [];
+  for (let a = 0; a < m.nu; a++) {
+    const n = name(T.mjOBJ_ACTUATOR.value, a);
+    const mine = n ? n.startsWith(r.prefix) : m.actuator_trntype[a] === 0 && m.jnt_bodyid[m.actuator_trnid[2 * a]] >= first && m.jnt_bodyid[m.actuator_trnid[2 * a]] < end;
+    if (!mine) continue;
+    actuators.push({ name: short(n) || `actuator ${a}`, ctrl: rnd(d.ctrl[a]),
+      ...(m.actuator_ctrllimited[a] && { range: [rnd(m.actuator_ctrlrange[2 * a]), rnd(m.actuator_ctrlrange[2 * a + 1])] }) });
+  }
+  return {
+    name: r.prefix.slice(0, -1), label: r.label, mass: rnd(mass), body_count: end - first,
+    ...(Number.isFinite(lo[0]) && { bounds: { min: lo.map((v) => rnd(v)), max: hi.map((v) => rnd(v)) } }),
+    bodies, ...(actuators.length && { actuators }),
+  };
+}
+
 // Pulls the selected body's selection point towards a target that follows the
 // pointer in the plane through the grab point facing the camera. The spring is
 // scaled by the body's subtree mass and critically damped, like simulate's

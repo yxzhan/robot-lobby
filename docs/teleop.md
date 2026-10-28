@@ -109,7 +109,7 @@ Goals can also come from a script, for several robots at once:
   conditions of one's own, and what the panels do: `spawn`, `remove`,
   `clear_world`, `reset_world`, `pause`, `place`, `place_body`, `models`
   (the library), `physics`, `set_controller` / `controllers`,
-  `use_skill` (its docstring lists them all). The script defines `root` (a behaviour) or `tree` (a
+  `inspect`, `use_skill` (its docstring lists them all). The script defines `root` (a behaviour) or `tree` (a
   `BehaviourTree`):
 
   ```python

@@ -46,7 +46,9 @@ pitch=+-pi/2 and z: lying on its face / back), set_policy(robot, id)
 (its walking policy, as the Teleop panel's Model; policy(robot) the one
 on), set_controller(robot, kind, on, policy=None) (kind 'policy', 'base'
 or 'ik', as the Teleop panel's chips), controllers(robot) ({policy, base,
-ik, skills}), active_skill(robot) (the policy skill running, e.g. 'walk'),
+ik, skills}), inspect(robot, bodies=None) (what it is made of: bodies as a
+tree with poses, masses, joints and their positions, geom sizes; its
+actuators; its bounds in the world), active_skill(robot) (the policy skill running, e.g. 'walk'),
 place_body(name, x, y) (a body on a free joint of its own, e.g. a ball in
 an environment's model, moved there at rest), spawn(model, x, y, yaw, z=0) (a
 model of the library, by name or path, at height z: it appears a moment
@@ -58,6 +60,7 @@ Removing and resetting ask the user first in a tree the Agent runs (while
 its "Ask before removing or resetting" is on); declined, the tree fails.
 """
 
+import json
 import math
 
 import py_trees
@@ -68,7 +71,7 @@ import lobby_js  # registered by pybt.js
 __all__ = ['GoTo', 'Move', 'Approach', 'Follow', 'Stop', 'Wait', 'robots', 'pose', 'time', 'distance',
            'body', 'upright', 'set_goal', 'stop', 'use_skill', 'reset_world', 'place', 'set_policy', 'policy',
            'active_skill', 'place_body', 'spawn', 'models', 'remove', 'clear_world', 'pause', 'physics',
-           'set_controller', 'controllers']
+           'set_controller', 'controllers', 'inspect']
 
 _STATUS = {'running': Status.RUNNING, 'success': Status.SUCCESS, 'failure': Status.FAILURE}
 
@@ -284,6 +287,17 @@ def controllers(robot):
   for use_skill)} of `robot`, or None (no such robot)."""
   c = lobby_js.controllers(str(robot))
   return None if c is None else c.to_py()
+
+
+def inspect(robot, bodies=None):
+  """What `robot` (any spawned thing) is made of: {name, label, mass,
+  body_count, bounds: {min, max} (its collision geoms in the world),
+  bodies: [{name, parent, pos, rpy (world), mass, joints: [{name, type,
+  qpos, qvel (None on a server), range}], size, center (its collision
+  geoms' extent in its own frame), geoms: [{type, size}]}], actuators:
+  [{name, ctrl, range}]};
+  `bodies`: only bodies whose name has this text."""
+  return json.loads(lobby_js.inspect(str(robot), bodies and str(bodies)))
 
 
 def set_policy(robot, policy_id):

@@ -85,6 +85,10 @@ export function loadPython(onProgress) {
         if (!['policy', 'base', 'ik'].includes(kind)) fail(`no controller ${kind} (policy, base, ik)`);
         window.lobby.setController(r, kind, on, policy || undefined).catch((err) => console.warn('set_controller:', err));
       },
+      inspect: (name, only) => {
+        const r = robotOf(name) ?? fail(`no robot ${name}`);
+        return JSON.stringify(window.lobby.describe(r, only || undefined));  // (as JSON: nested nulls would be jsnull)
+      },
       controllers: (name) => {
         const r = robotOf(name);
         if (!r) return null;

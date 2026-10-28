@@ -1306,14 +1306,15 @@ class World:
     return head.tobytes() + np.float64(d.time).tobytes() + np.concatenate(parts).astype(np.float32).tobytes()
 
   def world_tables(self):
-    """What the page's panels read from the model (inspect.js, teleop.js)."""
+    """What the page's panels read from the model (inspect.js, teleop.js; the geoms: describeRobot)."""
     m = self.model
     names = lambda obj, n: [mujoco.mj_id2name(m, obj, i) or '' for i in range(n)]
     out = {k: getattr(m, k).reshape(-1).tolist() for k in (
         'jnt_type', 'jnt_bodyid', 'jnt_qposadr', 'jnt_dofadr', 'jnt_limited', 'jnt_range',
         'body_jntnum', 'body_jntadr', 'body_mocapid', 'body_parentid', 'body_mass', 'body_subtreemass',
-        'actuator_trntype', 'actuator_trnid', 'actuator_ctrllimited', 'actuator_ctrlrange', 'actuator_biasprm')}
-    out.update({k: int(getattr(m, k)) for k in ('nbody', 'njnt', 'nu', 'nq', 'nv', 'na', 'nmocap')})
+        'actuator_trntype', 'actuator_trnid', 'actuator_ctrllimited', 'actuator_ctrlrange', 'actuator_biasprm',
+        'geom_bodyid', 'geom_type', 'geom_size', 'geom_pos', 'geom_quat', 'geom_aabb', 'geom_contype', 'geom_conaffinity')}
+    out.update({k: int(getattr(m, k)) for k in ('nbody', 'njnt', 'ngeom', 'nu', 'nq', 'nv', 'na', 'nmocap')})
     out['names'] = {'body': names(mujoco.mjtObj.mjOBJ_BODY, m.nbody), 'joint': names(mujoco.mjtObj.mjOBJ_JOINT, m.njnt),
                     'actuator': names(mujoco.mjtObj.mjOBJ_ACTUATOR, m.nu)}
     return out

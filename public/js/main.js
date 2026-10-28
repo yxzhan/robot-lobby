@@ -18,7 +18,7 @@ import { loadModelFiles, readFirst, urlSource } from './vfs.js';
 import { bodyInertia, compileWorld, firstKey, referencedNames } from './world.js';
 import { CONTROL_DT } from './groot.js';
 import { POLICIES, defaultPolicy, isInstalled, loadPolicy, loadPolicyIndex, policyById, policyId } from './policy.js';
-import { Perturb, StagePanel } from './inspect.js';
+import { Perturb, StagePanel, describeRobot } from './inspect.js';
 import { AssetPanel, loadAssets, loadRecent } from './assets.js';
 import { AxisGizmo } from './gizmo.js';
 import { TeleopPanel, TOUCH, locomotion } from './teleop.js';
@@ -2687,6 +2687,8 @@ try {
       await settled(() => !!app.paused === !!paused, 10);
     },
     capture: (size) => app.capture(size),
+    // Robot `r`'s bodies, joints and actuators (describeRobot, inspect.js).
+    describe: (r, only) => describeRobot(app, r, only),
     // The Physics panel's options changed by `changes` ({gravity: [0, 0, -1.6], speed: 2}…).
     async setPhysics(changes) {
       const bad = Object.keys(changes).filter((k) => !PHYSICS_KEYS.includes(k));
