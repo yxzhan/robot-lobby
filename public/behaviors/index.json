@@ -1,5 +1,5 @@
 [
- {"name": "Football 3v3 (py_trees)", "file": "football_1v1.py" },
+ {"name": "microduck_football", "file": "microduck_football.py" },
  {"name": "Square", "file": "square.bt" },
  {"name": "Swap places", "file": "swap_places.bt" },
  {"name": "Follow the leader", "file": "follow_the_leader.bt" },

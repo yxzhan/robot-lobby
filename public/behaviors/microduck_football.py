@@ -21,7 +21,8 @@ import lobby
 
 TEAMS = [("microduck_graphite", +1, "graphite"), ("microduck", -1, "white")]  # label (= model), attacks +x / -x, name
 PER_TEAM = 3
-PITCH = "microduck_football"       # the model spawned when there is no pitch (at the origin)
+PITCH = "microduck_football"       # the model spawned when there is no pitch,
+PITCH_AT = (0.0, 2.0, 0.0)         # with its centre spot here (x, y, z; on the floor)
 # Where ducks are spawned (pitch frame, for the team attacking +x; the other's are mirrored through the
 # centre spot): the first one clear of every duck. The first is the stage's spot.
 SPOTS = [(-0.6, 0.2), (-1.2, 0.6), (-1.2, -0.6), (-0.3, 0.9), (-1.5, 0.0)]
@@ -255,7 +256,7 @@ class Teams(py_trees.behaviour.Behaviour):
             return Status.RUNNING
         f = pitch()
         if f is None:
-            lobby.spawn(PITCH, 0.0, 0.0, 0.0)
+            lobby.spawn(PITCH, PITCH_AT[0], PITCH_AT[1], 0.0)
             self.pending = (PITCH, 0, time.monotonic())
             self.feedback_message = f"spawning {PITCH}"
             return Status.RUNNING
