@@ -253,6 +253,10 @@
   "speed": 0.2,
   "turn": 0.6
  },
+ "goal": {
+  "near": 0.15,
+  "about": "how near a goal (m) it starts closing in sideways (goal.js NEAR, 0.4, otherwise): its sidestep is slow, so it walks forward until 15 cm off"
+ },
  "bam": {
   "model": "xl330 m6",
   "kt": 0.36601349688984386,

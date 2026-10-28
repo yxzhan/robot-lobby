@@ -8,7 +8,8 @@
 //
 // Far from the goal the robot turns towards it and goes forward (slower the
 // more it is turned away), backwards for a goal behind a robot that cannot
-// strafe; near it (NEAR), a robot that can strafe closes the rest sideways,
+// strafe; near it (NEAR, or the controller's drive.near: a policy.json's
+// goal.near), a robot that can strafe closes the rest sideways,
 // one that cannot keeps aiming at the point. At the point it turns to the
 // goal heading and stops. Tolerances have hysteresis (a step out of the
 // point by more than twice TOL_POS starts over), and commands do not drop
@@ -37,7 +38,7 @@ export function bodyPose(data, b) {
 // {cmd, phase ('drive' | 'turn' | 'arrived'), dist, dyaw} for the robot at
 // `pose` and `goal` ({x, y, yaw}); `state` ({phase}) persists between calls.
 export function goalCommand(pose, goal, drive, state) {
-  const minSpeed = drive.minSpeed ?? MIN_SPEED, minTurn = drive.minTurn ?? MIN_TURN;
+  const minSpeed = drive.minSpeed ?? MIN_SPEED, minTurn = drive.minTurn ?? MIN_TURN, near = drive.near ?? NEAR;
   const tolPos = Math.max(TOL_POS, 0.25 * minSpeed), tolYaw = Math.max(TOL_YAW, 0.25 * minTurn);
   const dxw = goal.x - pose.x, dyw = goal.y - pose.y;
   const c = Math.cos(pose.yaw), s = Math.sin(pose.yaw);
@@ -57,17 +58,17 @@ export function goalCommand(pose, goal, drive, state) {
   const strafe = drive.side > 0;
   let bearing = Math.atan2(dy, dx), dir = 1;
   // A goal behind a robot that cannot strafe: back up to it rather than turn around.
-  if (!strafe && Math.abs(bearing) > Math.PI / 2 && dist < 3 * NEAR && drive.back > 0) {
+  if (!strafe && Math.abs(bearing) > Math.PI / 2 && dist < 3 * near && drive.back > 0) {
     bearing = wrap(bearing - Math.PI);
     dir = -1;
   }
-  if (dist > NEAR || !strafe) {
+  if (dist > near || !strafe) {
     const align = Math.max(0, Math.cos(bearing));
     const top = dir > 0 ? drive.forward : drive.back;
     out.cmd[0] = dir * atLeast(Math.min(top, K_POS * dist) * align * align, align > 0.7 ? minSpeed : 0);
     out.cmd[2] = clamp(K_YAW * bearing, drive.turn);
     // Near and roughly facing the point, the heading can start turning already.
-    if (dist < NEAR && align > 0.9) out.cmd[2] = clamp(K_YAW * bearing + 0.3 * dyaw, drive.turn);
+    if (dist < near && align > 0.9) out.cmd[2] = clamp(K_YAW * bearing + 0.3 * dyaw, drive.turn);
   } else {
     // Near: close the rest straight, forward/back and sideways, turning to the goal heading.
     const v = [clamp(K_POS * dx, dx > 0 ? drive.forward : drive.back), clamp(K_POS * dy, drive.side)];

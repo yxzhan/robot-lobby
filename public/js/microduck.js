@@ -53,15 +53,18 @@ export async function loadMicroduckPolicy(ort, source) {
   return { ort, sessions: await loadSessions(ort, source, spec.skills), spec };
 }
 
-// Key speeds a bit inside the trained command ranges, and the dead band
-// (minSpeed / minTurn: the goal marker's least command, goal.js).
-function driveOf(r, min) {
+// Key speeds a bit inside the trained command ranges, the dead band
+// (minSpeed / minTurn: the goal marker's least command, goal.js) and, from
+// policy.json's goal.near, how near a goal the robot starts closing in
+// sideways (near: goal.js's NEAR otherwise).
+function driveOf(r, min, goal) {
   const top = (v) => +(0.8 * Math.abs(v)).toFixed(2);
   return {
     forward: top(r.lin_vel_x[1]), back: top(r.lin_vel_x[0]),
     side: Math.min(top(r.lin_vel_y[0]), top(r.lin_vel_y[1])),
     turn: Math.min(top(r.ang_vel_yaw[0]), top(r.ang_vel_yaw[1])),
     ...(min && { minSpeed: min.speed, minTurn: min.turn }),
+    ...(goal?.near && { near: goal.near }),
   };
 }
 
@@ -72,7 +75,7 @@ export class MicroduckController {
     this.sessions = policy.sessions;
     this.prefix = prefix;
     this.name = name;
-    this.drive = driveOf(this.spec.command_range, this.spec.min_command);
+    this.drive = driveOf(this.spec.command_range, this.spec.min_command, this.spec.goal);
     this.cmd = [0, 0, 0];
     this.skills = new Skills(this.spec.skills);
     this.commands = this.spec.commands ?? {};

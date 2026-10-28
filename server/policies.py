@@ -361,15 +361,19 @@ def load_groot(directory):
 # MuJoCo Playground joystick policies (training/export_onnx.py)
 
 
-def drive_of(r, low=None):
-  """Key speeds a bit inside the trained command ranges, and the dead band
-  (minSpeed / minTurn: the goal marker's least command, public/js/goal.js)."""
+def drive_of(r, low=None, goal=None):
+  """Key speeds a bit inside the trained command ranges, the dead band
+  (minSpeed / minTurn: the goal marker's least command, public/js/goal.js)
+  and, from policy.json's goal.near, how near a goal the robot starts
+  closing in sideways (near)."""
   top = lambda v: round(0.8 * abs(v), 2)
   d = {'forward': top(r['lin_vel_x'][1]), 'back': top(r['lin_vel_x'][0]),
        'side': min(top(r['lin_vel_y'][0]), top(r['lin_vel_y'][1])),
        'turn': min(top(r['ang_vel_yaw'][0]), top(r['ang_vel_yaw'][1]))}
   if low:
     d.update(minSpeed=low['speed'], minTurn=low['turn'])
+  if goal and goal.get('near'):
+    d['near'] = goal['near']
   return d
 
 
@@ -675,7 +679,7 @@ class MicroduckController:
     self.sessions, self.spec = policy
     self.prefix = prefix
     self.name = name
-    self.drive = drive_of(self.spec['command_range'], self.spec.get('min_command'))
+    self.drive = drive_of(self.spec['command_range'], self.spec.get('min_command'), self.spec.get('goal'))
     self.cmd = [0.0, 0.0, 0.0]
     self.skills = Skills(self.spec['skills'])
     self.commands = self.spec.get('commands', {})

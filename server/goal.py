@@ -38,6 +38,7 @@ def goal_command(pose, goal, drive, state):
   """{cmd, phase, dist, dyaw} as goal.js goalCommand; `state` ({phase}) persists between calls."""
   min_speed = drive.get('minSpeed') or MIN_SPEED
   min_turn = drive.get('minTurn') or MIN_TURN
+  near = drive.get('near') or NEAR  # (a policy.json's goal.near)
   tol_pos, tol_yaw = max(TOL_POS, 0.25 * min_speed), max(TOL_YAW, 0.25 * min_turn)
   dxw, dyw = goal['x'] - pose['x'], goal['y'] - pose['y']
   c, s = math.cos(pose['yaw']), math.sin(pose['yaw'])
@@ -61,15 +62,15 @@ def goal_command(pose, goal, drive, state):
   strafe = drive.get('side', 0) > 0
   bearing, direction = math.atan2(dy, dx), 1
   # A goal behind a robot that cannot strafe: back up to it rather than turn around.
-  if not strafe and abs(bearing) > math.pi / 2 and dist < 3 * NEAR and drive.get('back', 0) > 0:
+  if not strafe and abs(bearing) > math.pi / 2 and dist < 3 * near and drive.get('back', 0) > 0:
     bearing, direction = wrap(bearing - math.pi), -1
-  if dist > NEAR or not strafe:
+  if dist > near or not strafe:
     align = max(0.0, math.cos(bearing))
     top = drive['forward'] if direction > 0 else drive['back']
     out['cmd'][0] = direction * at_least(min(top, K_POS * dist) * align * align, min_speed if align > 0.7 else 0)
     out['cmd'][2] = clamp(K_YAW * bearing, drive['turn'])
     # Near and roughly facing the point, the heading can start turning already.
-    if dist < NEAR and align > 0.9:
+    if dist < near and align > 0.9:
       out['cmd'][2] = clamp(K_YAW * bearing + 0.3 * dyaw, drive['turn'])
   else:
     # Near: close the rest straight, forward/back and sideways, turning to the goal heading.
