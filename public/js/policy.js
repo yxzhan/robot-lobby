@@ -83,27 +83,26 @@ export const POLICIES = [
     create: (weights, prefix) => new PlaygroundController(weights, prefix, 'Go2 joystick policy'),
   },
   {
-    id: 'microduck-walk',
-    name: 'Walking · Microduck',
-    about: 'Walking on flat ground (14 servos, 50 Hz), trained in microduck_rl (mjlab) on the BAM model of its XL330 servos, which drives the joints here too.',
-    dir: 'microduck_rl',  // scripts/export_microduck.py
+    id: 'microduck-official',
+    name: 'Walk + get up, tricks · Microduck (Pollen)',
+    about: "Pollen Robotics' published policy set (huggingface.co/pollen-robotics/microduck-policies, Apache-2.0): velstand walks and gets back up by itself after a fall; skills kick with either foot, roll forward, touch the ground, sit, stand.",
+    dir: 'microduck_official',  // the Hub's ONNX files and a policy.json for them
     defaultFor: /(^|\/)custom\/(microduck(_sky|_graphite|_lavender)?)\/\2\.xml$/,  // and its colors
     load: async (file) => loadMicroduckPolicy(await onnxRuntime(), file),
-    create: (weights, prefix) => new MicroduckController(weights, prefix, 'Microduck walking policy'),
-  },
-  {
-    id: 'microduck-supermimic',
-    name: 'Walking · Microduck (SuperMimic)',
-    about: 'The same walking task trained in 19 min with SuperMimic (training/supermimic): it steps and stays up, but makes little headway (0.06 m/s for 0.32 commanded).',
-    dir: 'microduck_supermimic',  // training/supermimic export_onnx.py, scripts/export_microduck.py
-    load: async (file) => loadMicroduckPolicy(await onnxRuntime(), file),
-    create: (weights, prefix) => new MicroduckController(weights, prefix, 'Microduck SuperMimic walking policy'),
+    create: (weights, prefix) => new MicroduckController(weights, prefix, 'Microduck policies (Pollen)'),
   },
 ];
 
 export const POLICY_ROOT = 'pretrained_policies';
 
-export const policyById = (id) => POLICIES.find((p) => p.id === id) ?? null;
+// Policies that were replaced: the id that stands in for them (a saved stage
+// or a remembered choice of the old id gets the new policy). Our own
+// Microduck policies (walk + kick, SuperMimic) are at git tag
+// before-official-microduck.
+const RENAMED = { 'microduck-walk': 'microduck-official', 'microduck-supermimic': 'microduck-official' };
+export const policyId = (id) => RENAMED[id] ?? id;
+
+export const policyById = (id) => POLICIES.find((p) => p.id === policyId(id)) ?? null;
 
 // The installed policy directories ({dir: [files]}), from public/json/policies.json.
 let installed = {};

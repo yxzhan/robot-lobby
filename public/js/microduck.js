@@ -1,15 +1,19 @@
-// The Microduck policies trained in microduck_rl (github.com/
-// pollen-robotics/microduck_rl: mjlab, MuJoCo Warp, rsl_rl PPO) and exported
-// by scripts/export_microduck.py: walk.onnx (velocity task) and the skills'
-// ONNX files, with the observation normalizer baked in, and policy.json,
-// which has the rest:
+// Microduck policies trained in microduck_rl (github.com/
+// pollen-robotics/microduck_rl: mjlab, MuJoCo Warp, rsl_rl PPO): Pollen's
+// published set (pretrained_policies/microduck_official, the Hub's
+// pollen-robotics/microduck-policies), ONNX files with the observation
+// normalizer baked in, all of one observation and action contract, and a
+// policy.json, which has the rest (scripts/export_microduck.py makes one for
+// checkpoints of our own: our walk + kick and the SuperMimic walk are at git
+// tag before-official-microduck):
 //
-// - skills (skills.js): walking, the default, and kick_right, which it
-//   switches to by hand for 0.3 s (as microduck_rl's daemon swaps its episodic
-//   policies), of the same observation and actions; it sees zeros for the
-//   twist and the commands (commands: false), as in its training. The
-//   SuperMimic walking policy (microduck_supermimic) is a directory and
-//   policy of its own, run by this controller too;
+// - skills (skills.js): velstand, the default (walks, stands, gets up after a
+//   fall), and the ones it switches to by hand, as microduck_rl's daemon
+//   swaps its policies: kicks (0.5 s), the forward roll (1 s) and touching
+//   the ground (2.8 s, its twist slot a phase clock) for a while, sitting
+//   (its twist slot the posture flag), standing and the older walk until
+//   another is picked; the episodic ones see zeros for the commands
+//   (commands: false), as in their training;
 // - joints / actuators, default_pose, action_scale: the 14 servos in action
 //   order; target = default + action * scale (no clipping, as in training);
 // - obs: mjlab's actor observation, 61 values, its parts in order: the root
@@ -207,14 +211,15 @@ export class MicroduckController {
       joint_pos: () => Array.from(this.qadr, (a, i) => qpos[a] - s.default_pose[i]),
       joint_vel: () => this.qvel,
       last_action: () => this.action,
-      command: () => this.cmd,
+      command: () => twist ?? this.cmd,
     };
+    const twist = this.skills.twistFor(skill, data.time);  // a skill's own twist slot (sitstand's flag, a phase clock)
     const blind = this.skills.blind(skill);  // trained with zeros there
     const obs = new Float32Array(s.obs.reduce((t, [, k]) => t + k, 0));
     let o = 0;
     for (const [name, size] of s.obs) {
       const c = name.startsWith('cmd:') && this.commands[name.slice(4)];
-      const part = blind && (c || name === 'command') ? new Float32Array(size)
+      const part = blind && (c || (name === 'command' && !twist)) ? new Float32Array(size)
         : c ? commandVector(c, this.command[name.slice(4)]) : parts[name]?.();
       if (!part || part.length !== size) throw new Error(`${this.name}: cannot build observation part ${name}`);
       obs.set(part, o);

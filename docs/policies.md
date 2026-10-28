@@ -147,74 +147,61 @@ for Go2 body velocity, gravity and joint velocities) and sets the targets
 `default + action * scale` every 0.02 s; on `go2.xml`'s torque motors it
 computes the trained PD torque itself before every physics step.
 
-## Walking Microduck (trained in microduck_rl)
+## Walking Microduck (Pollen's published policies)
 
 Pollen Robotics' [microduck_rl](https://github.com/pollen-robotics/microduck_rl)
-(mjlab, MuJoCo Warp, rsl_rl PPO) trains its 14-servo bipedal duck; with a
-clone next to `package.json`, the library repository's `scripts/import_microduck.py` copies the
-robot (`custom/microduck/microduck.xml`) and two of its scenes into
-the library, and after training `scripts/export_microduck.py` (run in the
-clone's environment, see its docstring) exports the walking policy to
-`pretrained_policies/microduck_rl/` (`walk.onnx`, `policy.json`). The duck
-starts with `microduck-walk` on (keys and goal marker), and so do its three
-other colors (`custom/microduck_sky`, `_graphite`, `_lavender`: the same model,
-recolored by `import_microduck.py`).
+(mjlab, MuJoCo Warp, rsl_rl PPO) trains its 14-servo bipedal duck, and
+Pollen publishes the set the robot ships with on the Hugging Face Hub
+([pollen-robotics/microduck-policies](https://huggingface.co/pollen-robotics/microduck-policies),
+Apache-2.0). Its ONNX files are in `pretrained_policies/microduck_official/`
+(revision `665ae4e`, 2026-10-12, with the Hub's `manifest.json`), beside a
+`policy.json` for them: microduck_rl's observation contract, default pose and
+servo model, which every policy of the set shares. With a microduck_rl clone
+next to `package.json`, the library repository's `scripts/import_microduck.py`
+copies the robot (`custom/microduck/microduck.xml`, the ground-contact
+collision model, so it can lie on the floor) and two of its scenes into the
+library. The duck starts with `microduck-official` (Walk + get up, tricks ·
+Microduck (Pollen)) on, and so do its three other colors
+(`custom/microduck_sky`, `_graphite`, `_lavender`: the same model, recolored
+by `import_microduck.py`).
+
+Our own Microduck policies (a walk and a right kick trained here, and a
+SuperMimic walk, `training/supermimic`) are at git tag
+`before-official-microduck`; a saved stage or a remembered choice naming
+them (`microduck-walk`, `microduck-supermimic`) gets the official set
+(`RENAMED` in `policy.js` and `policies.py`). `scripts/export_microduck.py`
+still writes a `policy.json` and ONNX files for checkpoints of our own.
 
 ### Skills
 
-Its `policy.json` has walking and a manual skill (see Skills above), like
-microduck_rl's daemon swapping its "episodic" policies on the robot:
-`kick_right` (`kick_right.onnx`, the `Mjlab-BallKick-Flat-MicroDuck` task):
-from a stand it kicks a ball lying at its right toe forward at about 1 m/s
-and settles on both feet. Trained from HOME only, it kicked once and then
-no more: the walking policy's stand (neck ~0.15 rad down, the legs a few
-hundredths off) was not a start it knew. It was trained on (3000 more
-iterations) with 70% of its episodes starting from 4000 stances the walking
-policy settles into, after walking, kicking and with head commands
-(`scripts/microduck_stances.py`, run in the viewer's physics; the task's
-`set_stance_from_library` event, the ball in front of the stance's right
-foot). It then kicked only with the feet at most ~85 mm apart: a kick leaves
-them wider for ~2 s while they slide back (for good with the solver's
-noslip, which was on by default then), so it was trained on again (3000
-iterations) from 6000 states, also 0-2 s after a kick (with their
-velocities, feet up to 160 mm apart) and with noslip (~95 mm). Its episodes
-start with a zero action history, so it has `reset_action`: reading the
-walking policy's last action as its own, it did not kick at all. Now it
-kicks with the feet 84-100 mm apart, from 0.3 s after the last kick on
-(not at the very end of one, its foot still up). It does not see the ball (the robot has no way
-to), so aim the duck first: the ball 9 cm ahead and 4 cm right of the
-trunk, within about 1.5 cm. The library's `objects/custom/microduck_ball` is
-the 70 mm, 15 g ball it was trained with.
+Its `policy.json` has velstand as the default and the others as skills (see
+Skills above), as microduck_rl's daemon swaps them on the robot:
 
-The kick runs 0.3 s (<kbd>K</kbd>; the ball is off at ~0.2 s), then the
-walking policy takes over the settling; the panel can set another
-duration. It sees zeros
-for the twist and the head and body commands, as in its training. Export
-more with `scripts/export_microduck.py` (`TASKS` and `SKILLS`).
+| skill | ONNX | key | what it does (tested in the viewer's physics) |
+|---|---|---|---|
+| Walk + get up (default) | `velstand.onnx` (v8) | | walks (slowly: ~0.08 m/s for 0.3), stands at zero command, turns (0.8 → ~1 rad/s), and gets back up by itself after a fall (face-down 0.4 s, face-up 0.6 s); body roll/pitch command while standing |
+| Kick (right foot), (left foot) | `ball_kick_right.onnx`, `_left` | K, J | 0.5 s: a ball at the toe (9.5 cm ahead, 4.2 cm to that side) goes 1.6-3 m, about 7-9° off straight, to the kicking foot's side |
+| Forward roll | `roulade.onnx` | O | 1 s: a forward roll; velstand stands it up after |
+| Touch the ground | `alpha_ground_pick.onnx` | P | 2.8 s: bows and touches the floor with the mouth tip; its twist slot is a phase clock (`phase: {period: 4}`: cos, sin of 2π t/4) |
+| Sit | `alpha_sitstand.onnx` | C | sits (trunk 0.06 m) and stays seated: its twist slot is the posture flag (`twist: [1, 0, 0]`); pick Walk to stand up |
+| Stand | `alpha_stand.onnx` | | holds a stand, gets up after a fall, does not walk |
+| Walk (alpha) | `alpha_walking.onnx` | | the older walk: a little faster (0.14 m/s), barely turns, no get-up |
 
-### Trained with SuperMimic
+The episodic ones start from a zero action history (`reset_action`) and see
+zeros for the commands (`commands: false`). The kicks do not see the ball
+(the robot has no way to): aim the duck first. `roller.onnx` and
+`roller_crouch.onnx` are in the directory but not offered: they need the
+Microduck on wheels, which the library lacks. `scripts/microduck_official_test.py`
+runs each in the viewer's physics; `public/behaviors/microduck_skills.py` (a
+Behavior-panel example) tries them all on a spawned duck and a ball.
 
-`microduck-supermimic` (Walking · Microduck (SuperMimic),
-`pretrained_policies/microduck_supermimic/`) is the same walking task trained
-with SuperMimic in 19 minutes (`training/supermimic`), a policy of its own
-picked in the Policy section: the same controller, servo model and
-observation (its `policy.json` is written by `scripts/export_microduck.py`
-beside microduck_rl's), its `walk.onnx` from `training/supermimic`'s
-`export_onnx.py`. It steps as the PPO policy does and stays up, but makes
-little headway (0.06 m/s for 0.32 commanded, the PPO policy 0.19).
-
-It was trained on the BAM model of the XL330 servos (firmware P loop,
+They were trained on the BAM model of the XL330 servos (firmware P loop,
 DC motor with back-EMF and battery sag, load-dependent friction), not on
-plain position actuators, and does not stand without it. `public/js/microduck.js`
+plain position actuators, and do not stand without it. `public/js/microduck.js`
 (and `MicroduckController` / `BamServos` in `server/policies.py`) turns the
 robot's position actuators into motors on bind, computes the servo torques
 and writes the friction budget into the joints before every physics step,
 delays the targets by the training's command delay, and builds mjlab's 61-D
 observation (trunk angular velocity and gravity, joint positions and
 velocities, last action, the drive command, and the head and body pose
-commands, see Commands above). In the viewer's world it walks without
-falling at ~2/3 of the commanded speed forward and back, turns at the
-commanded rate, but sidesteps slowly (0.2 m/s → 0.05); standing still it
-does not start below ~0.2 m/s or ~0.6 rad/s (`min_command`, so the goal
-marker commands at least that) and often does not turn right in place, as
-in microduck_rl's own CPU rehearsal (`scripts/infer_policy.py`).
+commands, see Commands above).

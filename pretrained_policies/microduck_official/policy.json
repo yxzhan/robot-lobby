@@ -1,12 +1,5 @@
 {
- "source": "training/supermimic (SuperMimic: world model + back-propagation through imagined rollouts)",
- "checkpoints": {
-  "walk": {
-   "task": "Mjlab-Velocity-Flat-MicroDuck",
-   "trainer": "training/supermimic",
-   "checkpoint": "2026-10-25_13-33-02_walk_gait/model_4000.pt"
-  }
- },
+ "source": "https://huggingface.co/pollen-robotics/microduck-policies (revision 665ae4eb20bfe13bca1ef4ea6d4bb6b4a096e448, 2026-10-12; Apache-2.0): Pollen Robotics' published Microduck policy set (manifest.json), trained in https://github.com/pollen-robotics/microduck_rl",
  "ctrl_dt": 0.02,
  "root": "trunk_base",
  "joints": [
@@ -175,8 +168,70 @@
  },
  "skills": {
   "walk": {
-   "onnx": "walk.onnx",
-   "label": "Walk"
+   "onnx": "velstand.onnx",
+   "label": "Walk + get up",
+   "about": "velstand v8: walks, stands at zero command and gets back up by itself after a fall; body roll/pitch steerable while standing"
+  },
+  "kick_right": {
+   "onnx": "ball_kick_right.onnx",
+   "label": "Kick (right foot)",
+   "duration": 0.5,
+   "commands": false,
+   "reset_action": true,
+   "key": "k",
+   "about": "kicks a ball just in front of the right toe, then walking again"
+  },
+  "kick_left": {
+   "onnx": "ball_kick_left.onnx",
+   "label": "Kick (left foot)",
+   "duration": 0.5,
+   "commands": false,
+   "reset_action": true,
+   "key": "j",
+   "about": "kicks a ball just in front of the left toe"
+  },
+  "roulade": {
+   "onnx": "roulade.onnx",
+   "label": "Forward roll",
+   "duration": 1.0,
+   "commands": false,
+   "reset_action": true,
+   "key": "o",
+   "about": "a forward roll from a stand; the walking policy stands it up after"
+  },
+  "ground_pick": {
+   "onnx": "alpha_ground_pick.onnx",
+   "label": "Touch the ground",
+   "duration": 2.8,
+   "commands": false,
+   "reset_action": true,
+   "phase": {
+    "period": 4.0
+   },
+   "key": "p",
+   "about": "bows and touches the floor with the mouth tip, back up (its twist slot is a phase clock)"
+  },
+  "sit": {
+   "onnx": "alpha_sitstand.onnx",
+   "label": "Sit",
+   "commands": false,
+   "twist": [
+    1.0,
+    0.0,
+    0.0
+   ],
+   "key": "c",
+   "about": "sits down and stays seated (sitstand with its posture flag on); pick Walk to stand up"
+  },
+  "stand": {
+   "onnx": "alpha_stand.onnx",
+   "label": "Stand",
+   "about": "alpha_stand: holds a stand (no walking), gets up after a fall"
+  },
+  "walk_alpha": {
+   "onnx": "alpha_walking.onnx",
+   "label": "Walk (alpha)",
+   "about": "alpha_walking: the older walk, a little faster, barely turns, no get-up"
   }
  },
  "joint_vel_lag": 1,

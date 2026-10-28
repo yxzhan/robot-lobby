@@ -17,7 +17,7 @@ import loadMujoco from '../vendor/mujoco/mujoco.js';
 import { loadModelFiles, readFirst, urlSource } from './vfs.js';
 import { bodyInertia, compileWorld, firstKey, referencedNames } from './world.js';
 import { CONTROL_DT } from './groot.js';
-import { defaultPolicy, loadPolicy, loadPolicyIndex, policyById } from './policy.js';
+import { defaultPolicy, loadPolicy, loadPolicyIndex, policyById, policyId } from './policy.js';
 import { Perturb, StagePanel } from './inspect.js';
 import { AssetPanel, loadAssets, loadRecent } from './assets.js';
 import { AxisGizmo } from './gizmo.js';
@@ -1961,6 +1961,7 @@ try {
   // Makes robot.policy the controller of the policy r.use.policy names
   // (loading its weights); clears r.use.policy if that fails.
   async function makePolicy(r, progress) {
+    r.use.policy = policyId(r.use.policy);  // (a replaced policy's id: its successor)
     const p = policyById(r.use.policy);
     if (r.policy && r.policy.policyId !== p?.id) { r.policy.unbind?.(); r.policy = null; }
     if (!p) { if (r.use.policy) r.errors.policy = `no policy ${r.use.policy}`; r.use.policy = ''; return; }

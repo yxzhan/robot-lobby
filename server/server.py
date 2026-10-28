@@ -286,7 +286,7 @@ class Robot:
 
   def make_policy(self):
     """self.policy for the policy use['policy'] names (main.js makePolicy)."""
-    pid = self.use['policy']
+    pid = self.use['policy'] = POL.policy_id(self.use['policy'])  # (a replaced policy's id: its successor)
     if self.policy is not None and self.policy_id != pid:
       self.policy.unbind()
       self.policy = None

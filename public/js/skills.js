@@ -33,6 +33,12 @@
 //   stood still after the walking policy's stand).
 // - commands: false: trained with zeros for the twist and the commands (the
 //   controller observes it so).
+// - twist: [vx, vy, yaw rate], what the model sees in the twist slot while it
+//   runs instead of the drive command (e.g. Pollen's sitstand: [1, 0, 0] is
+//   its posture flag, sit); phase: {period} (s), the twist slot as a phase
+//   clock instead, [cos 2πφ, sin 2πφ, 0] with φ = time since it started /
+//   period (Pollen's ground pick). With commands: false the other commands
+//   are zeros.
 // - label, about: for the panel.
 // A controller with skills has `skills` (a Skills) and, for the panel and
 // the network: skillMenu (menu), skill (the manual one picked, `want`),
@@ -144,5 +150,15 @@ export class Skills {
 
   blind(name) {
     return this.specs[name]?.commands === false;
+  }
+
+  // The twist skill `name` is shown at `time` (twist or phase), or null: the drive command.
+  twistFor(name, time) {
+    const s = this.specs[name];
+    if (s?.twist) return s.twist;
+    if (!s?.phase) return null;
+    const since = this.picked?.[0] === name ? time - this.picked[1] : 0;
+    const a = 2 * Math.PI * since / s.phase.period;
+    return [Math.cos(a), Math.sin(a), 0];
   }
 }

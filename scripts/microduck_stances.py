@@ -147,7 +147,7 @@ def main():
   out = {k: np.stack([s[k] for s in got]) for k in got[0]}
   np.savez(args.out, **out)
   dev = out['joint_pos'] - np.array(__import__('json').loads(
-      (ROOT / 'pretrained_policies' / 'microduck_rl' / 'policy.json').read_text())['default_pose'])
+      (ROOT / 'pretrained_policies' / 'microduck_official' / 'policy.json').read_text())['default_pose'])
   print(f'{args.out}: {len(got)} of {args.samples} stances (the others fell); |joint - HOME| p50 / p95 / max by joint:')
   for name, col in zip(('L_yaw', 'L_roll', 'L_pitch', 'L_knee', 'L_ankle', 'neck_p', 'head_p', 'head_y', 'head_r',
                         'R_yaw', 'R_roll', 'R_pitch', 'R_knee', 'R_ankle'), np.abs(dev).T):

@@ -215,6 +215,17 @@ class Skills:
   def blind(self, name):
     return self.specs.get(name, {}).get('commands') is False
 
+  def twist_for(self, name, time):
+    """The twist skill `name` is shown at `time` (its `twist`, or its `phase` clock), or None."""
+    s = self.specs.get(name, {})
+    if s.get('twist'):
+      return s['twist']
+    if not s.get('phase'):
+      return None
+    since = time - self.picked[1] if self.picked is not None and self.picked[0] == name else 0.0
+    a = 2 * math.pi * since / s['phase']['period']
+    return [math.cos(a), math.sin(a), 0.0]
+
 
 # ---------------------------------------------------------------------------
 # GR00T locomotion, Unitree G1
@@ -752,6 +763,7 @@ class MicroduckController:
 
   def observe(self, data, skill=None):
     R = data.xmat[self.root].reshape(3, 3)
+    twist = self.skills.twist_for(skill, data.time) if skill else None
     v = self.free_v
     parts = {
         'base_ang_vel': lambda: data.qvel[v + 3:v + 6],
@@ -759,12 +771,12 @@ class MicroduckController:
         'joint_pos': lambda: data.qpos[self.qadr] - self.default,
         'joint_vel': lambda: self.qvel,
         'last_action': lambda: self.action,
-        'command': lambda: self.cmd,
+        'command': lambda: self.cmd if twist is None else twist,
     }
     blind = bool(skill) and self.skills.blind(skill)  # trained with zeros there
     if blind:
       for name, size in self.spec['obs']:
-        if name == 'command' or name.startswith('cmd:'):
+        if (name == 'command' and twist is None) or name.startswith('cmd:'):
           parts[name] = lambda size=size: np.zeros(size)
     obs = observation(self.spec, parts, {} if blind else self.commands, self.command)
     self.qvel = data.qvel[self.dofs].copy()
@@ -807,20 +819,25 @@ POLICIES = [
      'defaultFor': re.compile(r'(^|/)mujoco_menagerie/unitree_go2/go2\.xml$'),
      'load': load_playground,
      'create': lambda policy, prefix: PlaygroundController(policy, prefix, 'Go2 joystick policy')},
-    {'id': 'microduck-walk', 'name': 'Walking · Microduck', 'dir': 'microduck_rl',
+    {'id': 'microduck-official', 'name': 'Walk + get up, tricks · Microduck (Pollen)', 'dir': 'microduck_official',
      'defaultFor': re.compile(r'(^|/)custom/(microduck(_sky|_graphite|_lavender)?)/\2\.xml$'),  # and its colors
      'load': load_microduck,
-     'create': MicroduckController},
-    {'id': 'microduck-supermimic', 'name': 'Walking · Microduck (SuperMimic)', 'dir': 'microduck_supermimic',
-     'load': load_microduck,
-     'create': lambda policy, prefix: MicroduckController(policy, prefix, 'Microduck SuperMimic walking policy')},
+     'create': lambda policy, prefix: MicroduckController(policy, prefix, 'Microduck policies (Pollen)')},
 ]
 
 _loaded = {}
 
 
+# Replaced policies: the id that stands in for them (as policy.js RENAMED).
+RENAMED = {'microduck-walk': 'microduck-official', 'microduck-supermimic': 'microduck-official'}
+
+
+def policy_id(pid):
+  return RENAMED.get(pid, pid)
+
+
 def by_id(pid):
-  return next((p for p in POLICIES if p['id'] == pid), None)
+  return next((p for p in POLICIES if p['id'] == policy_id(pid)), None)
 
 
 def installed(p):
