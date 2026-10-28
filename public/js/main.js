@@ -2464,7 +2464,8 @@ try {
 
   // Local mode: replaces what is spawned with a stage's items, in one
   // compile, then puts each in its saved state (which Reset goes back to).
-  // Items whose files fail to load are skipped (and reported).
+  // Items whose files fail to load are skipped (and reported). The items are
+  // numbered from r1 (nextId follows once they replace the old ones).
   async function loadStage({ stage, files = {} }) {
     const items = stage.items ?? [];
     const progress = (msg) => { status.textContent = msg; setBusy(msg); };
@@ -2480,7 +2481,7 @@ try {
       try {
         const key = robotKey(it.rel);
         const preset = { use: it.use, ik: files['ik.json']?.[key], base: files['base.json']?.[key] };
-        const r = await makeRobot(it.rel, it.label ?? it.rel, it.pos, it.yaw ?? 0, progress, undefined, preset);
+        const r = await makeRobot(it.rel, it.label ?? it.rel, it.pos, it.yaw ?? 0, progress, `r${added.length + 1}/`, preset);
         added.push(Object.assign(r, { stageItem: it }));
       } catch (err) {
         console.error(`stage item ${it.rel}:`, err);
@@ -2491,6 +2492,7 @@ try {
     await rebuild(added, added, progress);
     for (const r of removed) app.removeEntities(r.entities);
     robots.splice(0, robots.length, ...added);
+    nextId = added.length + 1;
     dropUnused();
     const { mujoco, model, data } = app, layout = stateLayout(robots);
     let skipped = 0;

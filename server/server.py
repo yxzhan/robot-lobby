@@ -666,14 +666,14 @@ class World:
             'thumbnail': extra.get('thumbnail')}
 
   async def load_stage(self, bundle):
-    """A stage replaces the world: its items spawned anew (numbered on from
-    the last id; its controllers switched on and set up as saved) in a new
+    """A stage replaces the world: its items spawned anew (numbered from 1
+    again; its controllers switched on and set up as saved) in a new
     MjData from time 0, each in its saved state, which Reset goes back to.
     Items whose model is gone are left out. Every page is told (scene with
     `stage`, then a reset)."""
     stage, files = bundle['stage'], bundle.get('files') or {}
     async with self.lock:
-      first = self.next_id
+      first = 1
       physics = checked_physics(stage.get('physics') or {}, self.physics)
 
       def make():
