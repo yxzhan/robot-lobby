@@ -45,7 +45,7 @@ KICKS = {
     "kick_right": ((0.095, -0.042), math.radians(-7)),
     "kick_left": ((0.095, 0.042), math.radians(9)),
 }
-KICK_TOL = (0.03, 0.025)           # how far from the ball spot it still kicks (m, forward / sideways)
+KICK_TOL = (0.04, 0.015)           # how far from the ball spot it still kicks (m, forward / sideways)
 KICK_YAW_TOL = 0.2                 # rad off the kick heading
 KICK_REST = 1.5                    # s (simulated) after a kick (0.5 s) before the next
 KICK_LEAD = 0.035                  # m: the goal set past the kick spot (a goal counts as reached 6 cm short)
