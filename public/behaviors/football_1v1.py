@@ -1,6 +1,6 @@
-# Duck football 3v3 (the microduck_football_1v1 stage: the tree spawns the
-# two more ducks per team it needs, all on Pollen's policy set,
-# microduck-official): the graphite Microducks attack the +x goal, the white
+# Duck football 3v3 (on the microduck_football_1v1 stage, or anywhere: the
+# tree spawns the pitch if there is none and the ducks each team lacks, all
+# on Pollen's policy set, microduck-official): the graphite Microducks attack the +x goal, the white
 # ones the -x goal (in the pitch's own frame, however it is placed). In each
 # team the duck nearest the ball attacks: it lines up behind the ball for a
 # kick with the nearer foot (the ball in front of that toe, where the kick was
@@ -14,14 +14,21 @@
 # (Reset itself puts the ball back on the centre spot).
 import math
 import random
+import time
 import py_trees
 from py_trees.common import Status
 import lobby
 
 TEAMS = [("microduck_graphite", +1, "graphite"), ("microduck", -1, "white")]  # label (= model), attacks +x / -x, name
 PER_TEAM = 3
-# Where the extra ducks are spawned (pitch frame, for the team attacking +x; mirrored for the other):
-EXTRA_SPOTS = [(-1.2, 0.6), (-1.2, -0.6), (-0.3, 0.9)]
+PITCH = "microduck_football"       # the model spawned when there is no pitch (at the origin)
+# Where ducks are spawned (pitch frame, for the team attacking +x; the other's are mirrored through the
+# centre spot): the first one clear of every duck. The first is the stage's spot.
+SPOTS = [(-0.6, 0.2), (-1.2, 0.6), (-1.2, -0.6), (-0.3, 0.9), (-1.5, 0.0)]
+SPOT_CLEAR = 0.35                  # m: a spot with a duck closer than this is taken
+SPAWN_WAIT = 60.0                  # s (wall time): a spawn not seen by then is asked for again
+SPAWN_SETTLE = 1.0                 # s (wall time) after a spawn shows before the next: in a shared world the
+                                   # poses come a moment after the new scene (all at the origin until then)
 SWITCH_MARGIN = 0.2                # m: a teammate takes over the attack once this much nearer the ball
 DEFEND_OUT = 0.6                   # m out from its goal, on the line to the ball (at most half way)
 SUPPORT_BACK, SUPPORT_SIDE = 0.7, 0.5  # m behind the ball (toward its own goal) and to its side
@@ -220,36 +227,54 @@ class Player(py_trees.behaviour.Behaviour):
 
 
 class Teams(py_trees.behaviour.Behaviour):
-    """Spawns the ducks the teams lack, one at a time (each rebuilds the world), at EXTRA_SPOTS; done when
-    every team has PER_TEAM."""
+    """Spawns the pitch if there is none, then the ducks the teams lack, one at a time (each spawn rebuilds
+    the world), each on the first free spot of SPOTS; done when every team has PER_TEAM."""
 
     def __init__(self):
         super().__init__(f"Teams of {PER_TEAM}")
-        self.pending = None  # (label, how many it had, simulated time): a spawn on its way
+        self.pending = None  # (what: a label or PITCH, how many there were, wall time): a spawn on its way
+        self.asked = []      # the spots spawned on: taken (a new duck's pose shows a moment after it does)
+        self.settle = 0.0    # wall time until which the last spawn settles (its poses arriving)
+        self.frame = None    # the pitch's frame, noted once settled (it does not move)
+
+    def initialise(self):
+        self.settle = time.monotonic() + SPAWN_SETTLE  # (the world may have just changed: its poses first)
+
+    def count(self, what):
+        return (1 if pitch() else 0) if what == PITCH else len(team(what))
 
     def update(self):
+        if self.pending is not None:  # one spawn at a time: until it shows (wall time: a rebuild may set the simulated one back)
+            what, had, t0 = self.pending
+            if self.count(what) <= had and time.monotonic() - t0 < SPAWN_WAIT:
+                self.feedback_message = f"spawning {what}"
+                return Status.RUNNING
+            self.pending = None
+            self.settle = time.monotonic() + SPAWN_SETTLE
+        if time.monotonic() < self.settle:
+            return Status.RUNNING
         f = pitch()
-        if not f:
-            self.feedback_message = "no pitch"
-            return Status.FAILURE
+        if f is None:
+            lobby.spawn(PITCH, 0.0, 0.0, 0.0)
+            self.pending = (PITCH, 0, time.monotonic())
+            self.feedback_message = f"spawning {PITCH}"
+            return Status.RUNNING
         counts = {label: len(team(label)) for label, _, _ in TEAMS}
         self.feedback_message = ", ".join(f"{name} {counts[label]}" for label, _, name in TEAMS)
-        if self.pending is not None:
-            label, had, t0 = self.pending
-            if counts[label] > had:
-                self.pending = None
-            elif lobby.time() - t0 > 30.0 or lobby.time() < t0:
-                self.pending = None  # (asks again)
-            else:
-                return Status.RUNNING
         missing = next(((label, sign) for label, sign, _ in TEAMS if counts[label] < PER_TEAM), None)
         if missing is None:
             return Status.SUCCESS
         label, sign = missing
-        u, v = EXTRA_SPOTS[(counts[label] - 1) % len(EXTRA_SPOTS)] if counts[label] else EXTRA_SPOTS[0]
-        fr = Frame(f["pose"])
-        lobby.spawn(label, *fr.world(sign * u, v), fr.yaw + (0.0 if sign > 0 else math.pi))
-        self.pending = (label, counts[label], lobby.time())
+        fr = self.frame = self.frame or Frame(f["pose"])
+        ducks = [r for l, _, _ in TEAMS for r in team(l)]
+        spots = [fr.world(sign * u, sign * v) for u, v in SPOTS]
+        clear = lambda p: min([dist(r, *p) for r in ducks] + [math.hypot(p[0] - ax, p[1] - ay) for ax, ay in self.asked],
+                              default=math.inf)
+        x, y = next((p for p in spots if clear(p) >= SPOT_CLEAR), max(spots, key=clear))  # (else the least crowded)
+        lobby.spawn(label, x, y, fr.yaw + (0.0 if sign > 0 else math.pi))
+        self.asked.append((x, y))
+        self.pending = (label, counts[label], time.monotonic())
+        self.feedback_message += f"; spawning {label}"
         return Status.RUNNING
 
 
