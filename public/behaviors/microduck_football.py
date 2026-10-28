@@ -35,7 +35,8 @@ DEFEND_OUT = 0.6                   # m out from its goal, on the line to the bal
 SUPPORT_BACK, SUPPORT_SIDE = 0.7, 0.5  # m behind the ball (toward its own goal) and to its side
 KEEP_OFF = 0.45                    # m: who does not attack stays this far from the ball
 GOAL_X, GOAL_HALF_W = 2.02, 0.40   # goal mouths at x = +-2.02 (pitch frame)
-TOUCH_Y = 1.40                     # ball wholly over the touchline (pitch frame, m)
+TOUCH_Y, END_X = 1.3, 2.05        # ball wholly over the touchline / the goal line (pitch frame, m: the lines'
+                                   # outer edges at 1.3125 / 2.0125, the ball's radius 0.04)
 BEHIND, PUSH = 0.22, 0.45          # going round the ball: this far behind it; walking through it: this far on
 # The kicks (skill: ball centre in the duck's frame, m; how far left of the
 # duck's heading the ball then runs, rad): trained with the ball 9 cm ahead of
@@ -329,8 +330,8 @@ class Referee(py_trees.behaviour.Behaviour):
             else:
                 self.landing = (before, ticks + 1)
         rx, ry = fr.local(b["x"], b["y"])
-        is_goal = abs(ry) < GOAL_HALF_W and abs(rx) > GOAL_X + 0.03
-        is_out = not is_goal and (abs(ry) > TOUCH_Y or abs(rx) > GOAL_X + 0.05)
+        is_goal = abs(ry) < GOAL_HALF_W and abs(rx) > END_X
+        is_out = not is_goal and (abs(ry) > TOUCH_Y or abs(rx) > END_X)
         self.out_since = (self.out_since if self.out_since is not None else t) if (is_goal or is_out) else None
         if self.quiet_until is None or t >= self.quiet_until:
             if self.out_since is not None and t - self.out_since >= OUT_TIME:
@@ -345,7 +346,7 @@ class Referee(py_trees.behaviour.Behaviour):
         return Status.RUNNING
 
 
-root = py_trees.composites.Sequence("Duck football 3v3", memory=True, children=[
+root = py_trees.composites.Sequence("Duck football", memory=True, children=[
     Teams(),
     py_trees.composites.Parallel(
         "Play",
