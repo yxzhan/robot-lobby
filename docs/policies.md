@@ -189,11 +189,26 @@ Skills above), as microduck_rl's daemon swaps them on the robot:
 
 The episodic ones start from a zero action history (`reset_action`) and see
 zeros for the commands (`commands: false`). The kicks do not see the ball
-(the robot has no way to): aim the duck first. `roller.onnx` and
-`roller_crouch.onnx` are in the directory but not offered: they need the
-Microduck on wheels, which the library lacks. `scripts/microduck_official_test.py`
+(the robot has no way to): aim the duck first. `scripts/microduck_official_test.py`
 runs each in the viewer's physics; `public/behaviors/microduck_skills.py` (a
 Behavior-panel example) tries them all on a spawned duck and a ball.
+
+### On roller skates
+
+`roller.onnx` and `roller_crouch.onnx` are for the Microduck on roller
+skates (`custom/microduck_rollers/microduck_rollers.xml`: a blade with two
+free wheels in place of each foot, `robot_groundcontact_rollers.xml`, the
+wheel bearings' friction 0.003 as microduck_rl's `infer_policy.py --roller`
+sets it; `import_microduck.py` copies it too). It starts with
+`microduck-roller` (Roller skating · Microduck (Pollen)), the same directory
+with its own spec, `roller.json`: the same joints, observation and servo
+model, `action_scale` 0.8 (the manifest's), and zeros in the head and body
+command slots (an obs part `zeros`: the roller tasks train them so).
+
+| skill | ONNX | key | what it does (tested in the viewer's physics) |
+|---|---|---|---|
+| Skate (default) | `roller.onnx` | | forward command > 0 pushes (0.6 → ~0.13 m/s), 0 coasts, < 0 brakes and rolls back; the turn command is a heading error (0.5 rad → ~20°/s); no sideways command |
+| Crouch | `roller_crouch.onnx` | C | 3.5 s: crouches (trunk 0.12 → 0.07 m) and back up as it glides; its twist slot is a phase clock (`phase: {period: 5}`) |
 
 They were trained on the BAM model of the XL330 servos (firmware P loop,
 DC motor with back-EMF and battery sag, load-dependent friction), not on

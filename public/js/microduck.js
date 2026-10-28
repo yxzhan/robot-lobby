@@ -23,7 +23,9 @@
 //   then the command block: the twist (command: vx, vy, yaw rate) and the
 //   commands of policy.json's "commands" (cmd:head, the head joints' offsets
 //   from the default pose; cmd:body, a body pose offset, which the walking
-//   task barely follows), set in the Teleop panel (commands.js);
+//   task barely follows), set in the Teleop panel (commands.js); zeros, a
+//   slot the policy was trained with zeros in (the roller policies' head and
+//   body slots);
 // - command_range, min_command: what the policy was trained to follow, and
 //   its dead band (it stands for less);
 // - bam: the XL330 servo model the policy was trained with (BAM M6,
@@ -47,9 +49,10 @@ import { Skills, loadSessions, loadSpec } from './skills.js';
 
 const FRICTION_DOF = 3;  // mjCNSTR_FRICTION_DOF
 
-// {ort, sessions: {skill: session}, spec}. `source(name)` returns a file's URL.
-export async function loadMicroduckPolicy(ort, source) {
-  const spec = await loadSpec(source);
+// {ort, sessions: {skill: session}, spec}. `source(name)` returns a file's URL;
+// `file`: the directory's spec file (policy.json by default).
+export async function loadMicroduckPolicy(ort, source, file) {
+  const spec = await loadSpec(source, file);
   return { ort, sessions: await loadSessions(ort, source, spec.skills), spec };
 }
 
@@ -223,7 +226,7 @@ export class MicroduckController {
     for (const [name, size] of s.obs) {
       const c = name.startsWith('cmd:') && this.commands[name.slice(4)];
       const part = blind && (c || (name === 'command' && !twist)) ? new Float32Array(size)
-        : c ? commandVector(c, this.command[name.slice(4)]) : parts[name]?.();
+        : c ? commandVector(c, this.command[name.slice(4)]) : name === 'zeros' ? new Float32Array(size) : parts[name]?.();
       if (!part || part.length !== size) throw new Error(`${this.name}: cannot build observation part ${name}`);
       obs.set(part, o);
       o += size;

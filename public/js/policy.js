@@ -91,6 +91,15 @@ export const POLICIES = [
     load: async (file) => loadMicroduckPolicy(await onnxRuntime(), file),
     create: (weights, prefix) => new MicroduckController(weights, prefix, 'Microduck policies (Pollen)'),
   },
+  {
+    id: 'microduck-roller',
+    name: 'Roller skating · Microduck (Pollen)',
+    about: "The roller policies of Pollen Robotics' published set, for the Microduck on roller skates: roller skates (forward pushes, zero coasts, back brakes; turning steers its heading); the crouch skill crouches low and back up as it glides.",
+    dir: 'microduck_official',  // its roller.json
+    defaultFor: /(^|\/)custom\/microduck_rollers\/microduck_rollers\.xml$/,
+    load: async (file) => loadMicroduckPolicy(await onnxRuntime(), file, 'roller.json'),
+    create: (weights, prefix) => new MicroduckController(weights, prefix, 'Microduck roller policies (Pollen)'),
+  },
 ];
 
 export const POLICY_ROOT = 'pretrained_policies';

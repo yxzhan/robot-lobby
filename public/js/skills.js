@@ -59,12 +59,12 @@ export async function loadSessions(ort, source, skills) {
   return Object.fromEntries(entries);
 }
 
-// A policy directory's policy.json, its skills checked.
-export async function loadSpec(source) {
-  const res = await fetch(await source('policy.json'));
-  if (!res.ok) throw new Error(`policy.json: ${res.status} ${res.statusText}`);
+// A policy directory's policy.json (or another spec file of it), its skills checked.
+export async function loadSpec(source, file = 'policy.json') {
+  const res = await fetch(await source(file));
+  if (!res.ok) throw new Error(`${file}: ${res.status} ${res.statusText}`);
   const spec = await res.json();
-  if (!spec.skills || !Object.keys(spec.skills).length) throw new Error('policy.json: no skills');
+  if (!spec.skills || !Object.keys(spec.skills).length) throw new Error(`${file}: no skills`);
   return spec;
 }
 

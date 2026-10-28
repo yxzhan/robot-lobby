@@ -105,11 +105,12 @@ def command_vector(d, v):
 
 def observation(spec, parts, commands, command):
   """The observation spec['obs'] lists, from `parts` ({name: () -> values})
-  and the commands (cmd:<name>)."""
+  and the commands (cmd:<name>); zeros, a slot trained with zeros in."""
   out = []
   for name, size in spec['obs']:
     key = name[4:] if name.startswith('cmd:') else None
-    v = command_vector(commands[key], command[key]) if key in commands else np.asarray(parts[name](), float)
+    v = (command_vector(commands[key], command[key]) if key in commands else np.zeros(size) if name == 'zeros'
+         else np.asarray(parts[name](), float))
     if v.size != size:
       raise ValueError(f'observation part {name}: {v.size} values, not {size}')
     out.append(v.ravel())
@@ -125,13 +126,13 @@ SKILL_CONDITIONS = {
 }
 
 
-def load_skills(directory):
+def load_skills(directory, file='policy.json'):
   """(sessions {skill: InferenceSession}, spec): a policy directory's
-  policy.json and the ONNX files of its skills."""
+  policy.json (or another spec file of it) and the ONNX files of its skills."""
   import onnxruntime as ort
-  spec = json.loads((directory / 'policy.json').read_text())
+  spec = json.loads((directory / file).read_text())
   if not spec.get('skills'):
-    raise ValueError(f'{directory / "policy.json"}: no skills')
+    raise ValueError(f'{directory / file}: no skills')
   opts = ort.SessionOptions()
   opts.intra_op_num_threads = 1  # tiny MLPs, many robots: no thread pools
   sessions = {k: ort.InferenceSession(str(directory / s['onnx']), opts, providers=['CPUExecutionProvider'])
@@ -804,8 +805,8 @@ class MicroduckController:
             'skills': self.skills.menu, 'skill': self.skills.want, 'active': self.skills.shown}
 
 
-def load_microduck(directory):
-  return load_skills(directory)
+def load_microduck(directory, file='policy.json'):
+  return load_skills(directory, file)
 
 
 # ---------------------------------------------------------------------------
@@ -827,6 +828,10 @@ POLICIES = [
      'defaultFor': re.compile(r'(^|/)custom/(microduck(_sky|_graphite|_lavender)?)/\2\.xml$'),  # and its colors
      'load': load_microduck,
      'create': lambda policy, prefix: MicroduckController(policy, prefix, 'Microduck policies (Pollen)')},
+    {'id': 'microduck-roller', 'name': 'Roller skating · Microduck (Pollen)', 'dir': 'microduck_official',  # its roller.json
+     'defaultFor': re.compile(r'(^|/)custom/microduck_rollers/microduck_rollers\.xml$'),
+     'load': lambda directory: load_microduck(directory, 'roller.json'),
+     'create': lambda policy, prefix: MicroduckController(policy, prefix, 'Microduck roller policies (Pollen)')},
 ]
 
 _loaded = {}

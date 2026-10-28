@@ -1,7 +1,8 @@
 """Which of Pollen's published Microduck policies (pretrained_policies/
 microduck_official: the Hub's pollen-robotics/microduck-policies) run as
 they are in the lobby: each on the lobby's Microduck (mjcf_assets, the
-groundcontact model) with server/policies.py's MicroduckController (the BAM
+groundcontact model; roller and roller_crouch on the roller-skating one,
+microduck_rollers, as roller.json has them) with server/policies.py's MicroduckController (the BAM
 servo model, as the page has it) in the viewer's default physics, through
 the test its manifest entry asks for; prints what happened.
 
@@ -25,26 +26,28 @@ import policies as POL  # noqa: E402
 OFFICIAL = ROOT / 'pretrained_policies' / 'microduck_official'
 SPEC = OFFICIAL / 'policy.json'  # the obs contract, default pose, BAM
 DUCK = ROOT / 'mjcf_assets' / 'robots' / 'custom' / 'microduck' / 'microduck.xml'
+ROLLER_SPEC = OFFICIAL / 'roller.json'
+ROLLER_DUCK = ROOT / 'mjcf_assets' / 'robots' / 'custom' / 'microduck_rollers' / 'microduck_rollers.xml'
 BALL = ROOT / 'mjcf_assets' / 'objects' / 'custom' / 'microduck_ball' / 'microduck_ball.xml'
 P = 'r/'
 
 
 class Sim:
-  def __init__(self, ball=None):
+  def __init__(self, ball=None, duck=DUCK, spec_file=SPEC):
     spec = mujoco.MjSpec()
     spec.option.timestep = 0.005
     spec.option.integrator = mujoco.mjtIntegrator.mjINT_IMPLICITFAST
     spec.worldbody.add_geom(type=mujoco.mjtGeom.mjGEOM_PLANE, size=[50, 50, 0.1])
-    duck = mujoco.MjSpec.from_file(str(DUCK))
-    spec.worldbody.add_frame().attach_body(duck.worldbody.first_body(), P, '')
+    robot = mujoco.MjSpec.from_file(str(duck))
+    spec.worldbody.add_frame().attach_body(robot.worldbody.first_body(), P, '')
     if ball is not None:
       b = mujoco.MjSpec.from_file(str(BALL))
       spec.worldbody.add_frame(pos=ball).attach_body(b.worldbody.first_body(), 'ball/', '')
     self.m = spec.compile()
     self.d = mujoco.MjData(self.m)
-    nq = mujoco.MjModel.from_xml_path(str(DUCK)).nq
-    self.d.qpos[:nq] = mujoco.MjModel.from_xml_path(str(DUCK)).key_qpos[0]
-    base = json.loads(SPEC.read_text())
+    nq = mujoco.MjModel.from_xml_path(str(duck)).nq
+    self.d.qpos[:nq] = mujoco.MjModel.from_xml_path(str(duck)).key_qpos[0]
+    base = json.loads(spec_file.read_text())
     base['skills'] = {'walk': {'onnx': 'x'}}
     self.sessions = {}
     self.c = POL.MicroduckController(({'walk': None}, base), P)
@@ -209,6 +212,45 @@ def test_roulade():
   return [f'roll (1 s): turned {math.degrees(turn[0]):.0f} deg in all; after it {mid}; velstand 3 s later {s.state()}']
 
 
+def test_roller():
+  s = Sim(duck=ROLLER_DUCK, spec_file=ROLLER_SPEC)
+  s.use('roller')
+  out = []
+
+  def go(seconds, cmd):
+    p0, y0 = s.xy, s.yaw
+    s.run(seconds, cmd)
+    d = s.xy - p0
+    fwd = d[0] * math.cos(y0) + d[1] * math.sin(y0)
+    turned = math.degrees((s.yaw - y0 + math.pi) % (2 * math.pi) - math.pi)
+    out.append(f'{cmd} for {seconds:g} s: {fwd:+.2f} m forward ({fwd / seconds:+.2f} m/s), turned {turned:+.0f} deg, '
+               f'{"ok" if standing(s) else "FELL"} ({s.state()})')
+  go(2.0, [0, 0, 0])
+  go(6.0, [0.3, 0, 0])
+  go(6.0, [0.6, 0, 0])
+  go(3.0, [-0.5, 0, 0])
+  go(4.0, [0.4, 0, 0.5])
+  go(4.0, [0.4, 0, -0.5])
+  return out
+
+
+def test_roller_crouch():
+  s = Sim(duck=ROLLER_DUCK, spec_file=ROLLER_SPEC)
+  s.use('roller')
+  s.run(2.0, [0.4, 0, 0])
+  z0, low = s.z, [1.0]
+
+  def each(s):
+    low[0] = min(low[0], s.z)
+  s.use('roller_crouch', fresh=True)
+  t0 = s.d.time
+  s.run(3.5, lambda t: [math.cos(2 * math.pi * (t - t0) / 5.0), math.sin(2 * math.pi * (t - t0) / 5.0), 0], each)
+  mid = s.state()
+  s.use('roller')
+  s.run(3.0, [0, 0, 0])
+  return [f'crouch (3.5 s): trunk from {z0:.3f} down to {low[0]:.3f} m, after it {mid}; roller 3 s later {s.state()}']
+
+
 TESTS = {
   'velstand': lambda: test_perpetual('velstand'),
   'alpha_walking': lambda: test_perpetual('alpha_walking'),
@@ -218,6 +260,8 @@ TESTS = {
   'ball_kick_right': lambda: test_kick('right'),
   'ball_kick_left': lambda: test_kick('left'),
   'roulade': test_roulade,
+  'roller': test_roller,
+  'roller_crouch': test_roller_crouch,
 }
 
 
@@ -230,7 +274,6 @@ def main():
     for line in TESTS[name]():
       print(f'  {line}')
     sys.stdout.flush()
-  print('roller, roller_crouch: not run (they need the roller Microduck, with wheels, which the library lacks)')
 
 
 if __name__ == '__main__':
