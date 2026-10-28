@@ -29,8 +29,16 @@ succeeds when its goals are reached, fails when one is taken from it, and
 clears its goals when interrupted. Angles in rad, or a string '90deg'.
 
 The world: robots() lists {name, label, drives, pose: {x, y, yaw}, goal,
-arrived} of every spawned thing, pose(name) one's pose, time() the
-simulated time (s).
+arrived} of every spawned thing, pose(name) one's pose, distance(a, b)
+between two, body(name) any body of the world ('r1/ball', or 'ball': the
+first so named) as {x, y, z, yaw, up}, upright(robot) the z of its trunk's
+up axis (1 standing, 0 lying on its side), time() the simulated time (s).
+Acting outside the behaviours: set_goal(robot, x, y, yaw) and stop(robot)
+(its goal marker, as GoTo / Stop do), use_skill(robot, skill, duration=None)
+(a policy skill, e.g. the Microduck's 'kick_right'), reset_world() (the
+toolbar's Reset: everything back to where it was spawned, time back to 0),
+place(robot, x, y, yaw) (a robot on a free joint moved there at once, at
+rest; Reset still puts it where it was spawned, unless spawn=True).
 """
 
 import math
@@ -38,9 +46,10 @@ import math
 import py_trees
 from py_trees.common import Status
 
-import lobby_js  # registered by pybt.js: check, leaf(type, params), robots(), pose(name), time()
+import lobby_js  # registered by pybt.js: check, leaf, robots, pose, time, body, upright, skill, set_goal, stop, reset, place
 
-__all__ = ['GoTo', 'Move', 'Approach', 'Follow', 'Stop', 'Wait', 'robots', 'pose', 'time', 'distance']
+__all__ = ['GoTo', 'Move', 'Approach', 'Follow', 'Stop', 'Wait', 'robots', 'pose', 'time', 'distance',
+           'body', 'upright', 'set_goal', 'stop', 'use_skill', 'reset_world', 'place']
 
 _STATUS = {'running': Status.RUNNING, 'success': Status.SUCCESS, 'failure': Status.FAILURE}
 
@@ -147,6 +156,48 @@ def distance(a, b):
 
 def time():
   return lobby_js.time()
+
+
+def body(name):
+  """{x, y, z, yaw, up} of a body by its name ('r1/ball', or 'ball'), or None."""
+  b = lobby_js.body(str(name))
+  return None if b is None else b.to_py()
+
+
+def upright(robot):
+  """The z of `robot`'s trunk up axis: 1 standing, 0 lying on its side (None: no such robot)."""
+  return lobby_js.upright(str(robot))
+
+
+def set_goal(robot, x, y, yaw=None):
+  """Sends `robot` (a name or a label) to a pose, as its goal marker; yaw: facing the way there if None."""
+  if yaw is None:
+    p = pose(robot)
+    yaw = math.atan2(y - p['y'], x - p['x'])
+  lobby_js.set_goal(str(robot), float(x), float(y), float(yaw))
+
+
+def stop(robot):
+  """Clears `robot`'s goal: it stops where it is."""
+  lobby_js.stop(str(robot))
+
+
+def use_skill(robot, skill, duration=None):
+  """Runs a skill of `robot`'s policy (e.g. 'kick_right'), for `duration` s if given."""
+  lobby_js.skill(str(robot), str(skill), None if duration is None else float(duration))
+
+
+def reset_world():
+  """The toolbar's Reset: every spawned thing back where it was spawned, time back to 0."""
+  lobby_js.reset()
+
+
+def place(robot, x, y, yaw, spawn=False):
+  """Moves `robot` (on a free joint: a walking robot, a ball) to x, y facing
+  yaw, at once and at rest, keeping its height and tilt. Reset still puts it
+  where it was spawned; with spawn=True this is its spawn pose from then on
+  (as the Stage panel's Pose sets it)."""
+  lobby_js.place(str(robot), float(x), float(y), float(yaw), bool(spawn))
 
 
 # ---- for pybt.js ----

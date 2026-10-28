@@ -14,7 +14,7 @@ the model are requests to this server.
 
 Protocol (client -> server, JSON {op, ...}; `rid` asks for a reply):
   spawn {rel, label, pos, yaw}   remove {ids}         move {id, pos, yaw}
-  place {id, pos, quat}          reset {}             reset_robot {id}
+  place {id, pos, quat, spawn?}  reset {}             reset_robot {id}
   pause {paused}                 physics {physics}    qpos {adr, dof, v}
   ctrl {a, v}                    perturb {body, local, target} (body -1: let go)
   ray {eye, dir} -> {body, point} or {body: -1}        ping {t} -> pong {t}
@@ -873,7 +873,7 @@ class World:
     elif op == 'move':
       await self.move_fixed(self.robot(msg['id']), msg['pos'], msg['yaw'])
     elif op == 'place':
-      self.place_free(self.robot(msg['id']), msg['pos'], msg['quat'])
+      self.place_free(self.robot(msg['id']), msg['pos'], msg['quat'], spawn=bool(msg.get('spawn', True)))
       await self.broadcast_meta()
     elif op == 'reset':
       mujoco.mj_resetData(m, d)
@@ -1126,8 +1126,9 @@ class World:
     j = m.body_jntadr[b]
     return j if m.jnt_type[j] == 0 else -1
 
-  def place_free(self, r, pos, quat):
-    """Moves a robot on a free joint, at rest (App.placeFree)."""
+  def place_free(self, r, pos, quat, spawn=True):
+    """Moves a robot on a free joint, at rest (App.placeFree); `spawn`: there
+    from now on also for Reset (and a saved stage)."""
     j = self.root_free_joint(r)
     if j < 0:
       raise ValueError(f'{r.label} has a fixed base')
@@ -1136,13 +1137,14 @@ class World:
     d.qpos[adr:adr + 3] = pos
     d.qpos[adr + 3:adr + 7] = quat
     d.qvel[dof:dof + 6] = 0
-    at = state_layout(self.robots)[r.id]
-    if r.initial is not None:
-      k = adr - at['qpos']
-      r.initial['qpos'][k:k + 7] = d.qpos[adr:adr + 7]
-    w, x, y, z = quat
-    r.pos = [float(v) for v in pos]
-    r.yaw = math.atan2(2 * (w * z + x * y), 1 - 2 * (y * y + z * z))
+    if spawn:
+      at = state_layout(self.robots)[r.id]
+      if r.initial is not None:
+        k = adr - at['qpos']
+        r.initial['qpos'][k:k + 7] = d.qpos[adr:adr + 7]
+      w, x, y, z = quat
+      r.pos = [float(v) for v in pos]
+      r.yaw = math.atan2(2 * (w * z + x * y), 1 - 2 * (y * y + z * z))
     mujoco.mj_forward(m, d)
     self.jumped()
 

@@ -46,6 +46,30 @@ export function loadPython(onProgress) {
       robots: () => (world ? world.goals.list() : []),
       pose: (name) => (world ? context(world.app, world.goals).thing(name)?.pose ?? null : null),
       time: () => world?.app.data?.time ?? 0,
+      body: (name) => bodyState(name),
+      upright: (name) => {
+        const r = robotOf(name);
+        return r ? world.app.data.xmat[9 * r.bodyOffset + 8] : null;
+      },
+      skill: (name, skill, duration) => {
+        const r = robotOf(name);
+        if (!r) throw new Error(`no robot ${name}`);
+        const c = r.use?.policy && r.policy;
+        if (!c?.skillMenu) throw new Error(`${name} has no skills (policy: ${r.use?.policy || 'off'})`);
+        c.setSkill(skill, duration ?? undefined);
+      },
+      set_goal: (name, x, y, yaw) => { world.goals.set(name, { x, y, yaw }); },
+      stop: (name) => { world.goals.clear(name); },
+      reset: () => window.lobby.reset(),
+      place: (name, x, y, yaw, spawn) => {
+        const r = robotOf(name);
+        if (!r) throw new Error(`no robot ${name}`);
+        // Its height and tilt kept, turned about z to `yaw`.
+        const { data } = world.app, b = r.bodyOffset, [w, qx, qy, qz] = data.xquat.subarray(4 * b, 4 * b + 4);
+        const h = (yaw - Math.atan2(2 * (w * qz + qx * qy), 1 - 2 * (qy * qy + qz * qz))) / 2, c = Math.cos(h), s = Math.sin(h);
+        const quat = [c * w - s * qz, c * qx - s * qy, c * qy + s * qx, c * qz + s * w];  // (cos h, 0, 0, sin h) * q
+        if (!world.app.placeFree(r, [x, y, data.xpos[3 * b + 2]], quat, !!spawn)) throw new Error(`${name} has a fixed base`);
+      },
     });
     py.runPython(`
 import sys, types
@@ -59,6 +83,31 @@ import py_trees, lobby
   })();
   loading.catch(() => { loading = null; });  // may try again
   return loading;
+}
+
+// A spawned thing by name (r2) or label (window.lobby's robots).
+const robotOf = (w) => (world ? window.lobby.robots().find((r) => r.prefix.slice(0, -1) === w || r.label === w) ?? null : null);
+
+// {x, y, z, yaw, up} of the world body `name` ('r1/ball', or 'ball': the
+// first body of that name in any model), or null; up: the z of its z axis.
+// Names from the model (in network mode the server's, the same call).
+let bodies = { model: null, ids: new Map() };
+function bodyState(name) {
+  const app = world?.app, m = app?.model, d = app?.data;
+  if (!m || !d) return null;
+  if (bodies.model !== m) bodies = { model: m, ids: new Map() };  // (a rebuilt world: other numbers)
+  let id = bodies.ids.get(name);
+  if (id === undefined) {
+    id = -1;
+    for (let i = 1; i < m.nbody; i++) {
+      const n = app.mujoco.mj_id2name(m, app.mujoco.mjtObj.mjOBJ_BODY.value, i) ?? '';
+      if (n === name || n.endsWith(`/${name}`)) { id = i; break; }
+    }
+    bodies.ids.set(name, id);
+  }
+  if (id < 0) return null;
+  const R = d.xmat.subarray(9 * id, 9 * id + 9);
+  return { x: d.xpos[3 * id], y: d.xpos[3 * id + 1], z: d.xpos[3 * id + 2], yaw: Math.atan2(R[3], R[0]), up: R[8] };
 }
 
 // A syntax error of a Python script: {line, column, message}, or null; null
@@ -145,8 +194,10 @@ export class PyRunner {
     this.status = status;
   }
 
+  // Stops the behaviours running (terminate(INVALID): their goals go).
+  // (BehaviourTree.interrupt() only ends its own tick_tock loop.)
   halt() {
-    try { this.tree?.interrupt(); } catch { /* the world is gone */ }
+    try { this.tree?.root.stop(this.py.pyTrees.common.Status.INVALID); } catch (err) { console.warn('behaviour tree stop:', err); }
   }
 
   // Stops the tree: its running behaviours are interrupted (their goals go).

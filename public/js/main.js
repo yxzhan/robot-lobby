@@ -1161,20 +1161,22 @@ class App {
   }
 
   // Moves a robot on a free joint to `pos` with orientation `quat` (w, x, y,
-  // z), at rest, at once (no rebuild); also its spawn pose (Reset, saved
-  // stage). False for a fixed base.
-  placeFree(robot, pos, quat) {
+  // z), at rest, at once (no rebuild); with `spawn`, also its spawn pose
+  // (Reset, saved stage). False for a fixed base.
+  placeFree(robot, pos, quat, spawn = true) {
     const j = this.rootFreeJoint(robot);
     if (j < 0) return false;
-    if (this.net) { this.net.send('place', { id: robot.netId, pos, quat }); return true; }
+    if (this.net) { this.net.send('place', { id: robot.netId, pos, quat, spawn }); return true; }
     const { mujoco, model, data } = this, adr = model.jnt_qposadr[j], dof = model.jnt_dofadr[j];
     data.qpos.set(pos, adr);
     data.qpos.set(quat, adr + 3);
     data.qvel.fill(0, dof, dof + 6);
-    const at = stateLayout(this.robots).get(robot);
-    if (robot.initial && at) robot.initial.qpos.set(data.qpos.subarray(adr, adr + 7), adr - at.qpos);
-    robot.pos = [...pos];
-    robot.yaw = Math.atan2(2 * (quat[0] * quat[3] + quat[1] * quat[2]), 1 - 2 * (quat[2] * quat[2] + quat[3] * quat[3]));
+    if (spawn) {
+      const at = stateLayout(this.robots).get(robot);
+      if (robot.initial && at) robot.initial.qpos.set(data.qpos.subarray(adr, adr + 7), adr - at.qpos);
+      robot.pos = [...pos];
+      robot.yaw = Math.atan2(2 * (quat[0] * quat[3] + quat[1] * quat[2]), 1 - 2 * (quat[2] * quat[2] + quat[3] * quat[3]));
+    }
     mujoco.mj_forward(model, data);
     this.syncTransforms();
     return true;
