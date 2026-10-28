@@ -8,7 +8,8 @@ browser) trades drawing quality for GPU load, applied at once: **Preset**
 **Resolution** (canvas pixels per CSS pixel, at most the screen's; the
 presets keep the screen's, which on an iPhone 15 made little difference),
 **Anti-alias** (off, FXAA, MSAA 4×; High uses MSAA, Medium FXAA, Low and Ultra low none), **Occlusion** (SSAO off, on at half
-resolution, high at full), **Shadows** (the sun's, on or off: this Filament
+resolution, high at full; a radius of 8 cm, of the order of a Microduck's parts: a larger one darkened a
+halo round every silhouette), **Shadows** (the sun's, on or off: this Filament
 build binds no shadow-map options, so their size is fixed) and **Textures**
 (64, 512, 1024 or 2048 px on the longer side; a change decodes the scene's
 images again, so it can be compared on the spot: a kitchen's 18 textures
@@ -39,6 +40,9 @@ Below the quality settings (`public/js/render.js` too):
 - **Lighting** (`public/js/lighting.js`, saved in this browser like the
   floor): the sun's brightness, azimuth, elevation and color, and the ambient
   (sky) light's brightness, live while a slider moves; Default resets them.
+  The ambient light is brighter from above than from below (spherical
+  harmonics bands 0 and 1: the sky over a darker floor), so a side the sun
+  does not reach (in shadow) still shows its shape rather than one flat grey.
 - **Reflections**: the sky is also the scene's reflection map (IBL), its mip
   levels prefiltered in code for each roughness, so metal and shiny surfaces
   reflect it everywhere (VR and robot cameras included) at no extra cost.

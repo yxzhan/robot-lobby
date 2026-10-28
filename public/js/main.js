@@ -714,8 +714,12 @@ class App {
     this.whiteTexture = uploadTexture(engine, 1, 1, new Uint8Array([255, 255, 255, 255]));
     this.images = new Map();  // image file(s) -> shared texture entry (bindTexture)
 
-    // Sun with shadows + flat-ish ambient (SH band 0 only) so nothing is pitch
-    // black, and the sky's reflections.
+    // Sun with shadows, an ambient light so nothing is pitch black, and the
+    // sky's reflections. The ambient is brighter from above (the sky) than
+    // from below (the floor): SH bands 0 and 1, irradiance c0 + c2 n.z
+    // (Filament takes the coefficients pre-convolved, band 1 in the order y,
+    // z, x; the scene is Z-up), so what the sun does not reach still shows
+    // its shape instead of one flat haze.
     this.sun = Filament.EntityManager.get().create();
     Filament.LightManager.Builder(Filament.LightManager$Type.SUN)
       .color([1.0, 0.97, 0.92])
@@ -726,7 +730,9 @@ class App {
       .build(engine, this.sun);
     this.scene.addEntity(this.sun);
     const sh = new Float32Array(27);
-    sh.set([0.65, 0.7, 0.8], 0);
+    const up = [0.8, 0.85, 0.95], down = [0.32, 0.31, 0.3];
+    sh.set(up.map((u, i) => (u + down[i]) / 2), 0);
+    sh.set(up.map((u, i) => (u - down[i]) / 2), 6);
     // The sky, and its blurred levels as the reflections of shiny surfaces.
     const sky = skyTexture(engine);
     this.skybox = Filament.Skybox.Builder().environment(sky).build(engine);
@@ -928,8 +934,11 @@ class App {
     view.setMultiSampleAntiAliasingOptions({ enabled: samples > 1, sampleCount: samples });
     const high = q.ao === 'high', Q = F.View$QualityLevel;
     view.setAmbientOcclusionOptions({
-      enabled: q.ao !== 'off' && !xr, radius: 0.2,
-      resolution: high ? 1 : 0.5, quality: high ? Q.HIGH : Q.LOW, upsampling: high ? Q.HIGH : Q.LOW,
+      // radius: of the order of a Microduck's parts (a larger one darkens a
+      // halo round every silhouette); upsampling HIGH, else the half
+      // resolution shows as blocks.
+      enabled: q.ao !== 'off' && !xr, radius: 0.08, bilateralThreshold: 0.02,
+      resolution: high ? 1 : 0.5, quality: high ? Q.HIGH : Q.MEDIUM, upsampling: Q.HIGH,
     });
     // Screen-space reflections (shiny floors mirror the robots): off in VR,
     // like SSAO, for the same reason.
