@@ -4,7 +4,8 @@
 # ones the -x goal (in the pitch's own frame, however it is placed). In each
 # team the duck nearest the ball attacks: it lines up behind the ball for a
 # kick with the nearer foot (the ball in front of that toe, where the kick was
-# trained) and kicks it on, or walks through it when it cannot get close
+# trained), coming at it from behind, stops, and kicks it on (from a stand:
+# a kick started mid-stride does not lift the foot), or walks through it when it cannot get close
 # enough; of the other two the one nearer its own goal defends (between that
 # goal and the ball) and the other supports (behind the ball, to one side).
 # A duck that falls gets back up by itself (velstand). A referee scores goals
@@ -46,13 +47,18 @@ KICKS = {
     "kick_right": ((0.095, -0.042), math.radians(-7)),
     "kick_left": ((0.095, 0.042), math.radians(9)),
 }
-KICK_TOL = (0.04, 0.015)           # how far from the ball spot it still kicks (m, forward / sideways)
+KICK_TOL = (0.03, 0.015, 0.015)    # how far from the ball spot it still kicks (m: the ball nearer / farther
+                                   # than its spot, sideways); 2.5 cm farther, a kick after walking misses
 KICK_YAW_TOL = 0.2                 # rad off the kick heading
 KICK_REST = 1.5                    # s (simulated) after a kick (0.5 s) before the next
-KICK_LEAD = 0.035                  # m: the goal set past the kick spot (a goal counts as reached 6 cm short)
+KICK_SET = 0.3                     # s (simulated) stopped on the spot before kicking: a kick started while
+                                   # walking does not lift the foot (0.1 s does not do, 0.3 s does)
+KICK_LEAD = 0.06                   # m: the goal set past the kick spot (a goal counts as reached 6 cm short)
 LINE_UP_NEAR = 0.35                # m from the kick spot: closer, it lines up on the spot itself (back out past
 LINE_UP_FAR = 0.50                 # this); farther, it first walks to a point APPROACH_BACK behind the spot
 APPROACH_BACK = 0.25               # on the kick line, so it comes at the ball from behind
+LINE_UP_YAW = 0.5                  # rad: it lines up only facing the kick heading this nearly, from behind the
+                                   # spot (within 45 deg of the kick line), else it goes to the approach point
 SETTLE = 2.0                       # s lining up close to the ball (within STUCK_NEAR) without a kick: walk
 STUCK_NEAR = 0.20                  # through the ball instead (m; at the kick spot the ball is ~0.10 m off)
 OUT_TIME = 0.3                     # s the ball must stay out (or in the goal)
@@ -120,6 +126,7 @@ class Player(py_trees.behaviour.Behaviour):
         self.kicked = None      # simulated time of the last kick
         self.at_spot = None     # since when it has been lining up close to the ball
         self.foot = None        # the kick it lines up for (KICKS), kept until it kicks or goes round
+        self.set_at = None      # simulated time it stopped on the spot to kick (self.foot)
 
     def update(self):
         f, ducks = pitch(), team(self.label)
@@ -129,10 +136,10 @@ class Player(py_trees.behaviour.Behaviour):
         me = ducks[self.index]
         name, t = me["name"], lobby.time()
         if kickoff["placing"]:
-            self.last = self.foot = None
+            self.last = self.foot = self.set_at = None
             self.feedback_message = "kick-off"
             return Status.RUNNING
-        for k in ("kicked", "at_spot"):  # time went back (Reset): forget
+        for k in ("kicked", "at_spot", "set_at"):  # time went back (Reset): forget
             if getattr(self, k) is not None and t < getattr(self, k):
                 setattr(self, k, None)
         if self.kicked is not None and t - self.kicked < KICK_REST:
@@ -148,6 +155,7 @@ class Player(py_trees.behaviour.Behaviour):
         attack_yaw = math.atan2(uy, ux)
         role = roles(self.label, self.sign, fr, bx, by).get(name, "support")
         if role != "attack":
+            self.set_at = None
             return self.position(name, role, fr, me, bx, by, ux, uy, attack_yaw)
         # Each kick's spot: facing so that the ball (with that kick's veer) runs
         # at the goal, the ball at its spot in front of the toe.
@@ -159,12 +167,24 @@ class Player(py_trees.behaviour.Behaviour):
         # The ball in the duck's own frame: kick when it is where a kick wants it.
         c, s = math.cos(myaw), math.sin(myaw)
         fwd, side = c * (bx - mx) + s * (by - my), -s * (bx - mx) + c * (by - my)
-        for foot, (_, _, face, ax, ay) in spots.items():
-            if abs(fwd - ax) < KICK_TOL[0] and abs(side - ay) < KICK_TOL[1] and abs(wrap(myaw - face)) < KICK_YAW_TOL:
-                lobby.stop(name)
+        on_spot = lambda foot: (-KICK_TOL[0] < fwd - spots[foot][3] < KICK_TOL[1] and abs(side - spots[foot][4]) < KICK_TOL[2]
+                                and abs(wrap(myaw - spots[foot][2])) < KICK_YAW_TOL)
+        if self.set_at is not None:  # stopped on the spot: kick once it stands, if still there
+            if t - self.set_at < KICK_SET:
+                self.feedback_message = "set " + self.foot
+                return Status.RUNNING
+            foot, self.set_at = self.foot, None
+            if on_spot(foot):
                 lobby.use_skill(name, foot)
                 self.kicked, self.at_spot, self.last, self.foot = t, None, None, None
                 self.feedback_message = "KICK " + foot
+                return Status.RUNNING
+        else:
+            foot = next((f for f in spots if on_spot(f)), None)
+            if foot is not None:
+                lobby.stop(name)
+                self.set_at, self.foot, self.last = t, foot, None
+                self.feedback_message = "set " + foot
                 return Status.RUNNING
         if self.foot is None:  # line up for the foot whose spot is nearer
             self.foot = min(spots, key=lambda f: math.hypot(mx - spots[f][0], my - spots[f][1]))
@@ -187,7 +207,10 @@ class Player(py_trees.behaviour.Behaviour):
             tx, ty, mode, yaw = bx + ux * PUSH, by + uy * PUSH, "push", attack_yaw  # not close enough to kick: walk through
         else:                                   # behind the ball: to the kick line, then the kick spot
             lined = self.last is not None and self.last[2].startswith("line up")
-            if spot > (LINE_UP_FAR if lined else LINE_UP_NEAR):
+            back = -((mx - sx) * cf + (my - sy) * sf)        # how far behind the spot, along the kick heading
+            lat = abs(-(mx - sx) * sf + (my - sy) * cf)      # and off the kick line
+            behind = lat < max(0.08, back) and abs(wrap(myaw - face)) < (1.6 if lined else 1.0) * LINE_UP_YAW
+            if spot > (LINE_UP_FAR if lined else LINE_UP_NEAR) or not behind:
                 tx, ty, mode, yaw = sx - cf * APPROACH_BACK, sy - sf * APPROACH_BACK, "approach", face
             else:
                 tx, ty, mode, yaw = sx + cf * KICK_LEAD, sy + sf * KICK_LEAD, "line up " + self.foot.split("_")[1], face
