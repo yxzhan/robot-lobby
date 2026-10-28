@@ -13,7 +13,7 @@ const WHEEL = 'py_trees-2.6.0-py2.py3-none-any.whl';
 const LOBBY = new URL('../py/lobby.py', import.meta.url);
 
 let loading = null;
-let world = null;  // {app, goals}: what the lobby module's leaves drive
+let world = null;  // {app, goals, confirm}: what the lobby module's leaves drive
 
 // Pyodide with py_trees and lobby (once; later calls get the same).
 export function loadPython(onProgress) {
@@ -60,7 +60,37 @@ export function loadPython(onProgress) {
       },
       set_goal: (name, x, y, yaw) => { world.goals.set(name, { x, y, yaw }); },
       stop: (name) => { world.goals.clear(name); },
-      reset: () => window.lobby.reset(),
+      reset: () => { ask('The behaviour tree wants to reset the scene.'); window.lobby.reset(); },
+      search: (query, category) => window.lobby.search(query, category || null),
+      remove: (names) => {
+        const list = String(names).split(',').map((n) => robotOf(n) ?? fail(`no robot ${n}`));
+        if (!list.length) return;
+        ask(`The behaviour tree wants to remove ${list.map((r) => r.prefix.slice(0, -1)).join(', ')}.`);
+        window.lobby.remove(list).catch((err) => console.warn('remove:', err));
+      },
+      clear: () => {
+        const list = window.lobby.robots();
+        if (!list.length) return;
+        ask(`The behaviour tree wants to remove all ${list.length} spawned models.`);
+        window.lobby.remove(list).catch((err) => console.warn('clear:', err));
+      },
+      pause: () => { window.lobby.setPaused(true).catch((err) => console.warn('pause:', err)); },
+      physics: (changes) => {
+        const c = plain(changes);
+        if (Object.keys(c).length) window.lobby.setPhysics(c).catch((err) => console.warn('physics:', err));
+        return structuredClone(world.app.physics);
+      },
+      set_controller: (name, kind, on, policy) => {
+        const r = robotOf(name) ?? fail(`no robot ${name}`);
+        if (!['policy', 'base', 'ik'].includes(kind)) fail(`no controller ${kind} (policy, base, ik)`);
+        window.lobby.setController(r, kind, on, policy || undefined).catch((err) => console.warn('set_controller:', err));
+      },
+      controllers: (name) => {
+        const r = robotOf(name);
+        if (!r) return null;
+        const c = r.use?.policy && r.policy, menu = c?.skillMenu;
+        return { policy: r.use?.policy || undefined, base: !!r.use?.base, ik: !!r.use?.ik, skills: menu ? [...menu.manual] : [] };
+      },
       place: (name, x, y, yaw, spawn, pitch, z) => {
         const r = robotOf(name);
         if (!r) throw new Error(`no robot ${name}`);
@@ -81,15 +111,15 @@ export function loadPython(onProgress) {
         if (!at) throw new Error(`no body ${name}`);
         if (!world.app.placeBody(at.name, [x, y, z ?? at.z])) throw new Error(`${name} is not on a free joint of its own`);
       },
-      spawn: (model, x, y, yaw) => {
+      spawn: (model, x, y, yaw, z) => {
         const asset = window.lobby.assets().find((a) => a.rel === model || a.name === model);
         if (!asset) throw new Error(`no model ${model} in the library`);
-        window.lobby.spawn(asset.rel, [x, y, 0], yaw).catch((err) => console.warn('spawn:', err));  // (it takes a moment)
+        window.lobby.spawn(asset.rel, [x, y, z ?? 0], yaw).catch((err) => console.warn('spawn:', err));  // (it takes a moment)
       },
       set_policy: (name, id) => {
         const r = robotOf(name);
         if (!r) throw new Error(`no robot ${name}`);
-        world.app.setUse(r, 'policy', id || '').then(() => world.app.teleop?.build?.()).catch((err) => console.warn('set_policy:', err));
+        window.lobby.setController(r, 'policy', !!id, id || undefined).catch((err) => console.warn('set_policy:', err));
       },
       policy: (name) => robotOf(name)?.use?.policy || null,
       active_skill: (name) => {
@@ -110,6 +140,11 @@ import py_trees, lobby
   loading.catch(() => { loading = null; });  // may try again
   return loading;
 }
+
+const fail = (msg) => { throw new Error(msg); };
+// Asks the user first when the tree's starter wants that (the Agent's trees);
+// declined: an error, the tree fails.
+const ask = (what) => { if (world?.confirm && !world.confirm(what)) fail('the user declined'); };
 
 // A spawned thing by name (r2) or label (window.lobby's robots).
 const robotOf = (w) => (world ? window.lobby.robots().find((r) => r.prefix.slice(0, -1) === w || r.label === w) ?? null : null);
@@ -160,16 +195,17 @@ const STATUS = { running: RUNNING, success: SUCCESS, failure: FAILURE, invalid: 
 
 export class PyRunner {
   // Runs `source` with Pyodide `py` on app / goals; `onTick(runner)` after each tick.
-  constructor(py, source, { app, goals, onTick }) {
+  constructor(py, source, { app, goals, confirm, onTick }) {
     this.py = py;
     this.app = app;
     this.goals = goals;
+    this.confirm = confirm;
     this.onTick = onTick;
     this.status = RUNNING;
     this.error = null;
     this.errorLine = null;
     this.start = null;
-    world = { app, goals };
+    world = { app, goals, confirm };
     const scope = py.globals.get('dict')();
     try {
       py.runPython(source, { globals: scope, filename: '<tree>' });
@@ -201,7 +237,7 @@ export class PyRunner {
   step() {
     if (this.status !== RUNNING || this.app.paused || !this.app.data || !due(this, this.app.data.time)) return;
     try {
-      world = { app: this.app, goals: this.goals };
+      world = { app: this.app, goals: this.goals, confirm: this.confirm };
       const time = this.app.data.time;
       this.start ??= time;
       if (time < this.start) this.start = time;

@@ -17,7 +17,7 @@ import loadMujoco from '../vendor/mujoco/mujoco.js';
 import { loadModelFiles, readFirst, urlSource } from './vfs.js';
 import { bodyInertia, compileWorld, firstKey, referencedNames } from './world.js';
 import { CONTROL_DT } from './groot.js';
-import { defaultPolicy, loadPolicy, loadPolicyIndex, policyById, policyId } from './policy.js';
+import { POLICIES, defaultPolicy, isInstalled, loadPolicy, loadPolicyIndex, policyById, policyId } from './policy.js';
 import { Perturb, StagePanel } from './inspect.js';
 import { AssetPanel, loadAssets, loadRecent } from './assets.js';
 import { AxisGizmo } from './gizmo.js';
@@ -2651,10 +2651,20 @@ try {
       await new Promise((r) => setTimeout(r, 100));
     }
   };
+  const PHYSICS_KEYS = ['gravity', 'wind', 'magnetic', 'density', 'viscosity', 'impratio', 'cone', 'noslip_iterations', 'noslip_tolerance',
+    'integrator', 'solver', 'iterations', 'tolerance', 'timestep', 'speed', 'sleep'];
   window.lobby = {
     assets: () => assets,
     robots: () => robots,
     busy: () => busy || !busyEl.hidden,
+    // Library models whose name, group, source or path has every word of
+    // `query` (case-insensitive; empty: all), of `category` if given.
+    search(query, category) {
+      const words = String(query ?? '').toLowerCase().split(/\s+/).filter(Boolean);
+      return assets.filter((a) => (!category || a.category === category)
+        && words.every((w) => `${a.name} ${a.group} ${a.source} ${a.rel}`.toLowerCase().includes(w)))
+        .map(({ rel, name, category: c, source, group }) => ({ rel, name, category: c, source, group }));
+    },
     // Spawns library model `rel` at [x, y, z], turned `yaw`: the new robot.
     async spawn(rel, pos, yaw = 0) {
       const asset = assets.find((a) => a.rel === rel);
@@ -2677,6 +2687,33 @@ try {
       await settled(() => !!app.paused === !!paused, 10);
     },
     capture: (size) => app.capture(size),
+    // The Physics panel's options changed by `changes` ({gravity: [0, 0, -1.6], speed: 2}…).
+    async setPhysics(changes) {
+      const bad = Object.keys(changes).filter((k) => !PHYSICS_KEYS.includes(k));
+      if (bad.length) throw new Error(`not a physics option: ${bad.join(', ')} (${PHYSICS_KEYS.join(', ')})`);
+      await app.setPhysics({ ...structuredClone(app.physics), ...changes });
+      app.world?.render();
+    },
+    // A controller of robot `r` on or off, as the Teleop panel's chips:
+    // kind 'policy' (on: `policy`, else the robot's own), 'base' or 'ik'.
+    // One robot's switches run one after the other (a policy loading while
+    // the next switch starts would bind the wrong one).
+    setController(r, kind, on, policy) {
+      const run = () => this.switchController(r, kind, on, policy);
+      r.switching = (r.switching ?? Promise.resolve()).then(run, run);
+      return r.switching;
+    },
+    async switchController(r, kind, on, policy) {
+      if (!['policy', 'base', 'ik'].includes(kind)) throw new Error(`no controller ${kind} (policy, base, ik)`);
+      if (!r.use && !app.net) throw new Error(`${r.prefix.slice(0, -1)} has no controllers`);
+      let value = !!on;
+      if (kind === 'policy') {
+        value = on ? policy || defaultPolicy(r.key) || r.lastPolicy || POLICIES.find(isInstalled)?.id : '';
+        if (on && !POLICIES.some((p) => p.id === value)) throw new Error(`no policy ${value}`);
+      }
+      await app.setUse(r, kind, value);
+      app.teleop?.build?.();
+    },
   };
 
   // Goal markers from a script (the devtools console, page automation), as

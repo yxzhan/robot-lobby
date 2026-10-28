@@ -104,9 +104,12 @@ Goals can also come from a script, for several robots at once:
   some 13 MB loaded the first time Python is picked), with the
   `lobby` module (`public/py/lobby.py`) for the robots: behaviours `GoTo`,
   `Move`, `Approach`, `Follow`, `Stop` (the moves above) and `Wait`
-  (simulated time; py_trees' own `Timer` counts wall time), and
-  `robots()`, `pose(name)`, `distance(a, b)`, `time()` for conditions of
-  one's own. The script defines `root` (a behaviour) or `tree` (a
+  (simulated time; py_trees' own `Timer` counts wall time),
+  `robots()`, `pose(name)`, `distance(a, b)`, `body(name)`, `time()` for
+  conditions of one's own, and what the panels do: `spawn`, `remove`,
+  `clear_world`, `reset_world`, `pause`, `place`, `place_body`, `models`
+  (the library), `physics`, `set_controller` / `controllers`,
+  `use_skill` (its docstring lists them all). The script defines `root` (a behaviour) or `tree` (a
   `BehaviourTree`):
 
   ```python

@@ -134,7 +134,8 @@ export class BehaviorPanel {
       .catch((err) => console.warn('behaviour tree examples:', err));
 
     window.bt = {
-      run: (t, format = this.format) => { if (t != null) this.setText(t, format); return this.run(); },
+      // confirm(what): asked before the tree removes or resets (the Agent's trees).
+      run: (t, format = this.format, { confirm } = {}) => { if (t != null) this.setText(t, format); return this.run({ confirm }); },
       stop: () => this.stop(),
       status: () => this.runner && {
         status: this.runner.status, error: this.runner.error, time: this.runner.time,
@@ -233,10 +234,10 @@ export class BehaviorPanel {
 
   // Starts the editor's tree (stopping one that runs); false if it does not
   // parse (a Python one: once Python is loaded).
-  async run() {
+  async run({ confirm } = {}) {
     this.runner?.stop();
     this.runner = null;
-    const source = this.editor.value, opts = { app: this.app, goals: this.goals, onTick: () => this.update() };
+    const source = this.editor.value, opts = { app: this.app, goals: this.goals, confirm, onTick: () => this.update() };
     this.error = null;
     if (this.format === 'python') {
       this.wantPython();

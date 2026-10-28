@@ -37,15 +37,25 @@ Acting outside the behaviours: set_goal(robot, x, y, yaw) and stop(robot)
 (its goal marker, as GoTo / Stop do), use_skill(robot, skill, duration=None)
 (a policy skill, e.g. the Microduck's 'kick_right'), reset_world() (the
 toolbar's Reset: everything back to where it was spawned, time back to 0),
+remove(robot) and clear_world() (removed: those, or everything spawned;
+names start again at r1 once nothing is left), pause() (the simulation,
+and with it this tree: only the Pause button or the Agent resumes it),
 place(robot, x, y, yaw) (a robot on a free joint moved there at once, at
 rest; Reset still puts it where it was spawned, unless spawn=True; with
 pitch=+-pi/2 and z: lying on its face / back), set_policy(robot, id)
 (its walking policy, as the Teleop panel's Model; policy(robot) the one
-on), active_skill(robot) (the policy skill running, e.g. 'walk'),
+on), set_controller(robot, kind, on, policy=None) (kind 'policy', 'base'
+or 'ik', as the Teleop panel's chips), controllers(robot) ({policy, base,
+ik, skills}), active_skill(robot) (the policy skill running, e.g. 'walk'),
 place_body(name, x, y) (a body on a free joint of its own, e.g. a ball in
-an environment's model, moved there at rest), spawn(model, x, y, yaw) (a
-model of the library, by name or path: it appears a moment later, its
-default controllers on).
+an environment's model, moved there at rest), spawn(model, x, y, yaw, z=0) (a
+model of the library, by name or path, at height z: it appears a moment
+later, its default controllers on), models(query='', category=None) (the
+library: [{rel, name, category, source, group}] whose names have the
+words), physics(**changes) (the Physics panel's options: gravity=[0, 0,
+-1.6], speed=2, timestep, wind…; returns them).
+Removing and resetting ask the user first in a tree the Agent runs (while
+its "Ask before removing or resetting" is on); declined, the tree fails.
 """
 
 import math
@@ -53,11 +63,12 @@ import math
 import py_trees
 from py_trees.common import Status
 
-import lobby_js  # registered by pybt.js: check, leaf, robots, pose, time, body, upright, skill, set_goal, stop, reset, place
+import lobby_js  # registered by pybt.js
 
 __all__ = ['GoTo', 'Move', 'Approach', 'Follow', 'Stop', 'Wait', 'robots', 'pose', 'time', 'distance',
            'body', 'upright', 'set_goal', 'stop', 'use_skill', 'reset_world', 'place', 'set_policy', 'policy',
-           'active_skill', 'place_body', 'spawn']
+           'active_skill', 'place_body', 'spawn', 'models', 'remove', 'clear_world', 'pause', 'physics',
+           'set_controller', 'controllers']
 
 _STATUS = {'running': Status.RUNNING, 'success': Status.SUCCESS, 'failure': Status.FAILURE}
 
@@ -219,11 +230,60 @@ def place_body(name, x, y, z=None):
   lobby_js.place_body(str(name), float(x), float(y), None if z is None else float(z))
 
 
-def spawn(model, x, y, yaw=0.0):
+def spawn(model, x, y, yaw=0.0, z=0.0):
   """Spawns a model of the library (its name, 'microduck_graphite', or its path)
-  standing on the floor at x, y, turned yaw. It takes a moment (the world is
+  at x, y, turned yaw: standing on the floor, or its base at height z (m). It takes a moment (the world is
   rebuilt): wait until robots() lists it."""
-  lobby_js.spawn(str(model), float(x), float(y), float(yaw))
+  lobby_js.spawn(str(model), float(x), float(y), float(yaw), float(z))
+
+
+def models(query='', category=None):
+  """Library models whose name, group, source or path has every word of
+  `query` (case-insensitive; '': all), of `category` ('robot', 'object',
+  'environment') if given: [{rel (what spawn takes), name, category, source, group}]."""
+  return lobby_js.search(str(query), category and str(category)).to_py()
+
+
+def remove(robot):
+  """Removes spawned things: a name ('r3'), a label (every one of it) or a
+  list. It takes a moment (the world is rebuilt): robots() lists them
+  until then."""
+  lobby_js.remove(_robots_arg(robot))
+
+
+def clear_world():
+  """Removes everything spawned (the toolbar's Clear); names start again at r1."""
+  lobby_js.clear()
+
+
+def pause():
+  """Pauses the simulation; this tree stops being ticked with it (only the
+  Pause button or the Agent resumes it)."""
+  lobby_js.pause()
+
+
+def physics(**changes):
+  """The Physics panel's options, changed by `changes` if any (gravity=[x, y, z]
+  m/s^2, wind=[x, y, z], timestep (s), speed (simulated s per wall s; 0: as
+  fast as it goes), integrator ('Euler', 'RK4', 'implicit',
+  'implicitfast'), density, viscosity, noslip_iterations…; a new timestep
+  or integrator rebuilds the world). Returns them."""
+  out = lobby_js.physics(changes)
+  return out.to_py() if hasattr(out, 'to_py') else out
+
+
+def set_controller(robot, kind, on=True, policy=None):
+  """Switches a controller of `robot` on or off, as the Teleop panel's chips:
+  kind 'policy' (on: `policy`, an id, else the robot's own), 'base' (a
+  mobile base) or 'ik' (IK chains for arms). It takes a moment."""
+  lobby_js.set_controller(str(robot), str(kind), bool(on), None if policy is None else str(policy))
+
+
+def controllers(robot):
+  """{policy (its id, or None), base, ik (on or not), skills (the policy's,
+  for use_skill)} of `robot`, or None (no such robot)."""
+  c = lobby_js.controllers(str(robot))
+  return None if c is None else c.to_py()
 
 
 def set_policy(robot, policy_id):

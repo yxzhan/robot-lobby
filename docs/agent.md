@@ -19,9 +19,11 @@ menu picks who answers:
   account); it is kept in this browser's localStorage and sent only to
   api.anthropic.com, **Forget key** removes it. There is no sign-in in the
   page: the Claude Platform's OAuth login is for Anthropic's own tools
-  (`ant auth login`, Claude Code), not for a web page. Model: Claude Opus
-  5.5 (default), Sonnet 5.5 or Haiku 5.5; effort low, medium (default) or
-  high. Requests ask for adaptive thinking with summaries, prompt caching,
+  (`ant auth login`, Claude Code), not for a web page. Model: those the
+  key can use, from the Models API (`GET /v1/models`, newest first, ↻
+  asks again), that think adaptively; effort: the levels the model takes
+  (low … max, medium by default). Until the list comes, or if it fails:
+  Claude Opus 5.5, Sonnet 5.5 or Haiku 5.5, effort low, medium or high. Requests ask for adaptive thinking with summaries, prompt caching,
   and the API's default fallback model when a request is declined (not for
   Haiku).
 - **Ollama**: a model of an [Ollama](https://ollama.com) server, by default
@@ -62,7 +64,11 @@ The tools (`tools()` in `agent.js`):
 | `set_view`, `screenshot` | the main camera's orbit; a 640 px picture of the view, sent to the model as an image |
 
 `remove`, `clear_scene` and `reset_scene` ask in a dialog first while
-**Ask before removing or resetting** is on. **Stop** ends a turn (the tool
+**Ask before removing or resetting** is on, and so do `lobby.remove`,
+`clear_world` and `reset_world` in a tree the agent runs (declined: the
+tree fails); a tree started from the Behavior panel does not ask. A tree
+can do all the tools do but the view and the picture (and resume a pause:
+a paused tree is not ticked). **Stop** ends a turn (the tool
 running finishes or gives up; a `wait` stops at once); **New chat** forgets
 the conversation. A turn makes at most 40 requests.
 

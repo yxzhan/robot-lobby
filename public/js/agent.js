@@ -15,7 +15,7 @@
 // remove things (remove, clear_scene, reset_scene) ask first while "Ask
 // before removing" is on.
 
-import { POLICIES, defaultPolicy, isInstalled } from './policy.js';
+import { POLICIES } from './policy.js';
 import { setView, viewOf } from './stage.js';
 
 const el = (tag, props = {}, ...children) => {
@@ -25,8 +25,10 @@ const el = (tag, props = {}, ...children) => {
 };
 
 const PROVIDERS = [['claude', 'Claude'], ['ollama', 'Ollama']];
-const CLAUDE_MODELS = [['claude-opus-5-5', 'Claude Opus 5.5'], ['claude-sonnet-5-5', 'Claude Sonnet 5.5'], ['claude-haiku-5-5', 'Claude Haiku 5.5']];
-const EFFORTS = ['low', 'medium', 'high'];
+// The Claude models until the Models API has listed the key's (claudeModels).
+const CLAUDE_MODELS = [['claude-opus-5-5', 'Claude Opus 5.5'], ['claude-sonnet-5-5', 'Claude Sonnet 5.5'], ['claude-haiku-5-5', 'Claude Haiku 5.5']]
+  .map(([id, name]) => ({ id, name, efforts: ['low', 'medium', 'high'] }));
+const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
 const SETTINGS = 'mujoco-filament/agent';      // localStorage: {provider, model, effort, ask, ollamaUrl, ollamaModel}
 const KEY = 'mujoco-filament/anthropic-key';   // localStorage: the Claude API key
 const OLLAMA_URL = 'http://localhost:11434';
@@ -119,22 +121,21 @@ function tools(agent) {
         required: ['query'],
       },
     }, ({ query, category, limit = 20 }) => {
-      const words = String(query).toLowerCase().split(/\s+/).filter(Boolean);
-      const hits = lobby().assets().filter((a) => (!category || a.category === category)
-        && words.every((w) => `${a.name} ${a.group} ${a.source} ${a.rel}`.toLowerCase().includes(w)));
-      return { count: hits.length, models: hits.slice(0, limit).map(({ rel, name, category: c, source, group }) => ({ rel, name, category: c, source, group })) };
+      const hits = lobby().search(query, category);
+      return { count: hits.length, models: hits.slice(0, limit) };
     }],
 
     [{
       name: 'spawn',
-      description: 'Spawns a library model (its rel from search_assets) standing on the floor at x, y, turned yaw. Returns the new thing as get_world_state lists it. Takes a few seconds (the world is rebuilt).',
+      description: 'Spawns a library model (its rel from search_assets) at x, y, turned yaw: standing on the floor, or with z its base that high (m: on a table, a shelf). Returns the new thing as get_world_state lists it. Takes a few seconds (the world is rebuilt).',
       input_schema: {
         type: 'object',
-        properties: { rel: { type: 'string' }, x: { type: 'number' }, y: { type: 'number' }, yaw: { type: 'number', description: 'rad, default 0' } },
+        properties: { rel: { type: 'string' }, x: { type: 'number' }, y: { type: 'number' }, yaw: { type: 'number', description: 'rad, default 0' },
+          z: { type: 'number', description: 'm, default 0 (the floor)' } },
         required: ['rel', 'x', 'y'],
       },
-    }, async ({ rel, x, y, yaw = 0 }) => {
-      const r = await lobby().spawn(rel, [num(x, 'x'), num(y, 'y'), 0], num(yaw, 'yaw'));
+    }, async ({ rel, x, y, yaw = 0, z = 0 }) => {
+      const r = await lobby().spawn(rel, [num(x, 'x'), num(y, 'y'), num(z, 'z')], num(yaw, 'yaw'));
       await sleep(300);
       return state().things.find((t) => t.name === r.prefix.slice(0, -1)) ?? { spawned: r.prefix.slice(0, -1) };
     }],
@@ -191,14 +192,7 @@ function tools(agent) {
       },
     }, async ({ robot, kind, on, policy }) => {
       const r = robotOf(robot);
-      if (!r.use && !app.net) throw new Error(`${robot} has no controllers`);
-      let value = on;
-      if (kind === 'policy') {
-        value = on ? policy || defaultPolicy(r.key) || r.lastPolicy || POLICIES.find(isInstalled)?.id : '';
-        if (on && !POLICIES.some((p) => p.id === value)) throw new Error(`no policy ${value}`);
-      }
-      await app.setUse(r, kind, value);
-      app.teleop.build?.();
+      await lobby().setController(r, kind, on, policy);
       await sleep(app.net ? 800 : 100);
       return state().things.find((t) => t.name === r.prefix.slice(0, -1));
     }],
@@ -282,7 +276,7 @@ function tools(agent) {
       description: `Runs a behaviour tree in the Behavior panel (replacing one that runs): a py_trees 2.6 script (Python, in the page) that defines \`root\` (a behaviour) or \`tree\` (a BehaviourTree). Ticked every 0.1 s of simulated time while the simulation runs; check it with behavior_tree_status. The lobby module:\n\n${agent.lobbyDoc}`,
       input_schema: { type: 'object', properties: { script: { type: 'string' } }, required: ['script'] },
     }, async ({ script }) => {
-      await window.bt.run(script, 'python');
+      await window.bt.run(script, 'python', { confirm: (what) => agent.confirm(what) });  // (its removing and resetting ask too)
       await sleep(600);
       return window.bt.status() ?? { status: 'not started' };
     }],
@@ -304,11 +298,7 @@ function tools(agent) {
       description: 'Changes physics options (the Physics panel): gravity [x, y, z] (m/s²), timestep (s, 0.0001-0.05), speed (simulated per wall second; 0: as fast as it goes), noslip_iterations, integrator (Euler, RK4, implicit, implicitfast), density and viscosity of the medium, wind [x, y, z]. Returns the physics now.',
       input_schema: { type: 'object', properties: { changes: { type: 'object' } }, required: ['changes'] },
     }, async ({ changes }) => {
-      const allowed = ['gravity', 'wind', 'magnetic', 'density', 'viscosity', 'impratio', 'cone', 'noslip_iterations', 'noslip_tolerance', 'integrator', 'solver', 'iterations', 'tolerance', 'timestep', 'speed', 'sleep'];
-      const bad = Object.keys(changes).filter((k) => !allowed.includes(k));
-      if (bad.length) throw new Error(`not a physics option: ${bad.join(', ')} (${allowed.join(', ')})`);
-      await app.setPhysics({ ...structuredClone(app.physics), ...changes });
-      app.world?.render();
+      await lobby().setPhysics(changes);
       return Object.fromEntries(Object.keys(changes).map((k) => [k, app.physics[k]]));
     }],
 
@@ -356,6 +346,21 @@ function tools(agent) {
 // The Anthropic SDK (bundled; loaded on first use).
 let sdk = null;
 const anthropicSdk = () => (sdk ??= import('../vendor/anthropic/anthropic.mjs').then((m) => m.default));
+
+// The Claude models this key can use (the Models API, newest first) that
+// think adaptively (as claudeTurn asks), each with the efforts it takes.
+async function claudeModels(key) {
+  const Anthropic = await anthropicSdk();
+  const client = new Anthropic({ apiKey: key, dangerouslyAllowBrowser: true });
+  const out = [];
+  for await (const m of client.models.list({ limit: 100 })) {
+    const caps = m.capabilities;
+    if (caps && !caps.thinking?.types?.adaptive?.supported) continue;
+    const efforts = caps?.effort ? EFFORTS.filter((e) => caps.effort[e]?.supported) : [];
+    out.push({ id: m.id, name: m.display_name || m.id, efforts: efforts.length ? efforts : ['low', 'medium', 'high'] });
+  }
+  return out;
+}
 
 // A Claude API request: the reply message (content blocks, stop_reason, usage).
 async function claudeTurn({ key, model, effort, system, tools: defs, messages, signal }) {
@@ -448,9 +453,10 @@ export class AgentPanel {
     this.running = null;     // {abort: AbortController} while a turn runs
     this.lobbyDoc = '';
     this.ollama = { models: [], info: null, error: null };  // what the Ollama server has
+    this.claude = { models: CLAUDE_MODELS, error: null };   // what the key can use
     let saved = {};
     try { saved = JSON.parse(localStorage.getItem(SETTINGS)) ?? {}; } catch { /* none */ }
-    this.settings = { provider: 'claude', model: CLAUDE_MODELS[0][0], effort: 'medium', ask: true, ollamaUrl: OLLAMA_URL, ollamaModel: '', ...saved };
+    this.settings = { provider: 'claude', model: CLAUDE_MODELS[0].id, effort: 'medium', ask: true, ollamaUrl: OLLAMA_URL, ollamaModel: '', ...saved };
     try { this.key = localStorage.getItem(KEY) ?? ''; } catch { this.key = ''; }
 
     const select = (options, value, onchange, title) => {
@@ -471,8 +477,10 @@ export class AgentPanel {
       set('provider')(v);
       if (v === 'ollama') this.refreshOllama();
     }, 'Who answers: Claude (the Anthropic API, your key) or a model of an Ollama server');
-    this.claudeModel = select(CLAUDE_MODELS, this.settings.model, set('model'), 'The Claude model');
-    this.effort = select(EFFORTS.map((e) => [e, e]), this.settings.effort, set('effort'), 'How much Claude thinks before acting (more: slower, more careful)');
+    this.claudeModel = select([], this.settings.model, set('model'), 'The Claude model (those your API key can use)');
+    this.effort = select([], this.settings.effort, set('effort'), 'How much Claude thinks before acting (more: slower, more careful)');
+    const listModels = el('button', { type: 'button', textContent: '↻', title: 'Ask the Anthropic API again for the models' });
+    listModels.onclick = () => this.refreshClaude();
     this.ollamaModel = el('select', { title: 'The Ollama model (one that supports tools)' });
     this.ollamaModel.onchange = () => { set('ollamaModel')(this.ollamaModel.value); this.ollamaModel.blur(); this.refreshOllama(); };
     const fresh = el('button', { type: 'button', textContent: 'New chat', title: 'Forget the conversation (the world stays as it is)' });
@@ -487,12 +495,19 @@ export class AgentPanel {
       this.keyInput.value = '';
       try { localStorage.setItem(KEY, this.key); } catch { /* no storage: kept for this page only */ }
       this.update();
+      this.refreshClaude();
     };
     const forget = el('button', { type: 'button', textContent: 'Forget key', title: 'Remove the API key from this browser' });
-    forget.onclick = () => { this.key = ''; try { localStorage.removeItem(KEY); } catch { /* none */ } this.update(); };
-    this.keyNote = el('span', { className: 'note' });
+    forget.onclick = () => {
+      this.key = '';
+      this.claude = { models: CLAUDE_MODELS, error: null };
+      try { localStorage.removeItem(KEY); } catch { /* none */ }
+      this.update();
+    };
+    this.claudeNote = el('div', { className: 'hint' });
     this.claudeBox = el('div', { className: 'agent-provider' },
-      el('div', { className: 'bar' }, this.claudeModel, this.effort),
+      el('div', { className: 'bar' }, this.claudeModel, this.effort, listModels),
+      this.claudeNote,
       el('div', { className: 'bar agent-key-entry' }, this.keyInput, saveKey),
       el('div', { className: 'bar agent-key-saved' }, el('span', { className: 'note ok', textContent: 'API key saved in this browser' }), forget),
       el('div', { className: 'hint agent-key-help' }, 'A Claude API key from ', el('a', { href: 'https://platform.claude.com/settings/keys', target: '_blank', rel: 'noopener', textContent: 'platform.claude.com' }),
@@ -529,6 +544,7 @@ export class AgentPanel {
     this.tools = tools(this);
     this.update();
     if (this.settings.provider === 'ollama') this.refreshOllama();
+    if (this.key) this.refreshClaude();
     // Opened again: the Ollama server may have models now.
     new MutationObserver(() => { if (!root.hidden && this.settings.provider === 'ollama' && !this.ollama.models.length) this.refreshOllama(); })
       .observe(root, { attributes: true, attributeFilter: ['hidden'] });
@@ -568,6 +584,19 @@ export class AgentPanel {
     this.update();
   }
 
+  // The models the key can use (claudeModels); the built-in list if that fails.
+  async refreshClaude() {
+    if (!this.key) return;
+    this.claude.error = null;
+    try {
+      const models = await claudeModels(this.key);
+      if (models.length) this.claude.models = models;
+    } catch (err) {
+      this.claude.error = `could not list the models (${err.status ?? err.message ?? err}): the usual ones are offered`;
+    }
+    this.update();
+  }
+
   // Whether a message can be sent now; else why not (for the panel).
   readiness() {
     if (this.settings.provider === 'claude') return this.key ? null : 'Enter a Claude API key to start.';
@@ -589,6 +618,13 @@ export class AgentPanel {
     this.claudeBox.querySelector('.agent-key-entry').hidden = !!this.key;
     this.claudeBox.querySelector('.agent-key-help').hidden = !!this.key;
     this.claudeBox.querySelector('.agent-key-saved').hidden = !this.key;
+    const models = this.claude.models;
+    const model = models.find((m) => m.id === this.settings.model) ?? models[0];
+    this.settings.model = model.id;  // (a model gone: the newest)
+    if (!model.efforts.includes(this.settings.effort)) this.settings.effort = model.efforts.includes('medium') ? 'medium' : model.efforts[0];
+    this.claudeModel.replaceChildren(...models.map((m) => new Option(m.name, m.id, false, m === model)));
+    this.effort.replaceChildren(...model.efforts.map((e) => new Option(e, e, false, e === this.settings.effort)));
+    this.claudeNote.textContent = this.key ? this.claude.error ?? '' : '';
     this.ollamaModel.replaceChildren(...this.ollama.models.map((m) => new Option(m, m, false, m === this.settings.ollamaModel)));
     this.ollamaModel.disabled = !this.ollama.models.length;
     const i = this.ollama.info;
