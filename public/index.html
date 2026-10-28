@@ -53,6 +53,26 @@
     #reset { --c: #5ea8f0; }
     #clear { --c: #f06a6a; }
     #restart { --c: #b48cf0; }
+    #record { --c: #ff6b81; }
+    #record[data-recording] svg { animation: rec-blink 1s steps(2, start) infinite; }
+    @keyframes rec-blink { to { visibility: hidden; } }
+    /* The replay bar (recorder.js): under the view, between the side panels,
+       while there is a recording (or a note about one). */
+    #replay { position: absolute; bottom: 12px; left: var(--room-left, 270px); right: var(--room-right, 540px); margin: 0 auto;
+              width: fit-content; max-width: calc(100% - var(--room-left, 270px) - var(--room-right, 540px) - 16px); box-sizing: border-box;
+              z-index: 2; display: flex; align-items: center; gap: 8px; padding: 5px 8px; border-radius: 8px;
+              color: #ddd; background: rgba(0,0,0,.55); font-size: 12px; border: 1px solid transparent; }
+    #replay[hidden], #replay [hidden] { display: none; }
+    #replay[data-replaying] { border-color: #ff6b81; }
+    #replay button, #replay select { font: inherit; color: #f0f0f0; background: #2a2c31; border: 1px solid #444; border-radius: 5px;
+                                     padding: 3px 8px; cursor: pointer; }
+    #replay button:hover { border-color: #888; }
+    #replay button:disabled { opacity: .45; cursor: default; }
+    #replay .play { min-width: 34px; }
+    #replay .live { color: #fff; background: #8a3443; border-color: #ff6b81; }
+    #replay .seek { width: 260px; min-width: 80px; flex: 1 1 260px; accent-color: #ff6b81; }
+    #replay .time { font-variant-numeric: tabular-nums; white-space: nowrap; min-width: 84px; }
+    #replay .note { color: #fd4; }
     #vr, #ar { --c: #46c8c0; }
     /* Left column, under its toggles, down to the bottom (over the axes
        gizmo): Assets, Stage and Physics (#world), each shrinking (and scrolling) to
@@ -423,6 +443,9 @@
       #assets input[type=search], #teleop select, #world select, #world input, #render select, #teleop input[type=number], #teleop .ros input[type=text] { font-size: 16px; }  /* no zoom on focus (iOS) */
       #gizmo { width: 64px; height: 64px; left: 8px; bottom: 8px; }
       #sticks { left: 12px; right: 12px; bottom: 84px; }
+      #replay { left: 80px; right: 8px; bottom: 56px; max-width: none; width: auto; gap: 5px; }
+      #replay .seek { width: auto; }
+      #replay .time { min-width: 0; }
       #offline { top: 8px; left: 8px; right: 8px; transform: none; max-width: none; justify-content: space-between; font-size: 12px; }
     }
   </style>
@@ -433,6 +456,7 @@
     <button id="pause" title="Pause or resume the simulation"><svg class="i-pause solid" viewBox="0 0 24 24"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg><svg class="i-play solid" viewBox="0 0 24 24"><path d="M8 5.5v13a1 1 0 0 0 1.5.86l10.5-6.5a1 1 0 0 0 0-1.72L9.5 4.64A1 1 0 0 0 8 5.5z"/></svg><span class="label">Pause</span></button>
     <button id="reset" title="Reset: every robot back to its spawn pose"><svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 2.64-6.36L3 8.3"/><path d="M3 3v5.3h5.3"/></svg><span class="label">Reset</span></button>
     <button id="clear" title="Clear: remove all robots"><svg viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M10 11v6M14 11v6"/><path d="M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12"/><path d="M9 7V4.5A1.5 1.5 0 0 1 10.5 3h3A1.5 1.5 0 0 1 15 4.5V7"/></svg><span class="label">Clear</span></button>
+    <button id="record" title="Record the simulation for replay"><svg class="solid" viewBox="0 0 24 24"><circle cx="12" cy="12" r="6.5"/></svg><span class="label">Record</span></button>
     <button id="restart" hidden title="Full restart of the shared world: the server reads the model files again and starts the simulation anew (time 0, every robot at its spawn point, controllers fresh), for everyone"><svg viewBox="0 0 24 24"><path d="M12 3v8"/><path d="M6.3 6.8a8 8 0 1 0 11.4 0"/></svg><span class="label">Full restart</span></button>
     <button id="vr" hidden title="Enter VR"><svg viewBox="0 0 24 24"><path d="M4 7h16a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1h-5l-3-3-3 3H4a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1z"/><circle cx="8" cy="11.5" r="1.5"/><circle cx="16" cy="11.5" r="1.5"/></svg><span class="label">Enter VR</span></button>
     <button id="ar" hidden title="Enter AR: the robots in your room (passthrough, Quest 3)"><svg viewBox="0 0 24 24"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M4 7.5l8 4.5 8-4.5M12 12v9"/></svg><span class="label">Enter AR</span></button>
@@ -517,6 +541,15 @@
   </div>
   </div>
   <canvas id="gizmo" title="World axes: click an axis to look along it"></canvas>
+  <div id="replay" hidden>
+    <button class="play" title="Replay">▶</button>
+    <input class="seek" type="range" min="0" max="1" step="0.0333" value="0" title="Where in the recording">
+    <span class="time"></span>
+    <select class="speed" title="Replay speed"></select>
+    <button class="live" title="Back to the live simulation">Live</button>
+    <span class="note"></span>
+    <button class="discard" title="Throw the recording away">✕</button>
+  </div>
   <div id="net" hidden title="Simulation speed: simulated time per second of wall time (1.00× is real time) and physics steps per second. Shared world also: round trip to the server (ping), states received per second, download rate, and how far the view trails the newest state (interpolation buffer)"><span class="rtt" hidden>RTT …</span><span class="rate" hidden></span><span class="sim"></span></div>
   <div id="offline" hidden><span class="msg"></span><button>Retry now</button></div>
   <div id="busy"><div class="spinner"></div><div class="msg">loading…</div></div>

@@ -17,7 +17,20 @@ them), Reset puts every robot back in its spawn pose. In a shared world, **Full 
 (after a confirmation, for everyone) has the server read the model files
 again and start anew: a fresh MjData at time 0, every robot at its spawn
 point with fresh controllers (the same ones switched on), so edits to the
-MJCF files take effect without restarting the server. The toggles above the
+MJCF files take effect without restarting the server.
+
+**Record** (red; Stop while it records) keeps the simulation's state, 30
+times a second of simulated time (qpos and the mocap poses, up to 5 minutes:
+the oldest goes), and the bar under the view replays it: ▶ / ❚❚, the
+timeline to drag, a speed (0.1× to 2×) and **Live**, back to the
+simulation. A recording is of this tab only and in memory (`recorder.js`):
+reloading drops it, and so does a spawn or removal (the world it fits is
+gone); a Reset while recording goes on in the same recording. Replaying
+places the bodies only (no physics, no controllers): locally the simulation
+is paused meanwhile and Live puts back its state as it was; in a shared
+world the server goes on for everyone and Live shows it again.
+
+The toggles above the
 left column show or hide the Assets, Stage and Physics panels (in it), those at
 the top right Teleop and the other panels of the right column.
 

@@ -41,6 +41,7 @@ import { Cameras, CamerasPanel, cameraKey, modelCameras } from './cameras.js';
 import { CHAIN_COLORS } from './teleop.js';
 import Stats from '../vendor/stats/Stats.js';
 import { NET_MUJOCO, NetClient, loadRender, worldData, worldModel } from './net.js';
+import { Recorder } from './recorder.js';
 import { dataUrl, problem, server, shareUrl } from './endpoint.js';
 import { BrowserStages, LibraryStages, STAGE_VERSION, ServerStages, StageList, applyState, askStage, blobToDataUrl, captureState, downloadBundle, newId, pickBundle, setView, viewOf, withParts } from './stage.js';
 import { RemoteBase, RemoteIk, RemotePolicy } from './remote.js';
@@ -1512,13 +1513,18 @@ class App {
   frame(xrFrame = null) {
     if (this.xr && !xrFrame) return;
     this.stats?.begin();
-    if (this.net) {
-      // The server steps; show its state (interpolated) once this world matches it.
-      if (this.model && this.net.apply(this.model, this.data, this.netVersion, this.robots)) this.syncTransforms();
-    } else if (this.model && !this.paused && !this.stepping) {
-      this.stepping = this.advance()
-        .catch((err) => { this.paused = true; console.error('simulation stopped', err); })
-        .finally(() => { this.stepping = null; });
+    if (this.recorder?.replaying) {
+      this.recorder.frame(performance.now());  // a recording shown in place of the live world (recorder.js)
+    } else {
+      if (this.net) {
+        // The server steps; show its state (interpolated) once this world matches it.
+        if (this.model && this.net.apply(this.model, this.data, this.netVersion, this.robots)) this.syncTransforms();
+      } else if (this.model && !this.paused && !this.stepping) {
+        this.stepping = this.advance()
+          .catch((err) => { this.paused = true; console.error('simulation stopped', err); })
+          .finally(() => { this.stepping = null; });
+      }
+      this.recorder?.frame(performance.now());  // recording, if it is
     }
     this.showStats();
     this.syncMarkers();
@@ -2934,13 +2940,19 @@ try {
     pauseButton.toggleAttribute('data-paused', !!app.paused);
     setLabel(pauseButton, app.paused ? 'Resume' : 'Pause');
   }
+  app.showPaused = showPaused;
   pauseButton.onclick = () => {
+    if (app.recorder?.replaying) { app.recorder.live(); return; }  // back to the live world first
     if (app.net) { app.net.send('pause', { paused: !app.paused }); return; }
     app.paused = !app.paused;
     showPaused();
     if (!app.paused && app.data) app.resync();
   };
-  document.getElementById('reset').onclick = () => app.model && app.reset();
+  document.getElementById('reset').onclick = () => {
+    app.recorder?.live();
+    if (app.model) app.reset();
+  };
+  app.recorder = new Recorder(app, { button: document.getElementById('record'), bar: document.getElementById('replay') });
   document.getElementById('clear').onclick = () => {
     if (robots.length && confirm(`Remove all ${robots.length} spawned model${robots.length > 1 ? 's' : ''}?`)) respawn([]);
   };

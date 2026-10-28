@@ -376,13 +376,13 @@ function quatToMat(q, out, o) {  // row-major, like mju_quat2Mat
   out[o + 6] = 2 * (x * z - w * y); out[o + 7] = 2 * (y * z + w * x); out[o + 8] = 1 - 2 * (x * x + y * y);
 }
 
-function lerp(out, a, b, t) {
+export function lerp(out, a, b, t) {
   for (let i = 0; i < out.length; i++) out[i] = a[i] + (b[i] - a[i]) * t;
 }
 
 // Shortest-path quaternion blend at `k` (a and b may sit on opposite
 // hemispheres), normalized.
-function blendQuat(out, k, a, b, t) {
+export function blendQuat(out, k, a, b, t) {
   const sign = a[k] * b[k] + a[k + 1] * b[k + 1] + a[k + 2] * b[k + 2] + a[k + 3] * b[k + 3] < 0 ? -1 : 1;
   let n = 0;
   for (let c = 0; c < 4; c++) {
@@ -396,7 +396,7 @@ function blendQuat(out, k, a, b, t) {
 // qpos indices where a quaternion starts: free joints (after x, y, z) and
 // ball joints. Cached per model.
 const slots = new WeakMap();
-function quatSlots(model) {
+export function quatSlots(model) {
   let s = slots.get(model);
   if (!s) {
     s = [];
