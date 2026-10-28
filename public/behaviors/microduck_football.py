@@ -20,7 +20,7 @@ import py_trees
 from py_trees.common import Status
 import lobby
 
-TEAMS = [("microduck_graphite", +1, "graphite"), ("microduck", -1, "white")]  # label (= model), attacks +x / -x, name
+TEAMS = [("microduck_lavender", +1, "host"), ("microduck", -1, "guest")]  # label (= model), attacks +x / -x, name
 PER_TEAM = 3
 PITCH = "microduck_football"       # the model spawned when there is no pitch,
 PITCH_AT = (0.0, 2.0, 0.0)         # with its centre spot here (x, y, z; on the floor)
@@ -35,8 +35,8 @@ SWITCH_MARGIN = 0.2                # m: a teammate takes over the attack once th
 DEFEND_OUT = 0.6                   # m out from its goal, on the line to the ball (at most half way)
 SUPPORT_BACK, SUPPORT_SIDE = 0.7, 0.5  # m behind the ball (toward its own goal) and to its side
 KEEP_OFF = 0.45                    # m: who does not attack stays this far from the ball
-GOAL_X, GOAL_HALF_W = 2.02, 0.40   # goal mouths at x = +-2.02 (pitch frame)
-TOUCH_Y, END_X = 1.3, 2.05        # ball wholly over the touchline / the goal line (pitch frame, m: the lines'
+GOAL_X, GOAL_HALF_W = 2.0, 0.40   # goal mouths at x = +-2.02 (pitch frame)
+TOUCH_Y, END_X = 1.27, 2.02        # ball wholly over the touchline / the goal line (pitch frame, m: the lines'
                                    # outer edges at 1.3125 / 2.0125, the ball's radius 0.04)
 BEHIND, PUSH = 0.22, 0.45          # going round the ball: this far behind it; walking through it: this far on
 # The kicks (skill: ball centre in the duck's frame, m; how far left of the
