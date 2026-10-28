@@ -1,42 +1,58 @@
-# Duck football 1v1 (the microduck_football_1v1 stage): the graphite Microduck
-# attacks the +x goal, the white one the -x goal (in the pitch's own frame,
-# however it is placed). Each duck lines up behind the ball for its kick (the
-# ball in front of its right foot, where the kick was trained) and kicks it
-# on; lined up but not close enough to kick, it walks through the ball
-# instead. A referee scores goals and restarts (Reset: the kick-off again)
-# when the ball goes out, both ducks are down, or the ball has not moved for
-# a while with both ducks at it (pushing it from both sides). Each kick-off (the first one
-# too: the tree starts with a Reset) puts the ducks at random spots near the
-# stage's, in their own halves (Reset itself still goes back to the stage's).
+# Duck football 3v3 (the microduck_football_1v1 stage: the tree spawns the
+# two more ducks per team it needs, all on Pollen's policy set,
+# microduck-official): the graphite Microducks attack the +x goal, the white
+# ones the -x goal (in the pitch's own frame, however it is placed). In each
+# team the duck nearest the ball attacks: it lines up behind the ball for a
+# kick with the nearer foot (the ball in front of that toe, where the kick was
+# trained) and kicks it on, or walks through it when it cannot get close
+# enough; of the other two the one nearer its own goal defends (between that
+# goal and the ball) and the other supports (behind the ball, to one side).
+# A duck that falls gets back up by itself (velstand). A referee scores goals
+# and restarts (Reset: the kick-off again) when the ball goes out. Each
+# kick-off (the first one too: the tree starts with a Reset) puts the ball at
+# a random spot of the pitch, clear of the ducks, which start on their spots
+# (Reset itself puts the ball back on the centre spot).
 import math
 import random
 import py_trees
 from py_trees.common import Status
 import lobby
 
-TEAMS = [("microduck_graphite", +1, "graphite"), ("microduck", -1, "white")]  # label, attacks +x / -x, name
+TEAMS = [("microduck_graphite", +1, "graphite"), ("microduck", -1, "white")]  # label (= model), attacks +x / -x, name
+PER_TEAM = 3
+# Where the extra ducks are spawned (pitch frame, for the team attacking +x; mirrored for the other):
+EXTRA_SPOTS = [(-1.2, 0.6), (-1.2, -0.6), (-0.3, 0.9)]
+SWITCH_MARGIN = 0.2                # m: a teammate takes over the attack once this much nearer the ball
+DEFEND_OUT = 0.6                   # m out from its goal, on the line to the ball (at most half way)
+SUPPORT_BACK, SUPPORT_SIDE = 0.7, 0.5  # m behind the ball (toward its own goal) and to its side
+KEEP_OFF = 0.45                    # m: who does not attack stays this far from the ball
 GOAL_X, GOAL_HALF_W = 2.02, 0.40   # goal mouths at x = +-2.02 (pitch frame)
 TOUCH_Y = 1.40                     # ball wholly over the touchline (pitch frame, m)
 BEHIND, PUSH = 0.22, 0.45          # going round the ball: this far behind it; walking through it: this far on
-KICK_AT = (0.095, -0.042)          # ball centre in the duck's frame for kick_right (trained: (0.09, -0.042) +-0.015, a 35 mm ball)
-KICK_TOL = (0.03, 0.025)           # how far from KICK_AT it still kicks (m, forward / sideways)
+# The kicks (skill: ball centre in the duck's frame, m; how far left of the
+# duck's heading the ball then runs, rad): trained with the ball 9 cm ahead of
+# that toe; measured in the viewer, the right kick sends it ~7 deg right, the
+# left one ~9 deg left (1.6-3 m).
+KICKS = {
+    "kick_right": ((0.095, -0.042), math.radians(-7)),
+    "kick_left": ((0.095, 0.042), math.radians(9)),
+}
+KICK_TOL = (0.03, 0.025)           # how far from the ball spot it still kicks (m, forward / sideways)
 KICK_YAW_TOL = 0.2                 # rad off the kick heading
-KICK_VEER = math.radians(18)       # the kicked ball runs this much left of the duck's heading
-KICK_REST = 1.5                    # s (simulated) after a kick before the next
+KICK_REST = 1.5                    # s (simulated) after a kick (0.5 s) before the next
 KICK_LEAD = 0.035                  # m: the goal set past the kick spot (a goal counts as reached 6 cm short)
-SETTLE = 2.0                       # s at the kick spot without a kick: walk through the ball instead
-FALL_UP = 0.5                      # trunk up-axis z below this = fallen
-FALL_TIME = 1.5                    # s on the ground before it counts
+LINE_UP_NEAR = 0.35                # m from the kick spot: closer, it lines up on the spot itself (back out past
+LINE_UP_FAR = 0.50                 # this); farther, it first walks to a point APPROACH_BACK behind the spot
+APPROACH_BACK = 0.25               # on the kick line, so it comes at the ball from behind
+SETTLE = 2.0                       # s lining up close to the ball (within STUCK_NEAR) without a kick: walk
+STUCK_NEAR = 0.20                  # through the ball instead (m; at the kick spot the ball is ~0.10 m off)
 OUT_TIME = 0.3                     # s the ball must stay out (or in the goal)
-STALL_MOVE, STALL_TIME = 0.05, 8.0  # the ball moving less than this (m) for this long (s), while
-STALL_NEAR = 0.35                  # both ducks are this close to it (m): a stalemate
 COOLDOWN = 5.0                     # s after a restart before the referee looks again
-SPREAD_X, SPREAD_Y = 0.35, 0.50    # random kick-off: this far (m) from the stage's spot, along / across the pitch
-SPREAD_YAW = math.radians(40)      # and turned this much at most
-OWN_HALF = 0.25                    # m: at least this far into its own half
-BALL_CLEAR, DUCK_CLEAR = 0.35, 0.40  # m from the ball, and between the two, at least
+BALL_SPREAD = (1.2, 0.9)           # random kick-off: the ball within this of the centre spot (m, along / across the pitch)
+DUCK_CLEAR = 0.35                  # and at least this far from every duck (m)
 score = {team: 0 for _, _, team in TEAMS}
-kickoff = {"placing": False}   # the referee placing the ducks after a Reset: the players wait
+kickoff = {"placing": False}   # the referee placing the ball after a Reset: the players wait
+attackers = {}                 # label -> name of the team's duck that attacks
 
 
 def wrap(a):
@@ -47,8 +63,28 @@ def pitch():
     return next((r for r in lobby.robots() if "football" in r["label"]), None)
 
 
-def player(label):
-    return next((r for r in lobby.robots() if r["label"] == label), None)
+def team(label):
+    """The team's ducks (lobby.robots() entries), in spawn order."""
+    num = lambda r: int(r["name"][1:]) if r["name"][1:].isdigit() else 0
+    return sorted((r for r in lobby.robots() if r["label"] == label), key=num)
+
+
+def dist(r, x, y):
+    return math.hypot(r["pose"]["x"] - x, r["pose"]["y"] - y)
+
+
+def roles(label, sign, fr, bx, by):
+    """{name: 'attack' | 'defend' | 'support'} of the team, the ball at bx, by."""
+    ducks = team(label)
+    if not ducks:
+        return {}
+    near = {r["name"]: dist(r, bx, by) for r in ducks}
+    cur, best = attackers.get(label), min(near, key=near.get)
+    if cur not in near or near[best] < near[cur] - SWITCH_MARGIN:
+        cur = attackers[label] = best
+    own = fr.world(-sign * GOAL_X, 0)
+    rest = sorted((r for r in ducks if r["name"] != cur), key=lambda r: dist(r, *own))
+    return {cur: "attack", **{r["name"]: "defend" if i == 0 else "support" for i, r in enumerate(rest)}}
 
 
 class Frame:
@@ -68,21 +104,23 @@ class Frame:
 
 
 class Player(py_trees.behaviour.Behaviour):
-    def __init__(self, label, attack_sign, team):
-        super().__init__(f"{team} plays")
-        self.label, self.sign = label, attack_sign
+    def __init__(self, label, attack_sign, team_name, index):
+        super().__init__(f"{team_name} {index + 1} plays")
+        self.label, self.sign, self.index = label, attack_sign, index
         self.last = None        # the goal last given: (x, y, mode)
         self.kicked = None      # simulated time of the last kick
-        self.at_spot = None     # since when it has stood at the kick spot
+        self.at_spot = None     # since when it has been lining up close to the ball
+        self.foot = None        # the kick it lines up for (KICKS), kept until it kicks or goes round
 
     def update(self):
-        f, me = pitch(), player(self.label)
-        if not f or not me:
+        f, ducks = pitch(), team(self.label)
+        if not f or len(ducks) <= self.index:
             self.feedback_message = "no pitch or no " + self.label
             return Status.FAILURE
+        me = ducks[self.index]
         name, t = me["name"], lobby.time()
         if kickoff["placing"]:
-            self.last = None
+            self.last = self.foot = None
             self.feedback_message = "kick-off"
             return Status.RUNNING
         for k in ("kicked", "at_spot"):  # time went back (Reset): forget
@@ -99,20 +137,30 @@ class Player(py_trees.behaviour.Behaviour):
         n = math.hypot(ux, uy) or 1.0
         ux, uy = ux / n, uy / n
         attack_yaw = math.atan2(uy, ux)
-        # The kick spot: facing so that the ball (veering left) runs at the goal,
-        # the ball at KICK_AT in front of the right foot.
-        face = attack_yaw - KICK_VEER
-        cf, sf = math.cos(face), math.sin(face)
-        sx, sy = bx - (cf * KICK_AT[0] - sf * KICK_AT[1]), by - (sf * KICK_AT[0] + cf * KICK_AT[1])
-        # The ball in the duck's own frame: kick when it is where the kick wants it.
+        role = roles(self.label, self.sign, fr, bx, by).get(name, "support")
+        if role != "attack":
+            return self.position(name, role, fr, me, bx, by, ux, uy, attack_yaw)
+        # Each kick's spot: facing so that the ball (with that kick's veer) runs
+        # at the goal, the ball at its spot in front of the toe.
+        spots = {}
+        for foot, ((ax, ay), veer) in KICKS.items():
+            face = attack_yaw - veer
+            cf, sf = math.cos(face), math.sin(face)
+            spots[foot] = (bx - (cf * ax - sf * ay), by - (sf * ax + cf * ay), face, ax, ay)
+        # The ball in the duck's own frame: kick when it is where a kick wants it.
         c, s = math.cos(myaw), math.sin(myaw)
         fwd, side = c * (bx - mx) + s * (by - my), -s * (bx - mx) + c * (by - my)
-        if abs(fwd - KICK_AT[0]) < KICK_TOL[0] and abs(side - KICK_AT[1]) < KICK_TOL[1] and abs(wrap(myaw - face)) < KICK_YAW_TOL:
-            lobby.stop(name)
-            lobby.use_skill(name, "kick_right")
-            self.kicked, self.at_spot, self.last = t, None, None
-            self.feedback_message = "KICK"
-            return Status.RUNNING
+        for foot, (_, _, face, ax, ay) in spots.items():
+            if abs(fwd - ax) < KICK_TOL[0] and abs(side - ay) < KICK_TOL[1] and abs(wrap(myaw - face)) < KICK_YAW_TOL:
+                lobby.stop(name)
+                lobby.use_skill(name, foot)
+                self.kicked, self.at_spot, self.last, self.foot = t, None, None, None
+                self.feedback_message = "KICK " + foot
+                return Status.RUNNING
+        if self.foot is None:  # line up for the foot whose spot is nearer
+            self.foot = min(spots, key=lambda f: math.hypot(mx - spots[f][0], my - spots[f][1]))
+        sx, sy, face, _, _ = spots[self.foot]
+        cf, sf = math.cos(face), math.sin(face)
         # Where the duck stands relative to the ball, along / across the attack line.
         dx, dy = mx - bx, my - by
         along, across = dx * ux + dy * uy, -dx * uy + dy * ux
@@ -121,25 +169,87 @@ class Player(py_trees.behaviour.Behaviour):
         if pushing and along < 0.12 and abs(across) < 0.16:   # keep pushing while still on the ball
             tx, ty, mode, yaw = bx + ux * PUSH, by + uy * PUSH, "push", attack_yaw
         elif along > 0.0:                       # in front of the ball: go round it
+            self.foot = None
             side_sign = 1.0 if across >= 0 else -1.0
             tx = bx - ux * BEHIND - uy * side_sign * 0.30
             ty = by - uy * BEHIND + ux * side_sign * 0.30
             mode, yaw = "around", attack_yaw
-        elif spot < 0.08 and self.at_spot is not None and t - self.at_spot > SETTLE:
+        elif self.at_spot is not None and t - self.at_spot > SETTLE and math.hypot(dx, dy) < STUCK_NEAR:
             tx, ty, mode, yaw = bx + ux * PUSH, by + uy * PUSH, "push", attack_yaw  # not close enough to kick: walk through
-        else:                                   # behind the ball: to the kick spot
-            tx, ty, mode, yaw = sx + cf * KICK_LEAD, sy + sf * KICK_LEAD, "line up", face
-        if mode == "line up" and spot < 0.08:
+        else:                                   # behind the ball: to the kick line, then the kick spot
+            lined = self.last is not None and self.last[2].startswith("line up")
+            if spot > (LINE_UP_FAR if lined else LINE_UP_NEAR):
+                tx, ty, mode, yaw = sx - cf * APPROACH_BACK, sy - sf * APPROACH_BACK, "approach", face
+            else:
+                tx, ty, mode, yaw = sx + cf * KICK_LEAD, sy + sf * KICK_LEAD, "line up " + self.foot.split("_")[1], face
+        if mode.startswith("line up") and math.hypot(dx, dy) < STUCK_NEAR:  # (by the ball: another duck may keep it off the spot)
             self.at_spot = t if self.at_spot is None else self.at_spot
         elif mode != "push":
             self.at_spot = None
-        # stay on the pitch
+        return self.go(name, fr, tx, ty, yaw, mode, math.hypot(dx, dy))
+
+    def go(self, name, fr, tx, ty, yaw, mode, ball, moved=0.03):
+        """The goal marker to tx, ty facing yaw (kept on the pitch), unless it is there already."""
         u, v = fr.local(tx, ty)
         tx, ty = fr.world(max(-2.2, min(2.2, u)), max(-1.5, min(1.5, v)))
-        if self.last is None or math.hypot(tx - self.last[0], ty - self.last[1]) > 0.03 or mode != self.last[2]:
+        if self.last is None or math.hypot(tx - self.last[0], ty - self.last[1]) > moved or mode != self.last[2]:
             lobby.set_goal(name, tx, ty, yaw)
             self.last = (tx, ty, mode)
-        self.feedback_message = f"{mode}  ball {math.hypot(dx, dy):.2f} m"
+        self.feedback_message = f"{mode}  ball {ball:.2f} m"
+        return Status.RUNNING
+
+    def position(self, name, role, fr, me, bx, by, ux, uy, attack_yaw):
+        """Defend (between its goal and the ball) or support (behind the ball, to one side)."""
+        self.foot = self.at_spot = None
+        mx, my = me["pose"]["x"], me["pose"]["y"]
+        if role == "defend":
+            gx, gy = fr.world(-self.sign * GOAL_X, 0)
+            vx, vy = bx - gx, by - gy
+            n = math.hypot(vx, vy) or 1.0
+            out = min(DEFEND_OUT, 0.5 * n)
+            tx, ty = gx + vx / n * out, gy + vy / n * out
+        else:
+            side = 1.0 if -(mx - bx) * uy + (my - by) * ux >= 0 else -1.0  # (it keeps to its side of the attack line)
+            tx = bx - ux * SUPPORT_BACK - uy * side * SUPPORT_SIDE
+            ty = by - uy * SUPPORT_BACK + ux * side * SUPPORT_SIDE
+        d = math.hypot(tx - bx, ty - by)
+        if d < KEEP_OFF:  # off the ball, out along the line from it
+            k = KEEP_OFF / (d or 1e-6)
+            tx, ty = bx + (tx - bx) * k, by + (ty - by) * k
+        return self.go(name, fr, tx, ty, math.atan2(by - ty, bx - tx), role, math.hypot(mx - bx, my - by), moved=0.08)
+
+
+class Teams(py_trees.behaviour.Behaviour):
+    """Spawns the ducks the teams lack, one at a time (each rebuilds the world), at EXTRA_SPOTS; done when
+    every team has PER_TEAM."""
+
+    def __init__(self):
+        super().__init__(f"Teams of {PER_TEAM}")
+        self.pending = None  # (label, how many it had, simulated time): a spawn on its way
+
+    def update(self):
+        f = pitch()
+        if not f:
+            self.feedback_message = "no pitch"
+            return Status.FAILURE
+        counts = {label: len(team(label)) for label, _, _ in TEAMS}
+        self.feedback_message = ", ".join(f"{name} {counts[label]}" for label, _, name in TEAMS)
+        if self.pending is not None:
+            label, had, t0 = self.pending
+            if counts[label] > had:
+                self.pending = None
+            elif lobby.time() - t0 > 30.0 or lobby.time() < t0:
+                self.pending = None  # (asks again)
+            else:
+                return Status.RUNNING
+        missing = next(((label, sign) for label, sign, _ in TEAMS if counts[label] < PER_TEAM), None)
+        if missing is None:
+            return Status.SUCCESS
+        label, sign = missing
+        u, v = EXTRA_SPOTS[(counts[label] - 1) % len(EXTRA_SPOTS)] if counts[label] else EXTRA_SPOTS[0]
+        fr = Frame(f["pose"])
+        lobby.spawn(label, *fr.world(sign * u, v), fr.yaw + (0.0 if sign > 0 else math.pi))
+        self.pending = (label, counts[label], lobby.time())
         return Status.RUNNING
 
 
@@ -149,43 +259,26 @@ class Referee(py_trees.behaviour.Behaviour):
         self.last = "kick-off"
         self.quiet_until = None       # no calls before this (simulated) time: a restart landing
         self.out_since = None
-        self.down_since = {label: None for label, _, _ in TEAMS}
-        self.still = None             # (x, y, since): where the ball has stayed
         self.prev_t = None
-        self.home = None              # {label: (u, v, yaw)}: the stage's kick-off spots (pitch frame)
         self.landing = None           # after a Reset: (the time before it, ticks since), until the ducks are placed
 
     def restart(self, why, t):
         self.last = why
         self.quiet_until = t + COOLDOWN
-        self.out_since, self.still = None, None
-        self.down_since = {label: None for label in self.down_since}
+        self.out_since = None
         lobby.reset_world()                     # the kick-off again
         self.landing = (t, 0)
         kickoff["placing"] = True
 
     def kick_off(self, fr, ball):
-        """The ducks at random spots near their stage spots (the first time: noted)."""
-        if self.home is None:
-            self.home = {}
-            for label, _, _ in TEAMS:
-                p = player(label)["pose"]
-                self.home[label] = (*fr.local(p["x"], p["y"]), wrap(p["yaw"] - fr.yaw))
-        bu, bv = fr.local(ball["x"], ball["y"])
-        placed = []
-        for label, sign, _ in TEAMS:
-            hu, hv, hyaw = self.home[label]
-            for _ in range(50):  # (the last try stands if none is clear)
-                u = hu + random.uniform(-SPREAD_X, SPREAD_X)
-                v = hv + random.uniform(-SPREAD_Y, SPREAD_Y)
-                u = sign * min(sign * u, -OWN_HALF)
-                v = max(-TOUCH_Y + 0.3, min(TOUCH_Y - 0.3, v))
-                if math.hypot(u - bu, v - bv) >= BALL_CLEAR and all(math.hypot(u - pu, v - pv) >= DUCK_CLEAR for pu, pv in placed):
-                    break
-            placed.append((u, v))
-            x, y = fr.world(u, v)
-            lobby.place(player(label)["name"], x, y, fr.yaw + hyaw + random.uniform(-SPREAD_YAW, SPREAD_YAW))
-
+        """The ball at a random spot of the pitch, clear of every duck (on its spot after the Reset)."""
+        ducks = [fr.local(p["pose"]["x"], p["pose"]["y"]) for label, _, _ in TEAMS for p in team(label)]
+        for _ in range(50):  # (the last try stands if none is clear)
+            u = random.uniform(-BALL_SPREAD[0], BALL_SPREAD[0])
+            v = random.uniform(-BALL_SPREAD[1], BALL_SPREAD[1])
+            if all(math.hypot(u - du, v - dv) >= DUCK_CLEAR for du, dv in ducks):
+                break
+        lobby.place_body(ball["name"], *fr.world(u, v))
 
     def update(self):
         f = pitch()
@@ -198,7 +291,7 @@ class Referee(py_trees.behaviour.Behaviour):
             return Status.RUNNING
         if t < self.prev_t:  # time went back (the Reset): the cool-down from here
             self.quiet_until = t + COOLDOWN
-            self.out_since, self.still = None, None
+            self.out_since = None
         self.prev_t = t
         fr, b = Frame(f["pose"]), lobby.body(f["name"] + "/ball")
         if self.landing is not None:  # the Reset landed (time went back, or a few ticks on): place the ducks
@@ -207,21 +300,12 @@ class Referee(py_trees.behaviour.Behaviour):
                 self.landing = None
                 self.kick_off(fr, b)
                 kickoff["placing"] = False
-                self.still = None
             else:
                 self.landing = (before, ticks + 1)
         rx, ry = fr.local(b["x"], b["y"])
-        for label in self.down_since:
-            up = lobby.upright(player(label)["name"]) if player(label) else None
-            fallen = up is not None and up < FALL_UP
-            self.down_since[label] = (self.down_since[label] if self.down_since[label] is not None else t) if fallen else None
         is_goal = abs(ry) < GOAL_HALF_W and abs(rx) > GOAL_X + 0.03
         is_out = not is_goal and (abs(ry) > TOUCH_Y or abs(rx) > GOAL_X + 0.05)
         self.out_since = (self.out_since if self.out_since is not None else t) if (is_goal or is_out) else None
-        contested = all(p is not None and math.hypot(p["pose"]["x"] - b["x"], p["pose"]["y"] - b["y"]) < STALL_NEAR
-                        for p in (player(label) for label, _, _ in TEAMS))
-        if not contested or self.still is None or math.hypot(b["x"] - self.still[0], b["y"] - self.still[1]) > STALL_MOVE:
-            self.still = (b["x"], b["y"], t)  # (the clock runs only while both press on a ball that stays put)
         if self.quiet_until is None or t >= self.quiet_until:
             if self.out_since is not None and t - self.out_since >= OUT_TIME:
                 if is_goal:
@@ -230,17 +314,17 @@ class Referee(py_trees.behaviour.Behaviour):
                     self.restart(f"GOAL {team}", t)
                 else:
                     self.restart("ball out", t)
-            elif all(d is not None and t - d >= FALL_TIME for d in self.down_since.values()):
-                self.restart("both ducks down", t)
-            elif t - self.still[2] >= STALL_TIME:
-                self.restart("stalemate", t)
         a, b2 = TEAMS[0][2], TEAMS[1][2]
         self.feedback_message = f"SCORE  {a} {score[a]} : {score[b2]} {b2}   (last: {self.last})"
         return Status.RUNNING
 
 
-root = py_trees.composites.Parallel(
-    "Duck football 1v1",
-    policy=py_trees.common.ParallelPolicy.SuccessOnAll(),
-    children=[Referee()] + [Player(label, sign, team) for label, sign, team in TEAMS],
+root = py_trees.composites.Sequence("Duck football 3v3", memory=True, children=[
+    Teams(),
+    py_trees.composites.Parallel(
+        "Play",
+        policy=py_trees.common.ParallelPolicy.SuccessOnAll(),
+        children=[Referee()] + [Player(label, sign, name, i) for label, sign, name in TEAMS for i in range(PER_TEAM)],
+    ),
+]
 )

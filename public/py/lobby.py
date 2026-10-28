@@ -38,7 +38,14 @@ Acting outside the behaviours: set_goal(robot, x, y, yaw) and stop(robot)
 (a policy skill, e.g. the Microduck's 'kick_right'), reset_world() (the
 toolbar's Reset: everything back to where it was spawned, time back to 0),
 place(robot, x, y, yaw) (a robot on a free joint moved there at once, at
-rest; Reset still puts it where it was spawned, unless spawn=True).
+rest; Reset still puts it where it was spawned, unless spawn=True; with
+pitch=+-pi/2 and z: lying on its face / back), set_policy(robot, id)
+(its walking policy, as the Teleop panel's Model; policy(robot) the one
+on), active_skill(robot) (the policy skill running, e.g. 'walk'),
+place_body(name, x, y) (a body on a free joint of its own, e.g. a ball in
+an environment's model, moved there at rest), spawn(model, x, y, yaw) (a
+model of the library, by name or path: it appears a moment later, its
+default controllers on).
 """
 
 import math
@@ -49,7 +56,8 @@ from py_trees.common import Status
 import lobby_js  # registered by pybt.js: check, leaf, robots, pose, time, body, upright, skill, set_goal, stop, reset, place
 
 __all__ = ['GoTo', 'Move', 'Approach', 'Follow', 'Stop', 'Wait', 'robots', 'pose', 'time', 'distance',
-           'body', 'upright', 'set_goal', 'stop', 'use_skill', 'reset_world', 'place']
+           'body', 'upright', 'set_goal', 'stop', 'use_skill', 'reset_world', 'place', 'set_policy', 'policy',
+           'active_skill', 'place_body', 'spawn']
 
 _STATUS = {'running': Status.RUNNING, 'success': Status.SUCCESS, 'failure': Status.FAILURE}
 
@@ -192,12 +200,46 @@ def reset_world():
   lobby_js.reset()
 
 
-def place(robot, x, y, yaw, spawn=False):
+def place(robot, x, y, yaw, spawn=False, pitch=None, z=None):
   """Moves `robot` (on a free joint: a walking robot, a ball) to x, y facing
-  yaw, at once and at rest, keeping its height and tilt. Reset still puts it
-  where it was spawned; with spawn=True this is its spawn pose from then on
-  (as the Stage panel's Pose sets it)."""
-  lobby_js.place(str(robot), float(x), float(y), float(yaw), bool(spawn))
+  yaw, at once and at rest, keeping its height and tilt; with `pitch` (rad,
+  about its own y axis: +pi/2 on its face, -pi/2 on its back) upright no
+  more, and at height `z` if given. Reset still puts it where it was
+  spawned; with spawn=True this is its spawn pose from then on (as the
+  Stage panel's Pose sets it)."""
+  lobby_js.place(str(robot), float(x), float(y), float(yaw), bool(spawn),
+                 None if pitch is None else float(pitch), None if z is None else float(z))
+
+
+def place_body(name, x, y, z=None):
+  """Moves a body on a free joint of its own ('r1/ball', or 'ball': as body()
+  finds it; e.g. the ball of a pitch's model) to x, y (and z, else its
+  height), at rest, its orientation kept. Not its spawn pose: Reset puts it
+  back."""
+  lobby_js.place_body(str(name), float(x), float(y), None if z is None else float(z))
+
+
+def spawn(model, x, y, yaw=0.0):
+  """Spawns a model of the library (its name, 'microduck_graphite', or its path)
+  standing on the floor at x, y, turned yaw. It takes a moment (the world is
+  rebuilt): wait until robots() lists it."""
+  lobby_js.spawn(str(model), float(x), float(y), float(yaw))
+
+
+def set_policy(robot, policy_id):
+  """Switches `robot`'s walking policy (as the Teleop panel's Model), e.g.
+  'microduck-official'; '' switches it off. It takes a moment (loading)."""
+  lobby_js.set_policy(str(robot), str(policy_id or ''))
+
+
+def policy(robot):
+  """The id of `robot`'s policy that is on, or None."""
+  return lobby_js.policy(str(robot))
+
+
+def active_skill(robot):
+  """The skill of `robot`'s policy running now ('walk', 'kick_right'...), or None."""
+  return lobby_js.active_skill(str(robot))
 
 
 # ---- for pybt.js ----

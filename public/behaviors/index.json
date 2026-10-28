@@ -1,9 +1,10 @@
 [
- {"name": "Football_1v1 (py_trees)", "file": "football_1v1.py" },
+ {"name": "Football 3v3 (py_trees)", "file": "football_1v1.py" },
  {"name": "Square", "file": "square.bt" },
  {"name": "Swap places", "file": "swap_places.bt" },
  {"name": "Follow the leader", "file": "follow_the_leader.bt" },
  {"name": "To the ball", "file": "to_the_ball.bt" },
  {"name": "Patrol (py_trees)", "file": "patrol.py" },
- {"name": "Near the ball (py_trees)", "file": "near_ball.py" }
+ {"name": "Near the ball (py_trees)", "file": "near_ball.py" },
+ {"name": "Microduck skills test (py_trees)", "file": "microduck_skills.py" }
 ]

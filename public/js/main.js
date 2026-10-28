@@ -1182,6 +1182,24 @@ class App {
     return true;
   }
 
+  // Moves body `name` (on a free joint of its own, e.g. a ball in an
+  // environment's model) to `pos`, at rest, its orientation kept; not its
+  // spawn pose. False without such a body.
+  placeBody(name, pos) {
+    const { mujoco, model, data } = this;
+    if (!model) return false;
+    let b = -1;
+    for (let i = 1; i < model.nbody && b < 0; i++) if (mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_BODY.value, i) === name) b = i;
+    if (b < 0 || !(model.body_jntnum[b] > 0) || model.jnt_type[model.body_jntadr[b]] !== 0) return false;
+    if (this.net) { this.net.send('place_body', { name, pos }); return true; }
+    const j = model.body_jntadr[b], adr = model.jnt_qposadr[j], dof = model.jnt_dofadr[j];
+    data.qpos.set(pos, adr);
+    data.qvel.fill(0, dof, dof + 6);
+    mujoco.mj_forward(model, data);
+    this.syncTransforms();
+    return true;
+  }
+
   writeInitial(robot, at) {
     if (!robot.initial) return;
     this.data.qpos.set(robot.initial.qpos, at.qpos);

@@ -15,6 +15,7 @@ the model are requests to this server.
 Protocol (client -> server, JSON {op, ...}; `rid` asks for a reply):
   spawn {rel, label, pos, yaw}   remove {ids}         move {id, pos, yaw}
   place {id, pos, quat, spawn?}  reset {}             reset_robot {id}
+  place_body {name, pos}         (a body on a free joint of its own, e.g. a ball in an environment)
   pause {paused}                 physics {physics}    qpos {adr, dof, v}
   ctrl {a, v}                    perturb {body, local, target} (body -1: let go)
   ray {eye, dir} -> {body, point} or {body: -1}        ping {t} -> pong {t}
@@ -875,6 +876,8 @@ class World:
     elif op == 'place':
       self.place_free(self.robot(msg['id']), msg['pos'], msg['quat'], spawn=bool(msg.get('spawn', True)))
       await self.broadcast_meta()
+    elif op == 'place_body':
+      self.place_body(str(msg['name']), msg['pos'])
     elif op == 'reset':
       mujoco.mj_resetData(m, d)
       layout = state_layout(self.robots)
@@ -1108,6 +1111,21 @@ class World:
     if r is None:
       raise ValueError(f'no robot {rid}')
     return r
+
+  def place_body(self, name, pos):
+    """Moves body `name` (on a free joint of its own, e.g. a ball in an
+    environment's model) to `pos`, at rest, its orientation kept (App.placeBody);
+    not its spawn pose."""
+    m, d = self.model, self.data
+    b = mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_BODY, name)
+    if b < 0 or m.body_jntnum[b] < 1 or m.jnt_type[m.body_jntadr[b]] != mujoco.mjtJoint.mjJNT_FREE:
+      raise ValueError(f'{name}: no body on a free joint of that name')
+    j = m.body_jntadr[b]
+    adr, dof = m.jnt_qposadr[j], m.jnt_dofadr[j]
+    d.qpos[adr:adr + 3] = pos
+    d.qvel[dof:dof + 6] = 0
+    mujoco.mj_forward(m, d)
+    self.jumped()
 
   def jumped(self):
     self.epoch += 1

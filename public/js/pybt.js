@@ -61,14 +61,40 @@ export function loadPython(onProgress) {
       set_goal: (name, x, y, yaw) => { world.goals.set(name, { x, y, yaw }); },
       stop: (name) => { world.goals.clear(name); },
       reset: () => window.lobby.reset(),
-      place: (name, x, y, yaw, spawn) => {
+      place: (name, x, y, yaw, spawn, pitch, z) => {
         const r = robotOf(name);
         if (!r) throw new Error(`no robot ${name}`);
-        // Its height and tilt kept, turned about z to `yaw`.
-        const { data } = world.app, b = r.bodyOffset, [w, qx, qy, qz] = data.xquat.subarray(4 * b, 4 * b + 4);
-        const h = (yaw - Math.atan2(2 * (w * qz + qx * qy), 1 - 2 * (qy * qy + qz * qz))) / 2, c = Math.cos(h), s = Math.sin(h);
-        const quat = [c * w - s * qz, c * qx - s * qy, c * qy + s * qx, c * qz + s * w];  // (cos h, 0, 0, sin h) * q
-        if (!world.app.placeFree(r, [x, y, data.xpos[3 * b + 2]], quat, !!spawn)) throw new Error(`${name} has a fixed base`);
+        const { data } = world.app, b = r.bodyOffset;
+        let quat;
+        if (pitch == null) {  // its tilt kept, turned about z to `yaw`
+          const [w, qx, qy, qz] = data.xquat.subarray(4 * b, 4 * b + 4);
+          const h = (yaw - Math.atan2(2 * (w * qz + qx * qy), 1 - 2 * (qy * qy + qz * qz))) / 2, c = Math.cos(h), s = Math.sin(h);
+          quat = [c * w - s * qz, c * qx - s * qy, c * qy + s * qx, c * qz + s * w];  // (cos h, 0, 0, sin h) * q
+        } else {  // yaw, then pitched about its own y axis (+90°: on its face, −90°: on its back)
+          const cy = Math.cos(yaw / 2), sy = Math.sin(yaw / 2), cp = Math.cos(pitch / 2), sp = Math.sin(pitch / 2);
+          quat = [cy * cp, -sy * sp, cy * sp, sy * cp];
+        }
+        if (!world.app.placeFree(r, [x, y, z ?? data.xpos[3 * b + 2]], quat, !!spawn)) throw new Error(`${name} has a fixed base`);
+      },
+      place_body: (name, x, y, z) => {
+        const at = bodyState(name);
+        if (!at) throw new Error(`no body ${name}`);
+        if (!world.app.placeBody(at.name, [x, y, z ?? at.z])) throw new Error(`${name} is not on a free joint of its own`);
+      },
+      spawn: (model, x, y, yaw) => {
+        const asset = window.lobby.assets().find((a) => a.rel === model || a.name === model);
+        if (!asset) throw new Error(`no model ${model} in the library`);
+        window.lobby.spawn(asset.rel, [x, y, 0], yaw).catch((err) => console.warn('spawn:', err));  // (it takes a moment)
+      },
+      set_policy: (name, id) => {
+        const r = robotOf(name);
+        if (!r) throw new Error(`no robot ${name}`);
+        world.app.setUse(r, 'policy', id || '').then(() => world.app.teleop?.build?.()).catch((err) => console.warn('set_policy:', err));
+      },
+      policy: (name) => robotOf(name)?.use?.policy || null,
+      active_skill: (name) => {
+        const r = robotOf(name), c = r?.use?.policy && r.policy;
+        return c ? (c.activeSkill ?? c.skills?.default ?? null) : null;
       },
     });
     py.runPython(`
@@ -107,7 +133,8 @@ function bodyState(name) {
   }
   if (id < 0) return null;
   const R = d.xmat.subarray(9 * id, 9 * id + 9);
-  return { x: d.xpos[3 * id], y: d.xpos[3 * id + 1], z: d.xpos[3 * id + 2], yaw: Math.atan2(R[3], R[0]), up: R[8] };
+  return { name: app.mujoco.mj_id2name(m, app.mujoco.mjtObj.mjOBJ_BODY.value, id), x: d.xpos[3 * id], y: d.xpos[3 * id + 1], z: d.xpos[3 * id + 2],
+           yaw: Math.atan2(R[3], R[0]), up: R[8] };
 }
 
 // A syntax error of a Python script: {line, column, message}, or null; null
