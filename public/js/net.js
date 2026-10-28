@@ -6,7 +6,9 @@
 // times a second; frames in between are interpolated, drawn a little in the
 // past so there is usually a snapshot on either side: one state interval
 // plus a margin for how unevenly they arrive (jitter), between MIN_DELAY and
-// MAX_DELAY.
+// MAX_DELAY. After a stall the states held up on the way arrive at once: the
+// view jumps to the newest (the older ones dropped) rather than playing them
+// through fast.
 //
 // Requests (spawn, remove, reset, drag, picking, …) go to the server, which
 // applies them and sends everyone the result. See server/server.py for the
@@ -15,6 +17,7 @@
 import { serverUrl, wsUrl } from './endpoint.js';
 
 const MIN_DELAY = 0.04, MAX_DELAY = 0.25;  // s of server time the view runs behind the newest snapshot
+const LAG_JUMP = 0.15;  // s (wall, at the sim rate): the view this much (or twice its delay) further behind jumps
 const KEEP = 40;    // snapshots kept
 const PING_EVERY = 1000;  // ms
 const SILENT_MAX = 5000;  // ms without a word from the server: the connection is gone
@@ -173,7 +176,8 @@ export class NetClient {
     if (prev) {  // arrival statistics (gaps over 0.5 s: paused, not jitter)
       const dt = (s.recv - prev.recv) / 1000;
       if (dt < 0.5) {
-        if (s.time > prev.time && s.version === prev.version && s.epoch === prev.epoch) {
+        // (not from a burst after a stall: states a moment apart would make it look 100× fast)
+        if (s.time > prev.time && s.version === prev.version && s.epoch === prev.epoch && dt > 0.5 * this.interval) {
           this.simRate += (Math.min(100, (s.time - prev.time) / Math.max(dt, 1e-3)) - this.simRate) * 0.1;
         }
         this.interval += (dt - this.interval) * 0.05;
@@ -206,8 +210,11 @@ export class NetClient {
     // Sim time runs at simRate × wall time (faster or slower than real time).
     const rate = this.simRate;
     const target = last.time - (fresh ? this.delay * rate : 0);
-    if (this.renderTime == null || Math.abs(target - this.renderTime) > 0.5 * Math.max(1, rate)) this.renderTime = target;
-    else {
+    const behind = target - (this.renderTime ?? target);
+    if (this.renderTime == null || behind > Math.max(LAG_JUMP, 2 * this.delay) * rate || -behind > 0.5 * Math.max(1, rate)) {
+      this.renderTime = target;  // a burst after a stall (or a jump): to the newest, the older snapshots dropped
+      while (snaps.length > 2 && snaps[1].time <= target) snaps.shift();
+    } else {
       this.renderTime += (now - (this.lastFrame ?? now)) / 1000 * rate;
       this.renderTime += (target - this.renderTime) * 0.05;  // drift back towards the target
     }

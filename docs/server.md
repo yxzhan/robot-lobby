@@ -23,6 +23,11 @@ which it loads no MuJoCo at all:
   ~50 KB/s. The page interpolates between states, a little behind (see
   the network meter; quaternions on the short arc), and places the bodies itself
   (`forwardKinematics`, MuJoCo's `mj_kinematics`, matching it to 1e-15).
+  After a stall the states held up arrive at once: the page jumps to the
+  newest and drops the older ones instead of playing them through fast. A
+  client whose connection still holds more than `STATE_BACKLOG` (16 KB)
+  gets no states until it has sent them: a newer one then, not a queue,
+  and a slow client does not hold up the others.
 - **Requests.** Spawn, Clear / ✕, Reset, Pause, the Stage panel's
   poses and sliders, Shift+drag, double-click picking (the server casts the
   ray) and the Physics panel's options go to the server, which applies them

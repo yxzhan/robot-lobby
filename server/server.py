@@ -115,6 +115,7 @@ import render_asset  # noqa: E402
 PUBLIC = pathlib.Path(__file__).resolve().parent.parent / 'public'
 STATUS_HZ = 5         # controller status (IK targets and errors) broadcasts per second
 CTRL_HZ = 5           # ctrl goes with a state this often: only the panels show it
+STATE_BACKLOG = 16384  # bytes a client's connection may still hold: more, and it gets no states until it has sent them
 STEP_BUDGET = 0.02     # s of wall time stepping per loop iteration at most
 
 
@@ -632,6 +633,7 @@ class World:
     self.perturbed = False  # xfrc_applied holds perturbation forces
     self.next_control = 0   # sim time of the next controller tick (IK.CONTROL_DT apart)
     self.clients = set()
+    self.transports = {}  # ws -> its connection's transport (how much it still has to send)
     self.lock = asyncio.Lock()  # one scene change at a time
     # The model and data belong to the stepping thread while it holds this
     # (run); requests that change or read them take it in between.
@@ -1283,7 +1285,7 @@ class World:
         hz = self.physics['stateHz']
         next_broadcast = max(next_broadcast + 1 / hz, now)
         sent += 1
-        await self.send_all(self.state_bytes(ctrl=sent % max(1, round(hz / CTRL_HZ)) == 0))
+        await self.send_state(self.state_bytes(ctrl=sent % max(1, round(hz / CTRL_HZ)) == 0))
       if now >= next_status and self.model is not None:
         next_status = now + 1 / STATUS_HZ
         self.expire_commands(now)
@@ -1375,6 +1377,19 @@ class World:
                                     'physics': self.physics, 'paused': self.paused}))
     self.dirty = True
 
+  async def send_state(self, payload):
+    """A state to every client but one whose connection still holds earlier
+    ones (a slow or stalled network): it gets a newer state once it has
+    caught up, not a queue of old ones, and does not hold up the others."""
+    for ws in list(self.clients):
+      transport = self.transports.get(ws)
+      if transport is None or transport.get_write_buffer_size() > STATE_BACKLOG:
+        continue
+      try:
+        await ws.send_bytes(payload)
+      except (ConnectionError, RuntimeError):
+        self.clients.discard(ws)
+
   async def send_all(self, payload):
     for ws in list(self.clients):
       try:
@@ -1395,6 +1410,7 @@ async def ws_handler(request):
   ws = web.WebSocketResponse(heartbeat=20, max_msg_size=1 << 20)
   await ws.prepare(request)
   world.clients.add(ws)
+  world.transports[ws] = request.transport
   print(f'client joined ({len(world.clients)} connected)')
   await ws.send_str(json.dumps(world.scene_msg()))
   if world.model is not None:
@@ -1416,6 +1432,7 @@ async def ws_handler(request):
         await ws.send_str(json.dumps({'type': 'error', 'op': req.get('op'), 'msg': str(err), 'rid': req.get('rid')}))
   finally:
     world.clients.discard(ws)
+    world.transports.pop(ws, None)
     async with world.stepping:
       world.perturbs.pop(ws, None)
       world.expire_commands(time.monotonic(), gone=ws)
