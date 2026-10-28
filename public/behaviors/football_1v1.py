@@ -5,7 +5,7 @@
 # on; lined up but not close enough to kick, it walks through the ball
 # instead. A referee scores goals and restarts (Reset: the kick-off again)
 # when the ball goes out, both ducks are down, or the ball has not moved for
-# a while (the two pushing it from both sides). Each kick-off (the first one
+# a while with both ducks at it (pushing it from both sides). Each kick-off (the first one
 # too: the tree starts with a Reset) puts the ducks at random spots near the
 # stage's, in their own halves (Reset itself still goes back to the stage's).
 import math
@@ -28,7 +28,8 @@ SETTLE = 2.0                       # s at the kick spot without a kick: walk thr
 FALL_UP = 0.5                      # trunk up-axis z below this = fallen
 FALL_TIME = 1.5                    # s on the ground before it counts
 OUT_TIME = 0.3                     # s the ball must stay out (or in the goal)
-STALL_MOVE, STALL_TIME = 0.05, 8.0  # the ball moving less than this (m) for this long (s): a stalemate
+STALL_MOVE, STALL_TIME = 0.05, 8.0  # the ball moving less than this (m) for this long (s), while
+STALL_NEAR = 0.35                  # both ducks are this close to it (m): a stalemate
 COOLDOWN = 5.0                     # s after a restart before the referee looks again
 SPREAD_X, SPREAD_Y = 0.35, 0.50    # random kick-off: this far (m) from the stage's spot, along / across the pitch
 SPREAD_YAW = math.radians(40)      # and turned this much at most
@@ -217,8 +218,10 @@ class Referee(py_trees.behaviour.Behaviour):
         is_goal = abs(ry) < GOAL_HALF_W and abs(rx) > GOAL_X + 0.03
         is_out = not is_goal and (abs(ry) > TOUCH_Y or abs(rx) > GOAL_X + 0.05)
         self.out_since = (self.out_since if self.out_since is not None else t) if (is_goal or is_out) else None
-        if self.still is None or math.hypot(b["x"] - self.still[0], b["y"] - self.still[1]) > STALL_MOVE:
-            self.still = (b["x"], b["y"], t)
+        contested = all(p is not None and math.hypot(p["pose"]["x"] - b["x"], p["pose"]["y"] - b["y"]) < STALL_NEAR
+                        for p in (player(label) for label, _, _ in TEAMS))
+        if not contested or self.still is None or math.hypot(b["x"] - self.still[0], b["y"] - self.still[1]) > STALL_MOVE:
+            self.still = (b["x"], b["y"], t)  # (the clock runs only while both press on a ball that stays put)
         if self.quiet_until is None or t >= self.quiet_until:
             if self.out_since is not None and t - self.out_since >= OUT_TIME:
                 if is_goal:
