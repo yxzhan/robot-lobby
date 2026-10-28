@@ -3,10 +3,10 @@
 // with py_trees 2.6 (its wheel there too) and the lobby module
 // (public/py/lobby.py: GoTo, Move, Approach, Follow, Stop, Wait, robots()…,
 // whose leaves bt.js runs). A script defines `root` (a behaviour) or `tree`
-// (a BehaviourTree); PyRunner ticks it every TICK_MS of wall time while the
-// simulation runs, as bt.js's Runner does a text tree.
+// (a BehaviourTree); PyRunner ticks it every TICK_SIM of simulated time
+// while the simulation runs, as bt.js's Runner does a text tree.
 
-import { FAILURE, IDLE, RUNNING, SUCCESS, TICK_MS, context, leaf } from './bt.js';
+import { FAILURE, IDLE, POLL_MS, RUNNING, SUCCESS, context, due, leaf } from './bt.js';
 
 const VENDOR = new URL('../vendor/pyodide/', import.meta.url);
 const WHEEL = 'py_trees-2.6.0-py2.py3-none-any.whl';
@@ -159,7 +159,7 @@ export class PyRunner {
     } finally {
       scope.destroy();
     }
-    this.timer = setInterval(() => this.step(), TICK_MS);
+    this.timer = setInterval(() => this.step(), POLL_MS);
     this.step();
   }
 
@@ -172,7 +172,7 @@ export class PyRunner {
   }
 
   step() {
-    if (this.status !== RUNNING || this.app.paused || !this.app.data) return;
+    if (this.status !== RUNNING || this.app.paused || !this.app.data || !due(this, this.app.data.time)) return;
     try {
       world = { app: this.app, goals: this.goals };
       const time = this.app.data.time;

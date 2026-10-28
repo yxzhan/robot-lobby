@@ -13,8 +13,8 @@ world looks like, for conditions of one's own.
     ])
 
 The script defines `root` (a behaviour) or `tree` (a
-py_trees.trees.BehaviourTree); the panel ticks it 10 times a second while
-the simulation runs.
+py_trees.trees.BehaviourTree); the panel ticks it every 0.1 s of simulated
+time while the simulation runs (alike at any speed of the Physics panel).
 
 Behaviours (each also takes name=...):
   GoTo(robot, x, y, yaw=None)            to a pose on the floor (m, rad)

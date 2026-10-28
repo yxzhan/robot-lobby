@@ -69,4 +69,4 @@ the conversation. A turn makes at most 40 requests.
 The model is not a controller: each request takes seconds, so it does not
 steer joints or speeds; it sets goals and skills, and for anything
 coordinated or reactive it writes a behaviour tree that the page then ticks
-10 times a second.
+every 0.1 s of simulated time.

@@ -2,8 +2,9 @@
 // action naming the robots it moves (the Behavior panel, btpanel.js; from
 // the devtools console window.bt). Built on main.js's window.goals, the
 // goal markers, so it works in local and network mode alike; the tree runs
-// in this page (ticked TICK_MS of wall time apart, on simulation time:
-// paused, nothing happens; at 4× speed a Wait is over 4× as fast).
+// in this page, ticked every TICK_SIM of simulated time (at most once a
+// frame: the simulation's state changes no more often), so it acts the same
+// at any speed of the Physics panel; paused, nothing happens.
 //
 // The text form, one node a line, children indented under it, `#` comments:
 //
@@ -53,7 +54,16 @@
 // Halting a node (a Timeout, a Parallel done, Stop in the panel) clears the
 // goals it set.
 
-export const TICK_MS = 100;
+export const TICK_SIM = 0.1;  // s of simulated time between ticks
+export const POLL_MS = 10;    // ms of wall time between looks at the time
+
+// Whether runner `r` is due a tick at simulated time `time` (time gone back,
+// a Reset: at once); notes it.
+export function due(r, time) {
+  if (r.lastTick != null && time >= r.lastTick && time - r.lastTick < TICK_SIM - 1e-9) return false;
+  r.lastTick = time;
+  return true;
+}
 export const RUNNING = 'running', SUCCESS = 'success', FAILURE = 'failure', IDLE = 'idle';
 
 const MOVED = 0.1;      // m: Approach/Follow set a goal again once it would move this far
@@ -454,7 +464,7 @@ export class Runner {
     this.status = RUNNING;
     this.error = null;
     this.start = null;  // sim time it started
-    this.timer = setInterval(() => this.step(), TICK_MS);
+    this.timer = setInterval(() => this.step(), POLL_MS);
     this.step();
   }
 
@@ -474,7 +484,7 @@ export class Runner {
   }
 
   step() {
-    if (this.status !== RUNNING || this.app.paused || !this.app.data) return;
+    if (this.status !== RUNNING || this.app.paused || !this.app.data || !due(this, this.app.data.time)) return;
     try {
       const ctx = this.context();
       this.start ??= ctx.time;

@@ -279,7 +279,7 @@ function tools(agent) {
 
     [{
       name: 'run_behavior_tree',
-      description: `Runs a behaviour tree in the Behavior panel (replacing one that runs): a py_trees 2.6 script (Python, in the page) that defines \`root\` (a behaviour) or \`tree\` (a BehaviourTree). Ticked 10 times a second of wall time while the simulation runs; check it with behavior_tree_status. The lobby module:\n\n${agent.lobbyDoc}`,
+      description: `Runs a behaviour tree in the Behavior panel (replacing one that runs): a py_trees 2.6 script (Python, in the page) that defines \`root\` (a behaviour) or \`tree\` (a BehaviourTree). Ticked every 0.1 s of simulated time while the simulation runs; check it with behavior_tree_status. The lobby module:\n\n${agent.lobbyDoc}`,
       input_schema: { type: 'object', properties: { script: { type: 'string' } }, required: ['script'] },
     }, async ({ script }) => {
       await window.bt.run(script, 'python');
