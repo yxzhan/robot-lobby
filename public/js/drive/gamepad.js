@@ -1,6 +1,6 @@
 // A gamepad (the Gamepad API's standard mapping: Xbox / PlayStation layout)
 // read through bindings of actions to stick axes and buttons:
-// public/js/drive/gamepad_defaults.json, changed in the Teleop panel (Input:
+// public/json/gamepad_defaults.json, changed in the Teleop panel (Input:
 // Gamepad) and kept in this browser. A binding is 'axisN' (stick axis N,
 // 'axis0'/'axis1' the left stick's x/y, 'axis2'/'axis3' the right one's, y
 // growing downward), '-axisN' (reversed) or 'buttonN'; '' is none.
@@ -10,7 +10,7 @@ const FALLBACK = {
   deadzone: 0.15, forward: '-axis1', left: '-axis0', turn: '-axis2',
   height_up: 'button12', height_down: 'button13', gripper1: 'button6', gripper2: 'button7',
 };
-const FILE = await fetch(new URL('./gamepad_defaults.json', import.meta.url)).then((r) => r.json()).catch(() => FALLBACK);
+const FILE = await fetch(new URL('../../json/gamepad_defaults.json', import.meta.url)).then((r) => r.json()).catch(() => FALLBACK);
 const { _comment: COMMENT, ...defaults } = FILE;
 export const GAMEPAD_DEFAULTS = defaults;
 

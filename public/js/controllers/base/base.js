@@ -21,14 +21,14 @@
 
 import { CONTROL_DT } from '../groot.js';
 
-// Built-in setups per robot file, in controllers/base/defaults.json (shared with the
+// Built-in setups per robot file, in json/base_defaults.json (shared with the
 // server, server/base.py). Garmi strafes slower than it drives, like the
 // real robot (teleop.py); its rollers give yaw a lever of only |x - y| = 4 cm
 // and the base turns ~3x slower than that predicts, hence its yaw
 // feedforward. Stretch 3's wheel velocity servos chatter (the left one flips
 // ±2.3 rad/s every step, in MuJoCo too), so its wheels run on software
 // servos.
-export const BASE_DEFAULTS = await fetch(new URL('./defaults.json', import.meta.url)).then((r) => r.json()).catch(() => ({}));
+export const BASE_DEFAULTS = await fetch(new URL('../../../json/base_defaults.json', import.meta.url)).then((r) => r.json()).catch(() => ({}));
 
 export const KINDS = [['', 'none'], ['wheels', 'wheels (differential, skid, mecanum)'], ['planar', 'planar joints (x, y, yaw)']];
 const STORE = 'mujoco-filament/base/';

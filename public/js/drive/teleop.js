@@ -979,7 +979,7 @@ export class TeleopPanel {
       this.button('Save', `Use this base setup for every spawn of this robot (${this.app.net ? 'on the server, for everyone' : 'this browser'})`, () => { c.save(); this.render(); }),
       this.button(c.hasDefaults ? 'Defaults' : 'Auto', c.hasDefaults ? 'Back to the built-in base setup' : 'Back to the setup found in the model',
         () => { c.restoreDefaults(); c.reset(); this.render(); }),
-      this.button('Export', 'Copy the setup as JSON (for controllers/base/defaults.json)', () => {
+      this.button('Export', 'Copy the setup as JSON (for json/base_defaults.json)', () => {
         const json = JSON.stringify({ [c.key]: c.config }, null, 2);
         navigator.clipboard?.writeText(json).catch(() => {});
         console.log(json);
@@ -1045,7 +1045,7 @@ export class TeleopPanel {
       }),
       this.button('Save', `Use this IK setup for every spawn of this robot (${this.app.net ? 'on the server, for everyone' : 'this browser'})`, () => { ik.save(); this.render(); }),
       this.button(ik.hasDefaults ? 'Defaults' : 'Auto', ik.hasDefaults ? 'Back to the built-in IK setup' : 'Back to the chains found in the model', () => { ik.restoreDefaults(); this.render(); }),
-      this.button('Export', 'Copy the setup as JSON (for controllers/ik/defaults.json)', () => {
+      this.button('Export', 'Copy the setup as JSON (for json/ik_defaults.json)', () => {
         const json = JSON.stringify({ [ik.key]: ik.config }, null, 2);
         navigator.clipboard?.writeText(json).catch(() => {});
         console.log(json);

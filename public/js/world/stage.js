@@ -6,9 +6,9 @@
 //   stage.json     {version, id, name, saved, items, physics, view; published
 //                  ones also author, published}
 //   thumbnail.jpg  the main view when it was saved, 256x256
-//   ik.json        IK setups in use, by robot file (keyed like controllers/ik/defaults.json)
-//   base.json      mobile base setups in use, likewise (controllers/base/defaults.json)
-//   cameras.json   camera setups in use, by cameraKey (cameras/defaults.json)
+//   ik.json        IK setups in use, by robot file (keyed like json/ik_defaults.json)
+//   base.json      mobile base setups in use, likewise (json/base_defaults.json)
+//   cameras.json   camera setups in use, by cameraKey (json/camera_defaults.json)
 // An item: {rel, label, pos, yaw, use (controllers switched on, robots only),
 // cameras (the robot's switched-on cameras), state: {qpos: {joint: value, or
 // the list of a free or ball joint}, ctrl: {actuator: value}, mocap: {body:

@@ -66,8 +66,8 @@ remembers the choice; Publish asks the same): a stage loads without them,
 leaving the physics, the view and the setups as they are and the models in
 their spawn pose. A stage is a folder named by a random id
 (the name is inside, so names may repeat): `stage.json`, `thumbnail.jpg`,
-`ik.json`, `base.json`, `cameras.json` (keyed like `controllers/ik/defaults.json`,
-`controllers/base/defaults.json`, `cameras/defaults.json`). Saved stages are **My
+`ik.json`, `base.json`, `cameras.json` (keyed like `json/ik_defaults.json`,
+`json/base_defaults.json`, `json/camera_defaults.json`). Saved stages are **My
 stages**: an IndexedDB record of those files in this browser, in either
 mode (on a server, the server makes the stage of its world and the page
 keeps it). **Publish** (on a server only) shares what is spawned, or one of

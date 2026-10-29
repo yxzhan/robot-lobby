@@ -24,13 +24,13 @@
 //
 // A robot file's cameras (as IK's chains): saved in this browser (CAM_STORE,
 // the panel's Save), else its built-in setup in
-// public/js/cameras/defaults.json (CAMERA_DEFAULTS, keyed by the file under
-// mjcf_assets/robots/ like controllers/ik/defaults.json, other models by theirs under
+// public/json/camera_defaults.json (CAMERA_DEFAULTS, keyed by the file under
+// mjcf_assets/robots/ like json/ik_defaults.json, other models by theirs under
 // mjcf_assets/; the panel's Export copies a setup for it), else the MJCF
 // <camera>s of its model (autoCameras).
 
 const CAM_STORE = 'robot-lobby/cameras/';
-export const CAMERA_DEFAULTS = await fetch(new URL('./defaults.json', import.meta.url)).then((r) => r.json()).catch(() => ({}));
+export const CAMERA_DEFAULTS = await fetch(new URL('../../json/camera_defaults.json', import.meta.url)).then((r) => r.json()).catch(() => ({}));
 // A model file's key in CAMERA_DEFAULTS.
 export const cameraKey = (rel) => rel.replace(/^(.*\/)?mjcf_assets\/(robots\/)?/, '');
 const SIZE = 256, HZ = 10, FOVY = 60;  // new cameras'
@@ -174,8 +174,8 @@ export class Cameras {
 
   hasDefaults(robot) { return !!CAMERA_DEFAULTS[cameraKey(robot.visual.rel)]; }
 
-  // The setup as JSON for cameras/defaults.json: {key: {cameras}}, number
-  // lists and flat objects on one line each (as controllers/ik/defaults.json has them).
+  // The setup as JSON for json/camera_defaults.json: {key: {cameras}}, number
+  // lists and flat objects on one line each (as json/ik_defaults.json has them).
   exportJson(robot) {
     return JSON.stringify({ [cameraKey(robot.visual.rel)]: { cameras: this.config(robot)?.cameras ?? [] } }, null, 2)
       .replace(/\[\s+([^[\]{}]*?)\s+\]/g, (_, x) => `[${x.split(/,\s*/).join(', ')}]`)
@@ -591,7 +591,7 @@ export class Cameras {
 // foldable box (window switch, pose marker, delete; name, link, follow,
 // offset, turn, size, rate, field of view), + Camera (on the selected,
 // double-clicked, body if it is the robot's), Save (this browser), Defaults
-// / Auto, Export (for cameras/defaults.json).
+// / Auto, Export (for json/camera_defaults.json).
 export class CamerasPanel {
   constructor(cameras, root) {
     this.cameras = cameras;
@@ -673,8 +673,8 @@ export class CamerasPanel {
         if (key) cameras.switchOn(key);
       }),
       this.button('Save', 'Use these cameras for every spawn of this robot (this browser)', () => cameras.save(robot)),
-      this.button(hasDefaults ? 'Defaults' : 'Auto', hasDefaults ? 'Back to the built-in cameras (cameras/defaults.json)' : 'Back to the cameras in the model', () => cameras.restoreDefaults(robot)),
-      this.button('Export', 'Copy the cameras as JSON (for cameras/defaults.json)', () => {
+      this.button(hasDefaults ? 'Defaults' : 'Auto', hasDefaults ? 'Back to the built-in cameras (json/camera_defaults.json)' : 'Back to the cameras in the model', () => cameras.restoreDefaults(robot)),
+      this.button('Export', 'Copy the cameras as JSON (for json/camera_defaults.json)', () => {
         const json = cameras.exportJson(robot);
         navigator.clipboard?.writeText(json).catch(() => {});
         console.log(json);

@@ -43,13 +43,13 @@ which it loads no MuJoCo at all:
   repeated while held; the server stops a command not repeated for 1 s
   (a closed or frozen tab), and the base's measured twist comes back for
   the readout. Base setups saved from the panel go to
-  `server/saved/base.json`; `public/js/controllers/base/defaults.json` holds the built-in ones.
+  `server/saved/base.json`; `public/json/base_defaults.json` holds the built-in ones.
 - **IK markers.** They work as in local mode:
   dragging a marker moves it at once and sends its target (in the chain's
   reference body frame, so it rides with the robot); the server sends
   targets and tracking errors back 5 times a second, so every browser sees
   the markers move. Chain edits, Save (to `server/saved/ik.json`, for
-  everyone) and Defaults are requests too. `public/js/controllers/ik/defaults.json` holds the
+  everyone) and Defaults are requests too. `public/json/ik_defaults.json` holds the
   built-in setups for both sides.
 - **Stages.** Saved in the browser (My stages): the server makes the
   world's items, state and controller setups into a stage, the page adds

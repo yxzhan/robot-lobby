@@ -79,8 +79,8 @@ held the same way (the first browser with Clock on and a robot on).
 
 ## ROS profiles: named like the real robot
 
-A robot file can have a profile in `public/js/ros/profiles.json` (keyed
-like `controllers/ik/defaults.json`) so that programs written for the real robot work
+A robot file can have a profile in `public/json/ros_profiles.json` (keyed
+like `json/ik_defaults.json`) so that programs written for the real robot work
 unchanged: `settings` (defaults for the topics and switches above),
 `prefix`, `joints` and `frames` (model name → ROS name; a joint mapped to
 null is left out), `world` (the root bodies' parent frame), `commands`

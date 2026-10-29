@@ -54,7 +54,7 @@ any Input mode: its sticks walk and turn and take over from a goal like the
 keys, which also do so in goal-marker mode. Two of its inputs close the
 grippers of the driven robot's first and second IK chain as far as they
 are pressed, like a WebXR trigger (let go: open). Its bindings are
-`public/js/drive/gamepad_defaults.json` (by default left stick walk, right
+`public/json/gamepad_defaults.json` (by default left stick walk, right
 stick turn, d-pad up/down height, LT/RT the grippers); **Input → Gamepad**
 (the only choice for a robot that does not walk but has IK chains) shows
 them per action, **Set** binds the next button pressed or stick pushed,

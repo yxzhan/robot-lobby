@@ -21,8 +21,8 @@ title bar; its **◉** looks through it in the main view, Esc: back); **⌖**
 shows where it is in the scene: a frustum of its field of view and aspect,
 a green tick on its top edge. **Save** keeps the robot's cameras for every
 spawn of its model in this browser; without, a model starts from its
-built-in setup in `public/js/cameras/defaults.json` (keyed like
-`controllers/ik/defaults.json`: the file under `mjcf_assets/robots/`, other models by
+built-in setup in `public/json/camera_defaults.json` (keyed like
+`json/ik_defaults.json`: the file under `mjcf_assets/robots/`, other models by
 theirs under `mjcf_assets/`), else the model's cameras. **Export** copies
 the setup as JSON for that file, **Defaults** / **Auto** goes back to it /
 to the model's.

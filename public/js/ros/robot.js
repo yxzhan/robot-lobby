@@ -43,8 +43,8 @@
 // topics and its own address if it has one; the prefix per robot (it names
 // one robot, not its model). Switched on in the panel each time.
 //
-// A robot file can have a ROS profile (profiles in public/json/
-// ros/profiles.json, keyed like controllers/ik/defaults.json): how the real robot's ROS
+// A robot file can have a ROS profile (public/json/ros_profiles.json,
+// keyed like json/ik_defaults.json): how the real robot's ROS
 // side names things, so programs written for it (MoveIt, ros2_control with
 // topic_based_ros2_control) work unchanged:
 //   settings  defaults for the robot's settings above (topics, tf.bodies…)
@@ -73,7 +73,7 @@ import { RosBridge } from './bridge.js';
 
 const WORLD_STORE = 'robot-lobby/ros-world';
 const STORE = 'robot-lobby/ros';  // per robot file
-export const ROS_PROFILES = await fetch(new URL('./profiles.json', import.meta.url)).then((r) => r.json()).catch(() => ({}));
+export const ROS_PROFILES = await fetch(new URL('../../json/ros_profiles.json', import.meta.url)).then((r) => r.json()).catch(() => ({}));
 const MAX_BUFFERED = 8e6;  // bytes waiting in the WebSocket: camera frames are dropped above
 
 export const WORLD_DEFAULTS = {
@@ -344,7 +344,7 @@ export class RosRobot {
     this.app = world.app;
     this.robot = robot;
     this.key = robot.key ?? robot.label;
-    this.profile = ROS_PROFILES[this.key] ?? {};  // how the real robot names things (ros/profiles.json)
+    this.profile = ROS_PROFILES[this.key] ?? {};  // how the real robot names things (json/ros_profiles.json)
     this.settings = loadRobot(this.key);
     this.prefix = this.profile.prefix ?? '';  // before every name ('': the robot's id; '/': none)
     this.on = false;

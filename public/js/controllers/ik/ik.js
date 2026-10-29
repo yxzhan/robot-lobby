@@ -25,7 +25,7 @@
 // tendon length or a software servo target.
 //
 // Configs, first found: one saved in localStorage from the Teleop panel,
-// IK_DEFAULTS per robot file (controllers/ik/defaults.json, keyed like base.js's BASE_DEFAULTS), or one
+// IK_DEFAULTS per robot file (json/ik_defaults.json, keyed like base.js's BASE_DEFAULTS), or one
 // made from the model (autoConfig): every serial run of at least MIN_CHAIN
 // free movable joints that ends a branch of the tree (an arm, a leg,
 // a neck with enough joints), gripper/finger joints left out and their
@@ -39,11 +39,11 @@
 
 import { CONTROL_DT } from '../groot.js';
 
-// Built-in setups per robot file, in controllers/ik/defaults.json (shared with the
+// Built-in setups per robot file, in json/ik_defaults.json (shared with the
 // server, server/ik.py). Garmi and the Panda put the Franka TCP 0.1034 m past
 // the hand flange, between the fingertips (panda.xml has no TCP site; only
 // mjx_panda.xml's "gripper", 0.1 m out).
-export const IK_DEFAULTS = await fetch(new URL('./defaults.json', import.meta.url)).then((r) => r.json()).catch(() => ({}));
+export const IK_DEFAULTS = await fetch(new URL('../../../json/ik_defaults.json', import.meta.url)).then((r) => r.json()).catch(() => ({}));
 
 const STORE = 'mujoco-filament/ik/';
 const MIN_CHAIN = 3;  // fewest joints for an automatic chain (a 2-joint head is left alone)

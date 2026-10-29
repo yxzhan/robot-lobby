@@ -171,7 +171,7 @@ export class RosPanel {
     det.append(this.field('Prefix', 'Before every topic not starting with / (r1/joint_states, r1/<camera>/…) and every TF frame (r1/base_link): empty, the robot\'s id; / for none', prefix));
     const prof = rr.profile, named = [prof.joints && 'joints', prof.frames && 'frames', prof.commands && 'commands', prof.cameras && 'cameras'].filter(Boolean);
     det.append(el('div', { className: 'bar' },
-      el('span', { className: 'note', title: prof.about ?? '', textContent: Object.keys(prof).length ? `ROS profile of ${rr.key} (ros/profiles.json)${named.length ? `: ${named.join(', ')} named as on the real robot` : ''}` : 'no ROS profile for this model' }),
+      el('span', { className: 'note', title: prof.about ?? '', textContent: Object.keys(prof).length ? `ROS profile of ${rr.key} (json/ros_profiles.json)${named.length ? `: ${named.join(', ')} named as on the real robot` : ''}` : 'no ROS profile for this model' }),
       this.button('Defaults', 'This robot\'s settings back to the defaults (the profile\'s, if it has one)', () => { rr.restoreDefaults(); this.render(); })));
     const topic = (k, label, title) => {
       const box = el('input', { type: 'checkbox', checked: s[k].on });
