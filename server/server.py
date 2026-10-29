@@ -1401,8 +1401,11 @@ class World:
         'body_jntnum', 'body_jntadr', 'body_mocapid', 'body_parentid', 'body_mass', 'body_subtreemass',
         'actuator_trntype', 'actuator_trnid', 'actuator_ctrllimited', 'actuator_ctrlrange', 'actuator_biasprm',
         'geom_bodyid', 'geom_type', 'geom_size', 'geom_pos', 'geom_quat', 'geom_aabb', 'geom_contype', 'geom_conaffinity',
-        'site_bodyid', 'site_pos', 'site_quat')}
-    out.update({k: int(getattr(m, k)) for k in ('nbody', 'njnt', 'ngeom', 'nsite', 'nu', 'nq', 'nv', 'na', 'nmocap')})
+        'site_bodyid', 'site_pos', 'site_quat',
+        # The model's lights, for the Render panel's Scene lights (scenelights.js): placed by their bodies.
+        'light_type', 'light_active', 'light_bodyid', 'light_pos', 'light_dir', 'light_diffuse', 'light_intensity',
+        'light_range', 'light_cutoff', 'light_exponent')}
+    out.update({k: int(getattr(m, k)) for k in ('nbody', 'njnt', 'ngeom', 'nsite', 'nu', 'nq', 'nv', 'na', 'nmocap', 'nlight')})
     out['names'] = {'body': names(mujoco.mjtObj.mjOBJ_BODY, m.nbody), 'joint': names(mujoco.mjtObj.mjOBJ_JOINT, m.njnt),
                     'actuator': names(mujoco.mjtObj.mjOBJ_ACTUATOR, m.nu), 'site': names(mujoco.mjtObj.mjOBJ_SITE, m.nsite)}
     return out

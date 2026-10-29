@@ -134,8 +134,9 @@ export class RenderPanel {
     this.body.append(row('Follow selection', '', title, box));
   }
 
-  // The Lighting section: sliders for the sun and the ambient light, live
-  // while dragging (this page only).
+  // The Lighting section: sliders for the sun and the ambient light, and the
+  // scene's own lights on or off and their brightness, live while dragging
+  // (this page only).
   lighting(row) {
     const l = this.app.lighting;
     this.body.append(el('div', { className: 'sub', textContent: 'Lighting' }));
@@ -153,6 +154,15 @@ export class RenderPanel {
     slider('azimuth', 'Azimuth', 0, 360, 1, '°', 'where the sun stands around the world: degrees from +x toward +y');
     slider('elevation', 'Elevation', 5, 90, 1, '°', 'how high the sun stands above the horizon: low makes long shadows, 90 straight down');
     slider('ambient', 'Ambient', 0, 300, 5, '%', 'light from all around (the sky): fills the shadows (100 %: the default)');
+    // The model's own lights (scenelights.js), off by default: then the sun
+    // and the ambient light alone light every scene alike.
+    const own = 'light the scene with its own lights (MJCF <light>: a lab\'s ceiling panels, a kitchen\'s lamps; '
+      + 'no shadows) in place of the sun, the ambient light at a fifth; off: the sun and the ambient light. '
+      + 'A scene without lights keeps the sun';
+    const box = el('input', { type: 'checkbox', checked: !!l.scene, title: own });
+    box.onchange = () => this.app.setLighting({ ...this.app.lighting, scene: box.checked });
+    this.body.append(row('Scene lights', '', own, box));
+    slider('sceneLevel', 'Scene', 0, 300, 5, '%', 'brightness of the scene\'s own lights (100 %: the default)');
     const title = 'the sunlight\'s color';
     const color = el('input', { type: 'color', value: l.color, title });
     color.oninput = () => this.app.setLighting({ ...this.app.lighting, color: color.value });

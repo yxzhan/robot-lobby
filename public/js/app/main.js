@@ -36,6 +36,7 @@ import { RenderPanel, loadQuality } from '../render/render.js';
 import { addSwarm } from './swarm.js';
 import { FLOOR_STYLES, floorTexture, hexRgb, loadFloor, saveFloor } from '../render/floor.js';
 import { AMBIENT, SUN_LUX, linearRgb, loadLighting, saveLighting, sunDirection } from '../render/lighting.js';
+import { SCENE_AMBIENT, SceneLights } from '../render/scenelights.js';
 import { ServerPanel } from '../net/serverpanel.js';
 import { SharePanel } from '../net/share.js';
 import { MARKER } from './marker.js';
@@ -745,6 +746,7 @@ class App {
     this.scene.setSkybox(this.skybox);
     this.indirect = Filament.IndirectLight.Builder().irradianceSh(3, sh).reflections(sky).intensity(AMBIENT).build(engine);
     this.scene.setIndirectLight(this.indirect);
+    this.sceneLights = new SceneLights(engine, this.scene);  // the model's own lights, when the Render panel says so
     this.setLighting(loadLighting());  // the Render panel's (lighting.js)
 
     // The floor of world.js's base XML (a size-0, i.e. infinite, plane), drawn
@@ -851,12 +853,19 @@ class App {
   setLighting(l) {
     this.lighting = l;
     saveLighting(l);
-    const lm = this.engine.getLightManager(), sun = lm.getInstance(this.sun);
-    lm.setIntensity(sun, SUN_LUX * l.sun / 100);
+    this.applyLighting();
+  }
+
+  // The sun and ambient light as this.lighting says; while the model's own
+  // lights shine (sceneLit, frame: the Render panel's Scene lights), no sun
+  // and SCENE_AMBIENT of the ambient light (scenelights.js).
+  applyLighting() {
+    const l = this.lighting, lm = this.engine.getLightManager(), sun = lm.getInstance(this.sun);
+    lm.setIntensity(sun, this.sceneLit ? 0 : SUN_LUX * l.sun / 100);
     lm.setDirection(sun, sunDirection(l));
     lm.setColor(sun, linearRgb(l.color));
     sun.delete();
-    this.indirect.setIntensity(AMBIENT * l.ambient / 100);
+    this.indirect.setIntensity(AMBIENT * l.ambient / 100 * (this.sceneLit ? SCENE_AMBIENT : 1));
   }
 
   // The world floor's look: `f` as loadFloor returns it (floor.js).
@@ -1546,6 +1555,10 @@ class App {
     }
     this.showStats();
     this.syncMarkers();
+    // The model's lights, where their bodies are; the sun and ambient light
+    // change over once they shine or stop (a spawn, the Render panel).
+    const lit = this.sceneLights.sync(this.model, this.data, this.lighting);
+    if (lit !== !!this.sceneLit) { this.sceneLit = lit; this.applyLighting(); }
     this.panel?.update(performance.now());
     this.teleop?.update(performance.now());  // the panel's inputs, pushed into the drive layer
     this.drive.tick();
