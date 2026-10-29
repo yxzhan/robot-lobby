@@ -131,7 +131,10 @@ try {
       const c = lo.map((v, k) => (v + hi[k]) / 2), radius = 0.5 * Math.hypot(...hi.map((v, k) => v - lo[k]));
       app.orbit.center = c;
       app.orbit.azim = -0.6; app.orbit.elev = 0.45;
-      app.orbit.dist = Math.max(0.15, 0.85 * radius / Math.tan(22.5 * Math.PI / 180));
+      // Its bounding sphere about two thirds of the 720 px clip (of an 800 px
+      // high window): 0.85 filled the window's height, and a long object (a
+      // banana, a bottle on its side) ran out of the clip's sides.
+      app.orbit.dist = Math.max(0.15, 1.3 * radius / Math.tan(22.5 * Math.PI / 180));
       if (!room) return;
       // From the side away from the main wall, a quarter turn off square.
       const main = [0, 0];
