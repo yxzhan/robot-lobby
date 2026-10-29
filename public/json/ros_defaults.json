@@ -1,0 +1,15 @@
+{
+  "custom/franka_fr3_hand/franka_fr3_hand.xml": {
+    "about": "As franka_ros2 drives an FR3 with its hand through ros2_control: the lobby is the hardware behind topic_based_ros2_control's default topics (server/ros/fr3: launch, URDF, controllers); robot_state_publisher computes TF from the URDF",
+    "prefix": "/",
+    "settings": {
+      "jointStates": { "on": true, "topic": "/robot_joint_states" },
+      "jointCommand": { "on": true, "topic": "/robot_joint_commands" },
+      "tf": { "on": true, "topic": "/tf", "bodies": false },
+      "cmdVel": { "on": false, "topic": "cmd_vel" }
+    },
+    "commands": {
+      "fr3_finger_joint1": { "actuator": "fr3_hand" }
+    }
+  }
+}

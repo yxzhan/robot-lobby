@@ -494,6 +494,7 @@ export class Cameras {
     gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
     c.frames++;
     c.stamp = c.shot;
+    c.simStamp = c.simShot;
     return true;
   }
 
@@ -526,6 +527,7 @@ export class Cameras {
     c.fence = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
     gl.flush();
     c.shot = Date.now();  // when it was taken (stamp: of the frame in c.pixels)
+    c.simShot = app.data?.time ?? 0;  // and in simulated time (a ROS bridge on sim time)
     app.offscreen = null;
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     return true;

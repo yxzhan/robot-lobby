@@ -17,5 +17,6 @@ __pycache__/
 **.tar.gz
 **.rviz
 tmp/
+ros_ws/
 # notes kept out of the repository
 TODOS.md

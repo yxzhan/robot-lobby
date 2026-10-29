@@ -55,9 +55,11 @@ Server -> client:
   {type: 'reply', rid, ...} / {type: 'error', op, msg, rid?}
   {type: 'pong', t}
   binary state, physics['stateHz'] times a second (30 by default): int32 [version, epoch, nq, nmocap,
-  nu], 4 bytes padding, float64 time, then float32 [qpos, mocap_pos,
-  mocap_quat, ctrl]; ctrl only about CTRL_HZ times a second (nu 0 in the
-  other states). `epoch` changes whenever the state jumps (reset, edits), so
+  nu, nv], float64 time, then float32 [qpos, mocap_pos, mocap_quat, ctrl,
+  qvel, qfrc_actuator]; ctrl only about CTRL_HZ times a second (nu 0 in the
+  other states); qvel and qfrc_actuator (nv 0 without) while a client asks
+  for them (op dynamics {on}: the ROS bridge's joint velocities and
+  efforts). `epoch` changes whenever the state jumps (reset, edits), so
   clients do not interpolate across it.
 
 Robots are attached in order (like world.js), so bodies, joints, actuators
@@ -634,6 +636,7 @@ class World:
     self.next_control = 0   # sim time of the next controller tick (IK.CONTROL_DT apart)
     self.clients = set()
     self.transports = {}  # ws -> its connection's transport (how much it still has to send)
+    self.dynamics = set()  # clients that want qvel and qfrc_actuator in the states
     self.lock = asyncio.Lock()  # one scene change at a time
     # The model and data belong to the stepping thread while it holds this
     # (run); requests that change or read them take it in between.
@@ -930,6 +933,8 @@ class World:
     elif op == 'ctrl':
       d.ctrl[int(msg['a'])] = float(msg['v'])
       self.dirty = True
+    elif op == 'dynamics':
+      (self.dynamics.add if msg.get('on') else self.dynamics.discard)(ws)
     elif op == 'perturb':
       self.set_perturb(ws, msg)
     elif op == 'ray':
@@ -1303,8 +1308,9 @@ class World:
 
   def state_bytes(self, ctrl=True):
     m, d = self.model, self.data
-    head = np.array([self.version, self.epoch, m.nq, m.nmocap, m.nu if ctrl else 0, 0], np.int32)
-    parts = [d.qpos, d.mocap_pos.reshape(-1), d.mocap_quat.reshape(-1)] + ([d.ctrl] if ctrl else [])
+    dyn = bool(self.dynamics)
+    head = np.array([self.version, self.epoch, m.nq, m.nmocap, m.nu if ctrl else 0, m.nv if dyn else 0], np.int32)
+    parts = [d.qpos, d.mocap_pos.reshape(-1), d.mocap_quat.reshape(-1)] + ([d.ctrl] if ctrl else []) + ([d.qvel, d.qfrc_actuator] if dyn else [])
     return head.tobytes() + np.float64(d.time).tobytes() + np.concatenate(parts).astype(np.float32).tobytes()
 
   def world_tables(self):
@@ -1434,6 +1440,7 @@ async def ws_handler(request):
   finally:
     world.clients.discard(ws)
     world.transports.pop(ws, None)
+    world.dynamics.discard(ws)
     async with world.stepping:
       world.perturbs.pop(ws, None)
       world.expire_commands(time.monotonic(), gone=ws)

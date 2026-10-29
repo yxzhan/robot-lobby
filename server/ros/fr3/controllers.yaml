@@ -1,0 +1,34 @@
+# ros2_control for the lobby's FR3 with its hand (fr3.urdf, made by
+# ../mjcf2urdf.py): the controllers franka_ros2 runs on the real robot's
+# position interfaces, here on topic_based_ros2_control's topics, which the
+# lobby's ROS bridge serves (its ROS profile: public/json/ros_defaults.json).
+controller_manager:
+  ros__parameters:
+    update_rate: 100  # Hz (the lobby's joint states come at the bridge's rate, 30 by default)
+
+    joint_state_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
+
+    fr3_arm_controller:
+      type: joint_trajectory_controller/JointTrajectoryController
+
+    fr3_gripper:
+      type: parallel_gripper_action_controller/GripperActionController
+
+fr3_arm_controller:
+  ros__parameters:
+    joints: [fr3_joint1, fr3_joint2, fr3_joint3, fr3_joint4, fr3_joint5, fr3_joint6, fr3_joint7]
+    command_interfaces: [position]
+    state_interfaces: [position, velocity]
+    allow_nonzero_velocity_at_trajectory_end: false
+    constraints:
+      goal_time: 1.0
+      stopped_velocity_tolerance: 0.05
+
+fr3_gripper:
+  ros__parameters:
+    joint: fr3_finger_joint1  # each finger's opening, 0-0.04 m (the lobby's fr3_hand actuator)
+    state_interfaces: [position, velocity]
+    goal_tolerance: 0.002
+    allow_stalling: true      # closed on something: done
+    stall_timeout: 0.5

@@ -71,6 +71,7 @@ export class NetClient {
       this.snaps = [];  // the server sends its scene and state anew (it may have restarted)
       this.renderTime = null;
       this.ctrl = null;
+      if (this.dynamicsFor?.size) this.send('dynamics', { on: true });  // (asked for before: again on a new connection)
       const ping = () => {
         this.checkAlive();
         this.waiting ??= performance.now();  // cleared by any message
@@ -139,6 +140,15 @@ export class NetClient {
     if (this.ws.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify({ op, ...args }));
   }
 
+  // Joint velocities and actuator forces in the states (the ROS bridge's
+  // joint_states) while anyone here wants them: `who` asks or lets go.
+  wantDynamics(who, on) {
+    this.dynamicsFor ??= new Set();
+    const had = this.dynamicsFor.size > 0;
+    if (on) this.dynamicsFor.add(who); else this.dynamicsFor.delete(who);
+    if (had !== this.dynamicsFor.size > 0) this.send('dynamics', { on: !had });
+  }
+
   // A request with a reply (e.g. 'ray'): resolves to the server's answer.
   request(op, args = {}) {
     const rid = this.nextRid++;
@@ -162,7 +172,7 @@ export class NetClient {
   }
 
   push(buf) {
-    const [version, epoch, nq, nmocap, nu] = new Int32Array(buf, 0, 5);
+    const [version, epoch, nq, nmocap, nu, nv] = new Int32Array(buf, 0, 6);
     const time = new Float64Array(buf, 24, 1)[0];
     const f = new Float32Array(buf, 32);
     let o = 0;
@@ -170,6 +180,7 @@ export class NetClient {
     const s = {
       version, epoch, time, recv: performance.now(),
       qpos: take(nq), mocap_pos: take(3 * nmocap), mocap_quat: take(4 * nmocap), ctrl: nu ? take(nu) : null,
+      qvel: nv ? take(nv) : null, qfrc_actuator: nv ? take(nv) : null,  // (while asked for: wantDynamics)
     };
     this.traffic.states++;
     const prev = this.snaps.at(-1);
@@ -230,6 +241,8 @@ export class NetClient {
     lerp(data.mocap_pos, a.mocap_pos, b.mocap_pos, alpha);
     for (let k = 0; k < model.nmocap; k++) blendQuat(data.mocap_quat, 4 * k, a.mocap_quat, b.mocap_quat, alpha);
     if (this.ctrl?.version === version && this.ctrl.ctrl.length === data.ctrl.length) data.ctrl.set(this.ctrl.ctrl);
+    if (b.qvel?.length === data.qvel.length) { data.qvel.set(b.qvel); data.qfrc_actuator.set(b.qfrc_actuator); data.dynamics = true; }
+    else data.dynamics = false;
     data.time = a.time + alpha * (b.time - a.time);
     forwardKinematics(robots, data);
     return true;
@@ -279,6 +292,7 @@ export function worldData(model) {
   return {
     time: 0,
     qpos: new Float64Array(model.nq), qvel: new Float64Array(model.nv), act: new Float64Array(model.na),
+    qfrc_actuator: new Float64Array(model.nv), dynamics: false,  // (qvel and qfrc_actuator while the server sends them)
     ctrl: new Float64Array(model.nu),
     mocap_pos: new Float64Array(3 * model.nmocap), mocap_quat: new Float64Array(4 * model.nmocap),
     xpos: new Float64Array(3 * model.nbody), xquat, xmat,

@@ -778,8 +778,21 @@ export class TeleopPanel {
       row(label, title, on, name);
     };
     box.append(el('div', { className: 'sub', textContent: 'Publish' }));
-    topic('jointStates', 'Joints', 'sensor_msgs/JointState: the robot\'s joint positions (and velocities in local mode)');
-    topic('tf', 'TF', 'tf2_msgs/TFMessage: every body in its parent\'s frame, the root in "world"');
+    topic('jointStates', 'Joints', 'sensor_msgs/JointState: the robot\'s joint positions, velocities and efforts (the actuators\' force on each joint)');
+    topic('tf', 'TF', 'tf2_msgs/TFMessage: every body in its parent\'s frame, the root in "world"; the cameras\' optical frames');
+    {
+      const bodies = el('input', { type: 'checkbox', checked: s.tf.bodies !== false });
+      bodies.onchange = () => { s.tf.bodies = bodies.checked; changed(); };
+      row('TF bodies', 'The bodies in TF; off when robot_state_publisher computes them from the URDF (the cameras\' frames still go)',
+        el('label', { className: 'inline' }, bodies, el('span', { textContent: 'every body' })));
+    }
+    topic('clock', 'Clock', 'rosgraph_msgs/Clock: the simulated time, for nodes with use_sim_time');
+    {
+      const sim = el('input', { type: 'checkbox', checked: !!s.simTime });
+      sim.onchange = () => { s.simTime = sim.checked; changed(); };
+      row('Stamps', 'Message stamps in simulated time (with Clock: what use_sim_time nodes expect), else wall time',
+        el('label', { className: 'inline' }, sim, el('span', { textContent: 'simulated time' })));
+    }
     {
       // Cameras: JPEG or raw.
       const c = s.camera;
@@ -801,6 +814,10 @@ export class TeleopPanel {
     if (s.jointCommand.on && busy.length) {
       box.append(el('div', { className: 'note warn', textContent: `${busy.join(' and ')} on: joint commands only move the joints ${busy.length > 1 ? 'they leave' : 'it leaves'} alone (untick ${busy.length > 1 ? 'them' : 'it'} above)` }));
     }
+    const prof = link.profile, named = [prof.joints && 'joints', prof.frames && 'frames', prof.commands && 'commands', prof.cameras && 'cameras'].filter(Boolean);
+    box.append(el('div', { className: 'bar' },
+      el('span', { className: 'note', textContent: Object.keys(prof).length ? `ROS profile of ${link.key} (ros_defaults.json)${named.length ? `: ${named.join(', ')} named as on the real robot` : ''}` : 'no ROS profile for this model' }),
+      this.button('Defaults', 'Settings back to the defaults (the profile\'s, if it has one)', () => { link.restoreDefaults(); this.render(); })));
     const counts = el('div', { className: 'readout' });
     box.append(counts, el('div', { className: 'hint', textContent:
       'Joint commands set the actuators\' targets; a running policy or IK writes over the joints it drives. ' +
