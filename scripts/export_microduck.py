@@ -3,7 +3,7 @@
 
   pretrained_policies/microduck_rl/walk.onnx        Mjlab-Velocity-Flat-MicroDuck
   pretrained_policies/microduck_rl/kick_right.onnx  Mjlab-BallKick-Flat-MicroDuck
-  pretrained_policies/microduck_rl/policy.json      what public/js/microduck.js and
+  pretrained_policies/microduck_rl/policy.json      what public/js/controllers/microduck.js and
                                                     server/policies.py need
   pretrained_policies/microduck_supermimic/policy.json
       the same for the walking policy trained with SuperMimic
@@ -111,7 +111,7 @@ def spec(sources):
       # gravity in the trunk frame, q - default, qdot (one control tick old,
       # as in training), the last action, then the 13-D command block
       # [twist (vx, vy, yaw rate), head pose (4), body pose (6)], the poses
-      # being the commands below (public/js/commands.js).
+      # being the commands below (public/js/controllers/commands.js).
       'obs': [['base_ang_vel', 3], ['projected_gravity', 3], ['joint_pos', 14], ['joint_vel', 14],
               ['last_action', 14], ['command', 3], ['cmd:head', 4], ['cmd:body', 6]],
       'commands': COMMANDS,

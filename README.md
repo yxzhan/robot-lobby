@@ -17,7 +17,12 @@ https://github.com/user-attachments/assets/242248f9-c4d9-415c-8fe0-4d691a56f08c
 
 Physics from the official MuJoCo WASM bindings
 (`@mujoco/mujoco`), rendering with Filament.js (WebGL2, PBR, sun shadows, SSAO).
-No bundler — `public/` is a static site.
+No bundler — `public/` is a static site. Its modules sit in `public/js/`
+by what they are, each with its panel and its shipped defaults: `app/`
+(the page, `main.js`), `world/`, `net/` (network mode), `render/`,
+`cameras/`, `controllers/` (policies, `base/`, `ik/`), `drive/` (who
+drives each robot: keys, gamepad, goals; the Teleop panel), `ros/`,
+`behavior/` and `agent/`; `public/json/` holds only generated indexes.
 
 ## UI Guide
 
@@ -79,7 +84,7 @@ The model library is `mjcf_assets/` next to `package.json`
 - [Agent](docs/agent.md) — the Agent panel: Claude (your API key) or an Ollama model working the lobby with tools
 - [Policies](docs/policies.md) — GR00T (G1), Playground (Spot, Go2), Microduck
 - [Mobile bases](docs/mobile-bases.md) and [IK chains](docs/ik.md)
-- [ROS bridge](docs/ros.md) — joint states, TF, commands, cameras over rosbridge
+- [ROS bridge](docs/ros.md) — the ROS panel: joint states, TF, commands, cameras over rosbridge
 - [Cameras](docs/cameras.md) — the robots' cameras
 - [Rendering](docs/rendering.md) — the Render panel, textures, materials
 - [VR and AR](docs/vr.md) — WebXR controllers and menu

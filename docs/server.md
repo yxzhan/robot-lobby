@@ -8,7 +8,7 @@ npm run server   # python3 server/server.py 4007
 `server/server.py` steps one MuJoCo world in Python and serves `public/`
 too; every browser that opens it (http://localhost:4007, or through the
 JupyterHub proxy) sees and changes the same world. The page notices the
-server (`server.json`) and switches to network mode (`public/js/net.js`), in
+server (`server.json`) and switches to network mode (`public/js/net/net.js`), in
 which it loads no MuJoCo at all:
 
 - **Drawing.** The server compiles each model file once and serves what is
@@ -38,18 +38,18 @@ which it loads no MuJoCo at all:
   bases (`server/base.py`) and IK (`server/ik.py`) are ports of `groot.js`,
   `playground.js`, `base.js` and `ik.js`,
   ticked at 50 Hz with the physics; ten G1s walking under GR00T keep real
-  time. The Teleop panel works as in local mode through `public/js/remote.js`.
+  time. The Teleop panel works as in local mode through `public/js/net/remote.js`.
   The keys' drive command goes to the server when it changes and is
   repeated while held; the server stops a command not repeated for 1 s
   (a closed or frozen tab), and the base's measured twist comes back for
   the readout. Base setups saved from the panel go to
-  `server/saved/base.json`; `public/json/base_defaults.json` holds the built-in ones.
+  `server/saved/base.json`; `public/js/controllers/base/defaults.json` holds the built-in ones.
 - **IK markers.** They work as in local mode:
   dragging a marker moves it at once and sends its target (in the chain's
   reference body frame, so it rides with the robot); the server sends
   targets and tracking errors back 5 times a second, so every browser sees
   the markers move. Chain edits, Save (to `server/saved/ik.json`, for
-  everyone) and Defaults are requests too. `public/json/ik_defaults.json` holds the
+  everyone) and Defaults are requests too. `public/js/controllers/ik/defaults.json` holds the
   built-in setups for both sides.
 - **Stages.** Saved in the browser (My stages): the server makes the
   world's items, state and controller setups into a stage, the page adds

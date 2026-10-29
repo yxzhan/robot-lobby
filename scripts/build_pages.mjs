@@ -7,7 +7,7 @@
 // usually a link to the whole library, which this would publish. The
 // page runs locally on those; its Server panel joins a server
 // (server/server.py, e.g. on Binder) for the whole library and a shared
-// world (public/js/endpoint.js). .github/workflows/pages.yml runs it on
+// world (public/js/app/endpoint.js). .github/workflows/pages.yml runs it on
 // every push to main.
 //
 //   node scripts/fetch_assets.mjs               # public/mjcf_assets, if not there

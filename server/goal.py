@@ -1,4 +1,4 @@
-"""Driving to a goal pose on the server: a port of public/js/goal.js (see there).
+"""Driving to a goal pose on the server: a port of public/js/drive/goal.js (see there).
 
 In network mode a robot's goal is shared: any browser sets it (op `goal`),
 the server follows it and tells everyone, so two browsers never drive the

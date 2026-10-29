@@ -8,7 +8,7 @@ const copies = {
   'node_modules/@mujoco/mujoco/mujoco.wasm': 'public/vendor/mujoco/mujoco.wasm',
   'node_modules/filament/filament.js': 'public/vendor/filament/filament.js',
   'node_modules/filament/filament.wasm': 'public/vendor/filament/filament.wasm',
-  // onnxruntime-web, WASM backend only (runs the ONNX policies, public/js/policy.js).
+  // onnxruntime-web, WASM backend only (runs the ONNX policies, public/js/controllers/policy.js).
   'node_modules/onnxruntime-web/dist/ort.wasm.min.mjs': 'public/vendor/onnxruntime/ort.wasm.min.mjs',
   'node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.mjs': 'public/vendor/onnxruntime/ort-wasm-simd-threaded.mjs',
   'node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.wasm': 'public/vendor/onnxruntime/ort-wasm-simd-threaded.wasm',
@@ -16,7 +16,7 @@ const copies = {
   'node_modules/stats.js/src/Stats.js': 'public/vendor/stats/Stats.js',
   // QR codes for the Share panel (ES module).
   'node_modules/qrcode-generator/dist/qrcode.mjs': 'public/vendor/qrcode/qrcode.mjs',
-  // Pyodide, CPython in WASM, for py_trees behaviour trees (public/js/pybt.js; loaded only when one runs).
+  // Pyodide, CPython in WASM, for py_trees behaviour trees (public/js/behavior/pybt.js; loaded only when one runs).
   ...Object.fromEntries(['pyodide.mjs', 'pyodide.asm.mjs', 'pyodide.asm.wasm', 'python_stdlib.zip', 'pyodide-lock.json']
     .map((f) => [`node_modules/pyodide/${f}`, `public/vendor/pyodide/${f}`])),
 };
@@ -247,7 +247,7 @@ function indexLibrary() {
   indexStages();
 }
 
-// Saved stages (public/js/stage.js): mjcf_assets/saved_stage/<id>/stage.json,
+// Saved stages (public/js/world/stage.js): mjcf_assets/saved_stage/<id>/stage.json,
 // listed in public/json/stages.json ([{id, name, saved, count, author}],
 // newest first) for local mode, which cannot list a folder (the server lists it
 // itself).
@@ -270,7 +270,7 @@ indexLibrary();
 // e.g. git clone https://huggingface.co/nepyope/GR00T-WholeBodyControl_g1),
 // exposed as public/pretrained_policies (symlink) and listed in
 // public/json/policies.json ({<name>: [its files]}) so the page knows which of
-// the policies it registers (POLICIES in public/js/policy.js) are installed.
+// the policies it registers (POLICIES in public/js/controllers/policy.js) are installed.
 const POLICY_DIR = 'pretrained_policies';
 function indexPolicies() {
   const stale = lstatSync('public/groot', { throwIfNoEntry: false });  // the old single-policy link

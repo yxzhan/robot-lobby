@@ -6,7 +6,7 @@
 The training model is not the viewer's: this loads the robot file itself
 (mesh collision, its own actuators for joints the policy does not drive,
 e.g. an arm, held at the home key), on a floor, with the viewer's physics
-defaults (public/js/physics.js: 2 ms, elliptic cone, impratio 10), sets the
+defaults (public/js/world/physics.js: 2 ms, elliptic cone, impratio 10), sets the
 trained gains and joint parameters as the viewer's controllers do
 (playground.js / PlaygroundController) and builds the observation with
 export_onnx.Observer. Scenarios: walking forward; commands changing every

@@ -1,8 +1,8 @@
 # Spawning robots
 
-The scene starts as an empty floor (`BASE_XML` in `public/js/world.js`). The
+The scene starts as an empty floor (`BASE_XML` in `public/js/world/world.js`). The
 Assets panel lists every model under three tabs — Scenes (`environments/`), Robots,
-Objects (`public/js/assets.js`) — after a **Recent** tab (the default): the
+Objects (`public/js/world/assets.js`) — after a **Recent** tab (the default): the
 last 30 models spawned from the panel, newest first, kept in the browser's
 localStorage; a browser without that list starts from `public/json/recent.json`
 (model files relative to `public/`, edited by hand). Drag one onto the
@@ -48,14 +48,14 @@ floor to deselect) and Shift+drag to pull it with a spring
 on `xfrc_applied`. The Stage panel lists everything spawned, each with its
 joint positions (settable while paused), actuator controls, a Reset button
 (back to its spawn pose, at rest, while the rest keeps going) and a remove
-button (`public/js/inspect.js`). Its **Pose** section places it: position (m)
+button (`public/js/app/inspect.js`). Its **Pose** section places it: position (m)
 and roll / pitch / yaw (deg) of its root. On a free joint that is its
 qpos, set at once with no rebuild (Reset and a saved stage then use the new
 pose); a fixed base (an arm, an environment) is placed by its attach frame,
 heading only, so the world is rebuilt with its state kept and its mocap
 bodies carried along.
 
-**Stages** (`public/js/stage.js`): Save asks for a name and which parts
+**Stages** (`public/js/world/stage.js`): Save asks for a name and which parts
 to keep, and saves what is spawned as a new stage: each item's spawn pose, joint positions,
 actuator controls and mocap bodies (by name, so a changed model loads what
 still matches), the controllers switched on with their IK and base setups,
@@ -66,8 +66,8 @@ remembers the choice; Publish asks the same): a stage loads without them,
 leaving the physics, the view and the setups as they are and the models in
 their spawn pose. A stage is a folder named by a random id
 (the name is inside, so names may repeat): `stage.json`, `thumbnail.jpg`,
-`ik.json`, `base.json`, `cameras.json` (keyed like `ik_defaults.json`,
-`base_defaults.json`, `camera_defaults.json`). Saved stages are **My
+`ik.json`, `base.json`, `cameras.json` (keyed like `controllers/ik/defaults.json`,
+`controllers/base/defaults.json`, `cameras/defaults.json`). Saved stages are **My
 stages**: an IndexedDB record of those files in this browser, in either
 mode (on a server, the server makes the stage of its world and the page
 keeps it). **Publish** (on a server only) shares what is spawned, or one of
@@ -135,7 +135,7 @@ Picking uses `mj_ray` on the physics world, so it hits collision geoms.
 - **Loading** — Spawning fetches only the files it
   references — the `<include>` tree, then the mesh/texture/hfield/skin files
   resolved via `<compiler meshdir/texturedir/assetdir>` — into MuJoCo's
-  in-memory filesystem (`public/js/vfs.js`).
+  in-memory filesystem (`public/js/app/vfs.js`).
 
 A compiled `MjModel` cannot grow, so each spawn rebuilds the world: parse
 `BASE_XML` into an `MjSpec`, `mjs_attach` every robot's spec under a frame at

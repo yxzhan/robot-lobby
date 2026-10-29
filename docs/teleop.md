@@ -1,6 +1,6 @@
 # Teleop panel and controllers
 
-The Teleop panel (`public/js/teleop.js`, open by default) picks which robot is
+The Teleop panel (`public/js/drive/teleop.js`, open by default) picks which robot is
 driven (the newest by default, or the one double-clicked; double-clicking
 anything else releases it; the others get a zero command and stand or
 brake) and which of its controllers are on: **Policy**, **Base**, **IK**,
@@ -17,8 +17,24 @@ into a text field are ignored); the sections fold. The Policy section also
 has a control for each of the policy's other commands (Microduck's head
 pose, GR00T's height; see Commands in `docs/policies.md`).
 
+![The Teleop panel](img/teleop-panel.png)
+
+Under the controllers two lines say what drives the robot now (**Drive**:
+ROS cmd_vel, the keys or gamepad, the goal marker, or standing) and who
+writes which of its joints (**Joints**: a switched-on policy, base or IK
+keeps the joints it drives, ROS joint commands write the others); **ROS**
+opens the robot in the [ROS panel](ros.md). Both come from the drive
+layer (`public/js/drive/drive.js`, no DOM): the panel's inputs (keys, gamepad,
+the touch and WebXR sticks, the goal marker) push into it, as ROS does,
+and every frame it writes each robot's walking policy or base command,
+first source first: a fresh ROS `cmd_vel`, then the keys or sticks while
+they drive, then the robot's goal; else a zero command. Goals are kept
+there for every caller (the marker, `window.goals`, behaviour trees, the
+Agent). Environments and objects are not listed (their ROS is in the ROS
+panel).
+
 The **Input** select picks the keys or a **goal marker** (the default,
-`public/js/goal.js`): an orange ring with a heading arrow, like the spawn
+`public/js/drive/goal.js`): an orange ring with a heading arrow, like the spawn
 marker, that sits under the driven robot until it is dragged along the
 floor (the mouse wheel or **Q**/**E** turn it while dragging, **Esc** puts
 it back; a label by the pointer shows its position and heading). It is
@@ -38,7 +54,7 @@ any Input mode: its sticks walk and turn and take over from a goal like the
 keys, which also do so in goal-marker mode. Two of its inputs close the
 grippers of the driven robot's first and second IK chain as far as they
 are pressed, like a WebXR trigger (let go: open). Its bindings are
-`public/json/gamepad_defaults.json` (by default left stick walk, right
+`public/js/drive/gamepad_defaults.json` (by default left stick walk, right
 stick turn, d-pad up/down height, LT/RT the grippers); **Input → Gamepad**
 (the only choice for a robot that does not walk but has IK chains) shows
 them per action, **Set** binds the next button pressed or stick pushed,
@@ -57,7 +73,7 @@ Goals can also come from a script, for several robots at once:
   goals. `which` is `'all'` (every robot whose walking policy or base is
   on), a name (`'r3'`), a label, or a list of those. E.g.
   `goals.move('all', {forward: 1}); await goals.wait('all'); goals.move('all', {forward: -1})`.
-  Behaviours on a timer (`public/js/swarm.js`):
+  Behaviours on a timer (`public/js/app/swarm.js`):
   `goals.randomWalk({model: 'microduck', exclude: ['r1']})` gives a few
   robots at a time a random goal nearby, inside a play area;
   `goals.chase({target: 'r1', distance: 0.4})` has them walk after robot
@@ -66,7 +82,7 @@ Goals can also come from a script, for several robots at once:
   `goals.running()` lists them, `goals.stop(id)` (or `goals.stop()` for all)
   stops them and clears their goals. A robot two behaviours take follows the
   one started last; the other options are at the top of `swarm.js`.
-- **A behaviour tree** (the **Behavior** panel, `public/js/bt.js`): one
+- **A behaviour tree** (the **Behavior** panel, `public/js/behavior/bt.js`): one
   tree drives the team, every move naming its robots, written as indented
   text (or pasted as BehaviorTree.CPP XML, as Groot2 saves it), run and
   stopped there, each node's status shown live:
@@ -102,7 +118,7 @@ Goals can also come from a script, for several robots at once:
   is highlighted, checked and run as that (examples and saved trees bring
   their own). A py_trees script runs real py_trees 2.6 in Pyodide (CPython in WASM, `public/vendor/pyodide`,
   some 13 MB loaded the first time Python is picked), with the
-  `lobby` module (`public/py/lobby.py`) for the robots: behaviours `GoTo`,
+  `lobby` module (`public/js/behavior/lobby.py`) for the robots: behaviours `GoTo`,
   `Move`, `Approach`, `Follow`, `Stop` (the moves above) and `Wait`
   (simulated time; py_trees' own `Timer` counts wall time),
   `robots()`, `pose(name)`, `distance(a, b)`, `body(name)`, `time()` for
@@ -142,4 +158,4 @@ A robot that is being driven with the keys in the Teleop panel ignores its
 goal, as with the marker.
 
 The controllers themselves: [policies](policies.md), [mobile bases](mobile-bases.md),
-[IK chains](ik.md); and the panel's [ROS bridge](ros.md).
+[IK chains](ik.md); and ROS in its own panel: [ROS bridge](ros.md).

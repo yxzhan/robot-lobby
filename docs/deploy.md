@@ -3,7 +3,7 @@
 The page and the server can also live apart: the page as a static site on
 GitHub Pages with a part of the library, running locally, and the server on
 Binder with the whole library, joined from the page's **Server** panel.
-`public/js/endpoint.js` decides where the server is: `?server=<url>`, else
+`public/js/app/endpoint.js` decides where the server is: `?server=<url>`, else
 the last one joined while it still answers, else the page's own origin
 (server.py serving the page, see [the shared world](server.md)), else none. With a server, every
 data file (`json/assets.json`, thumbnails, `mjcf_assets/`, `pretrained_policies/`)
@@ -79,7 +79,7 @@ it. A Binder session ends after a while without anyone connected (on
 mybinder.org about 10 minutes); the page then starts locally again.
 
 **Share panel.** Gets the page onto another device (a phone, a headset)
-without typing its URL (`public/js/share.js`, after bambot's `shareLink.ts`):
+without typing its URL (`public/js/net/share.js`, after bambot's `shareLink.ts`):
 the pairing service at join.aicor.dev (`?pair=<url>` for another) keeps a
 short code for the link for 30 minutes; the other device opens the service
 and types the code, or scans the QR code of `join.aicor.dev/<code>`. The

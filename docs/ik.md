@@ -1,8 +1,8 @@
 # IK chains
 
 Every robot under `mjcf_assets/robots/` gets an `IkController`
-(`public/js/ik.js`), on by default: IK chains whose targets are RViz-style
-interactive markers (`public/js/marker.js`, a fixed 0.15 m in the world):
+(`public/js/controllers/ik/ik.js`), on by default: IK chains whose targets are RViz-style
+interactive markers (`public/js/app/marker.js`, a fixed 0.15 m in the world):
 drag an arrow to move the target along that axis, a ring to turn it about
 that axis, the center ball (colored by chain) to move it in the plane
 facing the camera. Axes are the target's own (red x, green y, blue z); the

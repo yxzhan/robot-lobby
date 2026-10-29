@@ -1,0 +1,11 @@
+{
+  "_comment": "Gamepad bindings (public/js/drive/gamepad.js): per action a stick axis or a button of the Gamepad API's standard mapping. axisN is stick axis N (0, 1: left stick x, y; 2, 3: right stick x, y; y grows downward), -axisN the same reversed; buttonN is button N (0 A, 1 B, 2 X, 3 Y, 4 LB, 5 RB, 6 LT, 7 RT, 8 Back, 9 Start, 10, 11 stick presses, 12-15 d-pad up, down, left, right, 16 Home). Walk and turn take -1..1, the grippers 0 (open) .. 1 (closed), the height actions while held. deadzone: sticks within it of center count as let go. Changed in the Teleop panel (Input: Gamepad), kept in the browser.",
+  "deadzone": 0.15,
+  "forward": "-axis1",
+  "left": "-axis0",
+  "turn": "-axis2",
+  "height_up": "button12",
+  "height_down": "button13",
+  "gripper1": "button6",
+  "gripper2": "button7"
+}

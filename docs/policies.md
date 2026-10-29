@@ -5,7 +5,7 @@ model (not tracked by git). `npm install` (or `node scripts/vendor.mjs`)
 links the folder as `public/pretrained_policies` and lists what is there in
 `public/json/policies.json`; a registered policy whose directory is missing is
 shown as "not installed" and never switched on by default. Policies are
-registered in `POLICIES` (`public/js/policy.js`): each entry has an id, a
+registered in `POLICIES` (`public/js/controllers/policy.js`): each entry has an id, a
 name, its `dir`, the robot files it starts on for (`defaultFor`),
 `load(file)` for its weights (`file(name)` is the URL of a file in its
 directory; shared, loaded on first use; onnxruntime-web is there as
@@ -21,7 +21,7 @@ section picks the model; a hand or quadruped policy is one more entry.
 
 What a policy takes besides the robot's state and the drive twist (a head
 pose, a base height, a gait, …) it declares as **commands**
-(`public/js/commands.js`): `commands` on the controller, `{name: definition}`,
+(`public/js/controllers/commands.js`): `commands` on the controller, `{name: definition}`,
 with the current values in `command`. A policy that reads `policy.json`
 (Playground, Microduck) takes them from its `"commands"`, and its `obs` list
 puts one in the observation as the part `cmd:<name>`; GR00T declares its
@@ -56,7 +56,7 @@ A policy can run one of several models of the same observation and actions,
 its **skills**, listed in its directory's `policy.json` (GR00T,
 Microduck). A skill is the model, a level above the commands, which are
 inputs of the model running. One shared implementation picks the model every
-control tick, `public/js/skills.js` in the browser and `Skills` in
+control tick, `public/js/controllers/skills.js` in the browser and `Skills` in
 `server/policies.py`:
 
 ```json
@@ -99,7 +99,7 @@ network mode the server sends it with the status). Every skill keeps the
 controller's state as it is (the observation history, the last action):
 a switch is a hard swap, as on the robots.
 
-`public/js/torchscript.js` reads the tensors of a TorchScript `.pt` (a zip
+`public/js/controllers/torchscript.js` reads the tensors of a TorchScript `.pt` (a zip
 of raw storages) in the browser, so small exported MLPs/RNNs need no
 conversion.
 
@@ -108,7 +108,7 @@ conversion.
 If the GR00T locomotion policies are checked out into `pretrained_policies/`
 (`git clone https://huggingface.co/nepyope/GR00T-WholeBodyControl_g1
 pretrained_policies/GR00T-WholeBodyControl_g1`), they load the first time a
-robot runs the `groot-g1` policy. `public/js/groot.js` is a port of lerobot's
+robot runs the `groot-g1` policy. `public/js/controllers/groot.js` is a port of lerobot's
 `GrootLocomotionController` running on onnxruntime-web (WASM, one thread,
 ~0.2 ms per inference): two MLPs, the skills of its `policy.json` (Walk,
 and Balance, automatic for commands under 0.05, as lerobot switches them)
@@ -138,7 +138,7 @@ the arm stowed, reaching out or moved by IK, and on `spot.xml` too.
 Playground has no Go2 task: `training/envs/go2.py` runs its Go1 task on a
 Go2 built from `go2.xml`. Both walk without falling under the keys or the
 goal marker; `training/check_model.py` measures that on the viewer's own
-model files. `public/js/playground.js` (and `PlaygroundController` in
+model files. `public/js/controllers/playground.js` (and `PlaygroundController` in
 `server/policies.py`) runs any such policy from its `policy.json`: it writes
 the trained PD gains and joint damping / armature / friction loss into the
 robot, builds the observation (body gyro and up vector, joint positions,
@@ -212,7 +212,7 @@ command slots (an obs part `zeros`: the roller tasks train them so).
 
 They were trained on the BAM model of the XL330 servos (firmware P loop,
 DC motor with back-EMF and battery sag, load-dependent friction), not on
-plain position actuators, and do not stand without it. `public/js/microduck.js`
+plain position actuators, and do not stand without it. `public/js/controllers/microduck.js`
 (and `MicroduckController` / `BamServos` in `server/policies.py`) turns the
 robot's position actuators into motors on bind, computes the servo torques
 and writes the friction budget into the joints before every physics step,

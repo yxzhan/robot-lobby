@@ -1,0 +1,143 @@
+// Trained policies a robot can run as its "Policy" controller (Teleop
+// panel). Their files live in pretrained_policies/<dir>/ (one checkout per
+// model), which scripts/vendor.mjs links as public/pretrained_policies and
+// lists in public/json/policies.json. Add a model by putting its directory there
+// and adding an entry to POLICIES:
+//
+//   id          stable key, saved in the robot's controller choice
+//   name        shown in the panel's Policy select
+//   about       one line on what it drives
+//   dir         its directory under pretrained_policies/
+//   defaultFor  regex on the robot file path (under mjcf_assets/robots/):
+//               robots that start with this policy on (if it is installed)
+//   load(file)  fetches the weights once, shared by every robot using it;
+//               file(name) is the URL of one of the files in `dir`
+//   create(weights, prefix)  a controller for the robot whose names start
+//               with `prefix`
+//   physics     optional Physics settings it needs (physics.js keys, e.g.
+//               {cone, impratio}); the Policy section offers to apply them
+//
+// A policy controller implements, like GrootController (groot.js):
+//   name
+//   bind(mujoco, model)  find its joints/actuators in a freshly compiled
+//                        world; throw if the robot lacks them
+//   unbind()             give back whatever bind changed (actuator gains)
+//   owns(j)              its name if it drives joint j (IK leaves those alone)
+//   pose(data)           the start pose at spawn
+//   reset()              forget its history (robot reset)
+//   async step(data, valid)  one tick every CONTROL_DT; write data.ctrl only
+//                            if valid() still holds after any await
+// Locomotion policies also take `cmd` = [vx, vy, yaw rate] with key speeds
+// `drive` ({forward, back, side, turn}); a hand or arm policy leaves those
+// out and the keyboard skips it. Any other input (a head pose, a base
+// height, a gait…) is a command it declares in `commands`, with its values
+// in `command` (commands.js): the panel makes a control for each, and a
+// policy.json's observation takes one as its part cmd:<name>. A command
+// named `height` is also `height` on the controller (R/F keys). A policy of
+// several models (its policy.json's "skills") picks one each tick with
+// skills.js (Skills) and shows it as `activeSkill`.
+
+import { G1_MODELS, GrootController, loadGrootPolicy } from './groot.js';
+import { PlaygroundController, loadPlaygroundPolicy } from './playground.js';
+import { MicroduckController, loadMicroduckPolicy } from './microduck.js';
+import { dataUrl } from '../app/endpoint.js';
+
+// onnxruntime-web, loaded on first use.
+let ort = null;
+export function onnxRuntime() {
+  ort ??= (async () => {
+    const m = await import('../../vendor/onnxruntime/ort.wasm.min.mjs');
+    m.env.wasm.wasmPaths = new URL('vendor/onnxruntime/', location.href).href;
+    m.env.wasm.numThreads = 1;  // tiny MLPs; threads would need cross-origin isolation
+    return m;
+  })();
+  return ort;
+}
+
+export const POLICIES = [
+  {
+    id: 'groot-g1',
+    name: 'GR00T locomotion · Unitree G1',
+    about: 'Lower-body walking (legs and waist, 50 Hz); the arms keep their targets (IK chains or the Stage sliders).',
+    dir: 'GR00T-WholeBodyControl_g1',  // huggingface.co/nepyope/GR00T-WholeBodyControl_g1
+    defaultFor: G1_MODELS,
+    load: async (file) => loadGrootPolicy(await onnxRuntime(), file),
+    create: (weights, prefix) => new GrootController(weights, prefix),
+  },
+  {
+    id: 'playground-spot',
+    name: 'Walking · Boston Dynamics Spot',
+    about: "Walking on flat ground (12 leg joints, 50 Hz): Playground's Spot task on spot_arm.xml, the arm in any pose (training/envs/spot_arm.py); for every Spot model.",
+    dir: 'playground_spot',  // training/export_onnx.py
+    defaultFor: /(^|\/)mujoco_menagerie\/boston_dynamics_spot\/[^/]+\.xml$/,
+    load: async (file) => loadPlaygroundPolicy(await onnxRuntime(), file),
+    create: (weights, prefix) => new PlaygroundController(weights, prefix, 'Spot joystick policy'),
+  },
+  {
+    id: 'playground-go2',
+    name: 'Walking · Unitree Go2',
+    about: "Walking on flat ground (12 leg joints, 50 Hz): Playground's Go1 task on a Go2 (training/envs/go2.py); drives go2.xml's torque motors as PD servos.",
+    dir: 'playground_go2',  // training/export_onnx.py
+    defaultFor: /(^|\/)mujoco_menagerie\/unitree_go2\/go2\.xml$/,
+    load: async (file) => loadPlaygroundPolicy(await onnxRuntime(), file),
+    create: (weights, prefix) => new PlaygroundController(weights, prefix, 'Go2 joystick policy'),
+  },
+  {
+    id: 'microduck-official',
+    name: 'Walk + get up, tricks · Microduck (Pollen)',
+    about: "Pollen Robotics' published policy set (huggingface.co/pollen-robotics/microduck-policies, Apache-2.0): velstand walks and gets back up by itself after a fall; skills kick with either foot, roll forward, touch the ground, sit, stand.",
+    dir: 'microduck_official',  // the Hub's ONNX files and a policy.json for them
+    defaultFor: /(^|\/)custom\/(microduck(_sky|_graphite|_lavender)?)\/\2\.xml$/,  // and its colors
+    load: async (file) => loadMicroduckPolicy(await onnxRuntime(), file),
+    create: (weights, prefix) => new MicroduckController(weights, prefix, 'Microduck policies (Pollen)'),
+  },
+  {
+    id: 'microduck-roller',
+    name: 'Roller skating · Microduck (Pollen)',
+    about: "The roller policies of Pollen Robotics' published set, for the Microduck on roller skates: roller skates (forward pushes, zero coasts, back brakes; turning steers its heading); the crouch skill crouches low and back up as it glides.",
+    dir: 'microduck_official',  // its roller.json
+    defaultFor: /(^|\/)custom\/microduck_rollers\/microduck_rollers\.xml$/,
+    load: async (file) => loadMicroduckPolicy(await onnxRuntime(), file, 'roller.json'),
+    create: (weights, prefix) => new MicroduckController(weights, prefix, 'Microduck roller policies (Pollen)'),
+  },
+];
+
+export const POLICY_ROOT = 'pretrained_policies';
+
+// Policies that were replaced: the id that stands in for them (a saved stage
+// or a remembered choice of the old id gets the new policy). Our own
+// Microduck policies (walk + kick, SuperMimic) are at git tag
+// before-official-microduck.
+const RENAMED = { 'microduck-walk': 'microduck-official', 'microduck-supermimic': 'microduck-official' };
+export const policyId = (id) => RENAMED[id] ?? id;
+
+export const policyById = (id) => POLICIES.find((p) => p.id === policyId(id)) ?? null;
+
+// The installed policy directories ({dir: [files]}), from public/json/policies.json.
+let installed = {};
+export async function loadPolicyIndex(index = 'json/policies.json') {
+  try {
+    const res = await fetch(dataUrl(index));
+    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+    installed = await res.json();
+  } catch (err) {
+    console.warn(`no policy index (${index}): run node scripts/vendor.mjs`, err);
+    installed = {};
+  }
+}
+export const isInstalled = (p) => !!p && p.dir in installed;
+
+// The installed policy a robot file starts with ('' for none).
+export const defaultPolicy = (path) => POLICIES.find((p) => p.defaultFor?.test(path) && isInstalled(p))?.id ?? '';
+
+// Weights of policy `p`, loaded once; a failed load is retried next time.
+const loaded = new Map();
+export function loadPolicy(p, progress = () => {}) {
+  if (!isInstalled(p)) return Promise.reject(new Error(`${POLICY_ROOT}/${p.dir}/ is not installed`));
+  if (!loaded.has(p.id)) {
+    progress(`loading ${p.name}…`);
+    const file = (name) => dataUrl(`${POLICY_ROOT}/${p.dir}/${name}`);
+    loaded.set(p.id, p.load(file).catch((err) => { loaded.delete(p.id); throw err; }));
+  }
+  return loaded.get(p.id);
+}

@@ -1,6 +1,6 @@
 # Physics
 
-The Physics panel (`public/js/worldpanel.js`, settings in `public/js/physics.js`,
+The Physics panel (`public/js/world/worldpanel.js`, settings in `public/js/world/physics.js`,
 not saved: every load starts from the defaults) sets MuJoCo's global options and default geom
 properties (how the floor and the lighting look, and whether the camera
 follows the selection, are the Render panel's: rendering.md):

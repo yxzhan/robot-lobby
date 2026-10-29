@@ -2,7 +2,7 @@
 
 ## Render panel
 
-The Render panel (`public/js/render.js`, hidden by default, saved in this
+The Render panel (`public/js/render/render.js`, hidden by default, saved in this
 browser) trades drawing quality for GPU load, applied at once: **Preset**
 (High, Medium (the default; Low on a phone or tablet), Low, Ultra low; Custom once a field differs),
 **Resolution** (canvas pixels per CSS pixel, at most the screen's; the
@@ -22,9 +22,9 @@ session's layer, and renders every session frame. **Enter AR** (where
 `immersive-ar` is supported, e.g. Quest 3) is the same with passthrough:
 no sky and no world floor, so the robots stand in your room, on its floor.
 
-Below the quality settings (`public/js/render.js` too):
+Below the quality settings (`public/js/render/render.js` too):
 
-- **Floor** (`public/js/floor.js`, saved in this browser, in network mode
+- **Floor** (`public/js/render/floor.js`, saved in this browser, in network mode
   too since it is only this page's view): how the world floor looks, not its
   physics. Grid (the default), checker, tiles, wood and concrete (textures
   drawn in code, tileable), plain (one color) or none. Each pattern has two colors, side
@@ -37,7 +37,7 @@ Below the quality settings (`public/js/render.js` too):
   tint loads as the two colors it looked like. **Shine** takes the floor from its style's roughness toward
   polished (0.05; checker starts at 100 %): it then reflects the sky, and the robots with
   Reflections on. Robot cameras see the floor too.
-- **Lighting** (`public/js/lighting.js`, saved in this browser like the
+- **Lighting** (`public/js/render/lighting.js`, saved in this browser like the
   floor): the sun's brightness, azimuth, elevation and color, and the ambient
   (sky) light's brightness, live while a slider moves; Default resets them.
   The ambient light is brighter from above than from below (spherical
@@ -105,7 +105,7 @@ interpenetrating transparent mesh can blend in the wrong order.
 
 ## How it works
 
-`public/js/main.js`: for each visible geom (group < 3) of a robot's own model a
+`public/js/app/main.js`: for each visible geom (group < 3) of a robot's own model a
 Filament renderable is built once, with vertices baked from `geom_size`
 (plane, sphere, capsule, ellipsoid, cylinder, box, mesh; hfield/sdf skipped).
 Meshes use MuJoCo's per-corner normals (`mesh_facenormal` → `mesh_normal`),

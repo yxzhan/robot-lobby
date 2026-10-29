@@ -1,19 +1,19 @@
-"""Trained policies on the server: the ones of public/js/policy.js's POLICIES
+"""Trained policies on the server: the ones of public/js/controllers/policy.js's POLICIES
 that have a port here (same ids, so the Teleop panel's choice carries
 over), running on onnxruntime. A policy controller has the interface
 policy.js describes (bind, unbind, owns, pose, reset, step; locomotion ones
 also cmd, drive; any of them commands and command, see
-public/js/commands.js, of which command_default, clamp_command and
+public/js/controllers/commands.js, of which command_default, clamp_command and
 command_vector here are ports), with a synchronous step.
 
-Skills is public/js/skills.js: the models of a policy directory's
+Skills is public/js/controllers/skills.js: the models of a policy directory's
 policy.json ("skills") and which one runs each tick, for GrootController and
 MicroduckController alike.
 
-GrootController is a port of public/js/groot.js (see there for the
+GrootController is a port of public/js/controllers/groot.js (see there for the
 observation, the two MLPs and the PD gains); PlaygroundController of
-public/js/playground.js (policies from training/: policy.onnx + policy.json);
-MicroduckController and BamServos of public/js/microduck.js (microduck_rl's
+public/js/controllers/playground.js (policies from training/: policy.onnx + policy.json);
+MicroduckController and BamServos of public/js/controllers/microduck.js (microduck_rl's
 policies on the BAM servo model: scripts/export_microduck.py).
 """
 
@@ -33,7 +33,7 @@ OBJ = mujoco.mjtObj
 FRICTION_DOF = int(mujoco.mjtConstraint.mjCNSTR_FRICTION_DOF)
 
 # ---------------------------------------------------------------------------
-# Commands besides the twist (public/js/commands.js)
+# Commands besides the twist (public/js/controllers/commands.js)
 
 COMMAND_TYPES = ('scalar', 'vector', 'enum', 'bool')
 
@@ -118,7 +118,7 @@ def observation(spec, parts, commands, command):
 
 
 # ---------------------------------------------------------------------------
-# Policies of more than one model (public/js/skills.js)
+# Policies of more than one model (public/js/controllers/skills.js)
 
 SKILL_DURATION_RANGE = (0.1, 60.0)  # the durations a pick may ask for (s)
 SKILL_CONDITIONS = {
@@ -141,7 +141,7 @@ def load_skills(directory, file='policy.json'):
 
 
 class Skills:
-  """Which skill runs (see public/js/skills.js): the default (the first);
+  """Which skill runs (see public/js/controllers/skills.js): the default (the first);
   an automatic one (`when`) instead of it while its condition holds; a
   manual one picked with request() (a client's `skill` request), for its
   `duration` if any. Not commands: a skill picks the model."""
@@ -364,7 +364,7 @@ def load_groot(directory):
 
 def drive_of(r, low=None, goal=None):
   """Key speeds a bit inside the trained command ranges, the dead band
-  (minSpeed / minTurn: the goal marker's least command, public/js/goal.js)
+  (minSpeed / minTurn: the goal marker's least command, public/js/drive/goal.js)
   and, from policy.json's goal.near, how near a goal the robot starts
   closing in sideways (near)."""
   top = lambda v: round(0.8 * abs(v), 2)
@@ -379,7 +379,7 @@ def drive_of(r, low=None, goal=None):
 
 
 class PlaygroundController:
-  """See public/js/playground.js: position servos get the trained gains, torque
+  """See public/js/controllers/playground.js: position servos get the trained gains, torque
   motors the trained servo's torque every physics step (substep); sensor
   values are the forward pass's at the start of the last step, in the imu
   site's frame (the root body's without one)."""
@@ -531,7 +531,7 @@ def load_playground(directory):
 
 
 class BamServos:
-  """XL330 servos as BAM models them (see public/js/microduck.js): the firmware's
+  """XL330 servos as BAM models them (see public/js/controllers/microduck.js): the firmware's
   P loop gives a duty cycle, the DC motor a torque, and the M6 friction budget
   goes into the joints' friction loss and damping, where MuJoCo's solver
   applies it. update() runs before every physics step, as one function
@@ -673,7 +673,7 @@ class Substeps:
 
 
 class MicroduckController:
-  """See public/js/microduck.js: the microduck_rl policies on the BAM servo
+  """See public/js/controllers/microduck.js: the microduck_rl policies on the BAM servo
   model, walking and the skills it switches to for a while."""
 
   def __init__(self, policy, prefix, name='Microduck walking policy'):

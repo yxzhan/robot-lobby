@@ -1,7 +1,7 @@
-"""Teleoperation by inverse kinematics on the server: a port of public/js/ik.js
+"""Teleoperation by inverse kinematics on the server: a port of public/js/controllers/ik/ik.js
 (see there for how chains, dofs, followers, tendons and software servos
 work). The two must stay in step; the browser runs ik.js in local mode and
-talks to this one in network mode (public/js/remote.js).
+talks to this one in network mode (public/js/net/remote.js).
 
 Differences: configs are saved on the server (for everyone, SavedConfigs)
 instead of in the browser, and targets can be set directly in the frame of
@@ -17,8 +17,9 @@ import re
 import mujoco
 import numpy as np
 
-PUBLIC = pathlib.Path(__file__).resolve().parent.parent / 'public'
-IK_DEFAULTS = json.loads((PUBLIC / 'json' / 'ik_defaults.json').read_text())
+import shipped
+
+IK_DEFAULTS = shipped.load(shipped.IK_DEFAULTS)
 
 CONTROL_DT = 0.02  # s, like groot.js
 MIN_CHAIN = 3
@@ -614,7 +615,7 @@ class IkController:
     for c, dof in enumerate(active):
       self.set_value(dof, data, min(dof['range'][1], max(dof['range'][0], q[c] + dq[c] / over)))
 
-  # -- what the browser shows (public/js/remote.js) -------------------------
+  # -- what the browser shows (public/js/net/remote.js) -------------------------
 
   def describe(self):
     m = self.model

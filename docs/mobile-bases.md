@@ -1,6 +1,6 @@
 # Mobile bases
 
-Every robot gets a `BaseController` (`public/js/base.js`), driven
+Every robot gets a `BaseController` (`public/js/controllers/base/base.js`), driven
 from the Teleop panel like the G1 (**WASD**, **QE**), with a PI loop on the
 floating base's measured twist (ground truth as odometry) and an
 acceleration limit on the command (a step to full speed tips a tall robot

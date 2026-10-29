@@ -1,23 +1,21 @@
-"""Mobile-base teleoperation on the server: a port of public/js/base.js (see
+"""Mobile-base teleoperation on the server: a port of public/js/controllers/base/base.js (see
 there for the wheel model, mecanum rollers, the twist PI loop, software
 servo wheels and planar bases). The two must stay in step; the browser runs
 base.js in local mode and talks to this one in network mode
-(public/js/remote.js). Configs saved from the Teleop panel live on the server
+(public/js/net/remote.js). Configs saved from the Teleop panel live on the server
 (server/saved/base.json).
 """
 
 import copy
-import json
 import math
-import pathlib
 
 import mujoco
 import numpy as np
 
+import shipped
 from ik import CONTROL_DT, SavedConfigs  # noqa: F401  (SavedConfigs: for server.py)
 
-PUBLIC = pathlib.Path(__file__).resolve().parent.parent / 'public'
-BASE_DEFAULTS = json.loads((PUBLIC / 'json' / 'base_defaults.json').read_text())
+BASE_DEFAULTS = shipped.load(shipped.BASE_DEFAULTS)
 
 WHEEL_RATE = 50
 GAINS = {'ff': [1, 1, 1], 'kp': [0.5, 0.5, 0.3], 'ki': [0.3, 0.3, 0.2], 'iclamp': [0.2, 0.2, 0.2], 'accel': [0.5, 0.5, 1.0]}
@@ -343,7 +341,7 @@ class BaseController:
       self.model.actuator_biasprm[a, :3] = b
     self.muted = None
 
-  # -- what the browser shows (public/js/remote.js) ---------------------------
+  # -- what the browser shows (public/js/net/remote.js) ---------------------------
 
   def describe(self):
     return {'config': self.config, 'saved': self.saved, 'hasDefaults': self.has_defaults, 'error': self.error,

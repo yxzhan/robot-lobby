@@ -117,7 +117,7 @@ def mlp_layers(policy_params):
 def build_onnx(mean, std, layers, act_size):
   """obs -> (obs - mean) / std -> Dense+swish ... -> Dense -> first act_size -> tanh.
 
-  The batch size is free, so the page runs several robots in one call (public/js/batch.js).
+  The batch size is free, so the page runs several robots in one call (public/js/app/batch.js).
   """
   inits = [numpy_helper.from_array(mean.astype(np.float32), 'obs_mean'),
            numpy_helper.from_array(std.astype(np.float32), 'obs_std')]

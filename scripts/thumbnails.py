@@ -1,6 +1,6 @@
 """Compresses each asset's screenshot into a small WebP thumbnail for the
 asset panel: mjcf_assets/thumbs/<category>/<source>/<model>.webp (thumbPath in
-public/js/assets.js), at most WIDTH x HEIGHT, aspect kept. The originals are
+public/js/world/assets.js), at most WIDTH x HEIGHT, aspect kept. The originals are
 not touched. They live in the library, so they go wherever it goes (a
 Binder session's shared volume keeps them: binder/start makes them only if
 there are none).

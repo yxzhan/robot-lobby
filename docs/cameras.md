@@ -1,6 +1,6 @@
 # Cameras panel
 
-The **Cameras** panel (`public/js/cameras.js`) works like the Teleop
+The **Cameras** panel (`public/js/cameras/cameras.js`) works like the Teleop
 panel's IK chains: it shows one robot at a time (picked at the top; a
 newly spawned one comes up) and its cameras, each in a foldable box. They
 start as the MJCF `<camera>`s of the robot's model (24 of the library's
@@ -21,8 +21,8 @@ title bar; its **◉** looks through it in the main view, Esc: back); **⌖**
 shows where it is in the scene: a frustum of its field of view and aspect,
 a green tick on its top edge. **Save** keeps the robot's cameras for every
 spawn of its model in this browser; without, a model starts from its
-built-in setup in `public/json/camera_defaults.json` (keyed like
-`ik_defaults.json`: the file under `mjcf_assets/robots/`, other models by
+built-in setup in `public/js/cameras/defaults.json` (keyed like
+`controllers/ik/defaults.json`: the file under `mjcf_assets/robots/`, other models by
 theirs under `mjcf_assets/`), else the model's cameras. **Export** copies
 the setup as JSON for that file, **Defaults** / **Auto** goes back to it /
 to the model's.

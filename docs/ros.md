@@ -1,57 +1,86 @@
 # ROS bridge
 
-Anything spawned (robots, and environments and objects too: the Teleop
-panel lists them with no controllers) can have a rosbridge connection of its own
-(`public/js/ros.js`, rosbridge_suite's WebSocket protocol, no roslibjs),
-switched on with the **ROS** chip in the [Teleop panel](teleop.md) and made from
-this browser, in local and network mode alike. Its section in the panel:
-the bridge's address (`localhost:9090` by default, or a `ws://` / `wss://`
-URL) with the connection's state (retried every 2 s while it is down);
-what it publishes, each with its topic: the joint states
-(`sensor_msgs/JointState` on `joint_states`: the robot's hinge and slide
-joints, names without the `r1/` prefix; velocities only in local mode, the
-server sends positions) and TF (`tf2_msgs/TFMessage` on `/tf`: every body
-in its parent's frame, the root bodies in `world`); what it takes: joint
-commands (`sensor_msgs/JointState` on `joint_command`: position targets
-for the actuators on those joints; a running policy or IK keeps writing
-the joints it drives, the panel says so) and `cmd_vel`
-(`geometry_msgs/Twist` on `cmd_vel`: linear x / y and angular z drive the
-walking policy or the base like the keys do, before a goal; one older than
-0.5 s counts as zero); the publishing rate (1–60 Hz, 30 by default); and
-the cameras. Each camera of the robot ticked in the Cameras panel is
-published every frame it renders (its own rate): `<camera>/image_raw/compressed`
-(`sensor_msgs/CompressedImage`, JPEG, the default) or
-`<camera>/image_raw` (`sensor_msgs/Image`, `rgb8`), and
-`<camera>/camera_info` (`sensor_msgs/CameraInfo`: a pinhole of
-its vertical field of view, fx = fy = (h/2)/tan(fovy/2), centered, no
-distortion). With TF on, every camera
-of the robot also has `<camera>_optical_frame` (z forward, x right, y down)
-in its link's frame. Frames are dropped while the WebSocket is more than
-8 MB behind (counted in the panel). One **prefix** per robot, the robot's
-id by default (`r1`, `r2`, or typed in; `/` for none), goes before every
-name, so robots of one model on one bridge do not overwrite each other:
-the topics not starting with `/` (`r1/joint_states`, `r1/joint_command`,
-`r1/cmd_vel`, `r1/wrist_cam/image_raw/compressed`; `/tf` stays shared) and
-the TF frames (`r1/base_link`, `r1/wrist_cam_optical_frame`; the roots
-still in `world`). Joint names in the messages stay plain. For one robot
-with robot_state_publisher, set the prefix to `/` or use its
-`frame_prefix`.
-Joint states carry velocities and efforts (`qfrc_actuator`: the actuators'
-force on each joint) in network mode too: while a bridge is connected the
-page asks the server to add them to its states (op `dynamics`). **TF
-bodies** off leaves the bodies out of TF (when robot_state_publisher
-computes them from a URDF); the cameras' optical frames still go.
-Stamps are wall time in ROS 2's form (`sec`, `nanosec`), or with **Stamps:
-simulated time** the simulation's, and **Clock** publishes it on `/clock`
-(`rosgraph_msgs/Clock`) for nodes with `use_sim_time`. Settings are kept
-per robot file in this browser (the prefix per robot); **Defaults** puts
-them back. A page on HTTPS (GitHub Pages, Binder) may
-still connect to `ws://localhost`; browsers treat localhost as secure.
+ROS goes through rosbridge (rosbridge_suite's WebSocket protocol, no
+roslibjs), from this browser, in local and network mode alike, set up in
+the **ROS** panel (top right; `public/js/ros/`: `bridge.js` one WebSocket
+per address, `robot.js` the world's setup and each robot's, `rospanel.js`).
+
+![The ROS panel](img/ros-panel.png)
+
+On top what belongs to the world, once: the default **bridge** address
+(`localhost:9090` until changed, or a `ws://` / `wss://` URL) with its
+state (retried every 2 s while it is down; ↻ connects again), the **rate**
+every robot's joint states and TF go out at (1–60 Hz, 30 by default),
+**Clock** and **Stamps**. Stamps are wall time in ROS 2's form (`sec`,
+`nanosec`), or with **Stamps: simulated time** the simulation's; **Clock**
+publishes the simulated time on `/clock` (`rosgraph_msgs/Clock`, on the
+default bridge only) for nodes with `use_sim_time`, while a robot's ROS is on.
+
+Below, everything spawned (robots, environments and objects) with its own
+switch and state; unfolded, its settings:
+
+- **Bridge**: empty for the default one, or an address of its own. Robots
+  on one address share one WebSocket.
+- **Prefix**: the robot's id by default (`r1`, `r2`, or typed in; `/` for
+  none), before every name, so robots of one model on one bridge do not
+  overwrite each other: the topics not starting with `/` (`r1/joint_states`,
+  `r1/joint_command`, `r1/cmd_vel`, `r1/wrist_cam/image_raw/compressed`;
+  `/tf` stays shared) and the TF frames (`r1/base_link`,
+  `r1/wrist_cam_optical_frame`; the roots still in `world`). Joint names in
+  the messages stay plain. For one robot with robot_state_publisher, set it
+  to `/` or use its `frame_prefix`.
+- The ROS profile it uses (below) and **Defaults**.
+- Published: the joint states (`sensor_msgs/JointState` on `joint_states`:
+  the robot's hinge and slide joints, names without the `r1/` prefix, with
+  velocities and efforts, `qfrc_actuator`: the actuators' force on each
+  joint; in network mode the page asks the server to add them to its states
+  while a robot is on, op `dynamics`) and TF (`tf2_msgs/TFMessage` on
+  `/tf`: every body in its parent's frame, the root bodies in `world`;
+  **TF bodies** off leaves the bodies out when robot_state_publisher
+  computes them from a URDF, the cameras' optical frames still go).
+- **Cameras**: each camera of the robot switched on in the Cameras panel
+  (and ticked here) is published every frame it renders (its own rate):
+  `<camera>/image_raw/compressed` (`sensor_msgs/CompressedImage`, JPEG, the
+  default) or `<camera>/image_raw` (`sensor_msgs/Image`, `rgb8`), and
+  `<camera>/camera_info` (`sensor_msgs/CameraInfo`: a pinhole of its
+  vertical field of view, fx = fy = (h/2)/tan(fovy/2), centered, no
+  distortion); with TF on, also `<camera>_optical_frame` (z forward, x
+  right, y down) in its link's frame. Frames are dropped while the
+  WebSocket is more than 8 MB behind (counted).
+- Subscribed, both into the drive layer (`public/js/drive/drive.js`, which also
+  takes the Teleop panel's keys and goals): `cmd_vel`
+  (`geometry_msgs/Twist`: linear x / y and angular z drive the walking
+  policy or the base like the keys do, before the keys and a goal; one
+  older than 0.5 s counts as none; the panel says when there is nothing to
+  drive, with a link to the Teleop panel) and joint commands
+  (`sensor_msgs/JointState` on `joint_command`: position targets for the
+  actuators on those joints). A joint a switched-on policy, base or IK
+  drives stays theirs; the commands move the others. With **Take over**
+  they move those too while they come (written over what the controllers
+  wrote before every physics step; 0.5 s after the last one the controllers
+  have them back; the server does the same in network mode). The line
+  below says who writes which joints (`fr3_joint1–7: IK · fr3_hand: ROS`),
+  as the Teleop panel does.
+
+Settings stay in this browser: the world's, and per robot file its topics,
+switches and its own address if it has one (the prefix per robot, for this
+page's life); a robot's ROS is switched on in the panel each time. (The
+settings of before, all per robot file, are split once: an address saved
+the same for every file becomes the default, differing ones stay those
+files' own.) A page on HTTPS (GitHub Pages, Binder) may still connect to
+`ws://localhost`; browsers treat localhost as secure.
+
+**Shared world**: one browser publishes a robot. The server keeps, per
+robot, which browser holds its ROS (the one that switched it on, op
+`ros_hold`, until it switches it off or leaves) and tells every browser
+(`ros` messages); in the others the robot shows *held elsewhere* and its
+switch is off limits, so its joint states do not go out twice. `/clock` is
+held the same way (the first browser with Clock on and a robot on).
 
 ## ROS profiles: named like the real robot
 
-A robot file can have a profile in `public/json/ros_defaults.json` (keyed
-like `ik_defaults.json`) so that programs written for the real robot work
+A robot file can have a profile in `public/js/ros/profiles.json` (keyed
+like `controllers/ik/defaults.json`) so that programs written for the real robot work
 unchanged: `settings` (defaults for the topics and switches above),
 `prefix`, `joints` and `frames` (model name → ROS name; a joint mapped to
 null is left out), `world` (the root bodies' parent frame), `commands`
@@ -60,7 +89,7 @@ position · scale + offset, e.g. a gripper on a tendon) and `cameras`
 (`{camera: {topic, frame}}`: the namespace of its `image_raw` /
 `camera_info` and its optical frame, as the real driver names them; a
 RealSense: `camera/camera/color`, `camera_color_optical_frame`). The ROS
-section says which profile it uses.
+panel says which profile a robot uses.
 
 ## ros2_control: the FR3 as franka_ros2 runs it
 
@@ -93,7 +122,8 @@ the URDF), no prefix. `server/ros/fr3/`:
 ```sh
 source /opt/ros/jazzy/setup.bash
 ros2 launch server/ros/fr3/fr3_lobby.launch.py
-# in the lobby: spawn Franka FR3 with hand, untick its IK, tick ROS
+# in the lobby: spawn Franka FR3 with hand; in the ROS panel switch it on
+# (and tick Take over, or untick its IK in the Teleop panel)
 python3 server/ros/fr3/demo.py
 ```
 

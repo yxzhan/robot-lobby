@@ -75,9 +75,9 @@ marker.
 
 ## In the viewer
 
-`public/js/playground.js` (browser) and `PlaygroundController` in
+`public/js/controllers/playground.js` (browser) and `PlaygroundController` in
 `server/policies.py` read `policy.json`, so a newly exported policy needs no
-code change, only a `POLICIES` entry (`public/js/policy.js` and
+code change, only a `POLICIES` entry (`public/js/controllers/policy.js` and
 `server/policies.py`) if it is for another robot or directory. On bind they
 write the trained PD gains and joint parameters into the robot's actuators
 and joints (and give them back on unbind), build the observation each 0.02 s

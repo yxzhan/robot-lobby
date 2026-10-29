@@ -6,7 +6,7 @@ microducks a metre apart and have them swap places", "kick the ball with
 r1"), and it spawns, drives, waits, looks and answers, each step shown as it
 goes (a tool call with its input and result; a thinking summary).
 
-Everything runs in the page (`public/js/agent.js`): the conversation, the
+Everything runs in the page (`public/js/agent/agent.js`): the conversation, the
 tools, and the requests to the model, so it works wherever the page does
 (local mode, a shared world, GitHub Pages) with no server part. The first
 menu picks who answers:

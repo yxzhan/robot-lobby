@@ -1,7 +1,7 @@
 # ros2_control for the lobby's FR3 with its hand (fr3.urdf, made by
 # ../mjcf2urdf.py): the controllers franka_ros2 runs on the real robot's
 # position interfaces, here on topic_based_ros2_control's topics, which the
-# lobby's ROS bridge serves (its ROS profile: public/json/ros_defaults.json).
+# lobby's ROS bridge serves (its ROS profile: public/js/ros/profiles.json).
 controller_manager:
   ros__parameters:
     update_rate: 100  # Hz (the lobby's joint states come at the bridge's rate, 30 by default)

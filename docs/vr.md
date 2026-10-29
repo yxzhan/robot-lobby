@@ -3,7 +3,7 @@
 **Enter VR** / **Enter AR** are in the toolbar; what the headset renders
 is in the [Render panel](rendering.md) notes.
 
-**Controllers** (`public/js/xr.js`; Quest Touch, or any xr-standard
+**Controllers** (`public/js/render/xr.js`; Quest Touch, or any xr-standard
 gamepad), in local and network mode. Each controller points a ray, which
 ends on the menu, the IK marker or the floor it meets:
 
@@ -18,7 +18,7 @@ ends on the menu, the IK marker or the floor it meets:
   the controllers squeezes it.)
 - **Y** (left controller), held 0.4 s, opens the **menu** (and closes it;
   a short press closes it too): a panel in front of you, the trigger
-  choosing the row under the ray (`public/js/xrmenu.js`, menus of submenus
+  choosing the row under the ray (`public/js/render/xrmenu.js`, menus of submenus
   with a Back row). **Reset TCP** puts the driven robot's IK targets back
   on its tips; **Quality** sets the headset's **Resolution** (0.6× to 1.5×
   its default framebuffer, at once), **Anti-alias** (MSAA off, 2×, 4×),

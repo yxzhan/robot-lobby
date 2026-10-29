@@ -7,7 +7,7 @@ It serves public/ (like scripts/serve.py, Cache-Control: no-store), the
 render data of each model file at /render?rel=… (render_asset.py) and a
 WebSocket at /ws, and a small HTTP API for scripts (GET /api/robots, POST
 /api/goal: goal markers, see api_goal). The page sees /server.json and switches to network mode
-(public/js/net.js): it loads no MuJoCo at all. It draws each model from its
+(public/js/net/net.js): it loads no MuJoCo at all. It draws each model from its
 render data and places its bodies from the qpos / mocap state broadcast
 here (its own forward kinematics); picking and everything else that needs
 the model are requests to this server.
@@ -18,14 +18,23 @@ Protocol (client -> server, JSON {op, ...}; `rid` asks for a reply):
   place_body {name, pos}         (a body on a free joint of its own, e.g. a ball in an environment)
   pause {paused}                 physics {physics}    qpos {adr, dof, v}
   ctrl {a, v}                    perturb {body, local, target} (body -1: let go)
+  ros_hold {key: robot id or 'clock', on}  this browser publishes that robot's
+                    ROS (or /clock) from now on, or no longer: one browser
+                    per robot (public/js/ros/robot.js), the first to ask; let
+                    go when it leaves
+  joint_cmd {id, ctrl: [[a, v], ...], takeover}  ROS joint commands for robot
+                    `id` (public/js/drive/drive.js jointCommand, the same rules): an
+                    actuator a switched-on controller drives (item.owners) is
+                    left to it, unless `takeover`: then written over it while
+                    they come (JOINT_TIMEOUT)
   ray {eye, dir} -> {body, point} or {body: -1}        ping {t} -> pong {t}
   Teleop (robot `id`): use {kind: policy|base|ik, on (policy: its id or '')}
   cmd {kind: policy|base, cmd: [vx, vy, yaw rate], height?} (repeated while
   not zero; stops after CMD_TIMEOUT without one; a moving one drops the goal)
   command {name, value}   one of the policy's other commands (its describe()'s
-  `commands`, public/js/commands.js), kept until changed
+  `commands`, public/js/controllers/commands.js), kept until changed
   skill {name, duration?}   the policy's manual skill to run (its
-  describe()'s `skills`, public/js/skills.js): the model, not an input of
+  describe()'s `skills`, public/js/controllers/skills.js): the model, not an input of
   it; a timed one for `duration` s instead of its own
   goal {goal: {x, y, yaw} or null} (the robot drives there: goal.py)
   ik_config {config}   ik_target {chain, pos, rot} (in the chain's ref body
@@ -43,7 +52,8 @@ Server -> client:
   {type: 'meta', items, physics, paused}             same world, new settings
   {type: 'robot', item}                     a robot's controllers changed
                               (item.use, item.errors, item.ik / base / policy:
-                              their describe())
+                              their describe(), item.owners: {actuator:
+                              'policy' | 'base' | 'ik'}, what they drive)
   {type: 'status', robots: {id: {ik: {targets, err}, base: {measured},
                               goal: {phase, dist, dyaw}, policy: {command,
                               skill, active}}}} (skill: the manual one
@@ -52,6 +62,8 @@ Server -> client:
   {type: 'goal', id, goal, arrived?}  a robot's goal changed (null: none;
                               arrived: the goal it reached, let go)
   {type: 'reset', id}            after reset (id null) / reset_robot {id}
+  {type: 'ros', holds: {key: 'you' | 'other'}}  whose ROS is held, as this
+                              client sees it (on joining, and on changes)
   {type: 'reply', rid, ...} / {type: 'error', op, msg, rid?}
   {type: 'pong', t}
   binary state, physics['stateHz'] times a second (30 by default): int32 [version, epoch, nq, nmocap,
@@ -74,7 +86,7 @@ browser. Setups
 saved from the panel go to server/saved/{ik,base}.json. Not yet: the Physics
 panel's default geom properties.
 
-Stages (public/js/stage.js): a page saves its own in its browser; the
+Stages (public/js/world/stage.js): a page saves its own in its browser; the
 server's are the published ones, the community's, folders under
 mjcf_assets/saved_stage/ named by a random id: stage.json, thumbnail.jpg,
 ik.json, base.json, cameras.json. GET /api/stages lists them, GET
@@ -167,6 +179,7 @@ warnings.filterwarnings('ignore', message='Attach conflict')
 IK_SAVED = IK.SavedConfigs(pathlib.Path(__file__).resolve().parent / 'saved' / 'ik.json')
 BASE_SAVED = IK.SavedConfigs(pathlib.Path(__file__).resolve().parent / 'saved' / 'base.json')
 CMD_TIMEOUT = 1.0  # s: a drive command not repeated for this long stops (a frozen or vanished browser)
+JOINT_TIMEOUT = 0.5  # s: a joint command taking over a controller's joint lasts this long (drive.js)
 mujoco.set_mju_user_warning(lambda msg: msg.startswith('Attach conflict') or print(f'MuJoCo: {msg.strip()}'))
 
 
@@ -266,6 +279,8 @@ class Robot:
     self.cmd_at = {}  # 'policy' / 'base' -> (when its drive command last came, from which browser)
     self.goal, self.goal_state, self.goal_result = None, {}, None  # the goal marker's pose (goal.py)
     self.arrived = False
+    self.model = None
+    self.overrides = {}  # actuator -> (ctrl, when): ROS joint commands taking over (joint_command)
     if self.key:
       self.use = {'policy': POL.default_policy(self.key), 'base': None, 'ik': True}
       self.base = BASE.BaseController(self.key, self.prefix, BASE_SAVED)
@@ -282,7 +297,7 @@ class Robot:
   def item(self):
     out = {'id': self.id, 'rel': self.rel, 'label': self.label, 'pos': self.pos, 'yaw': self.yaw}
     if self.key:
-      out.update(key=self.key, use=self.use, errors=self.errors, goal=self.goal,
+      out.update(key=self.key, use=self.use, errors=self.errors, goal=self.goal, owners=self.owners(),
                  ik=self.ik.describe() if self.ik.model is not None else None,
                  base=self.base.describe() if self.base.model is not None else None,
                  policy=self.policy.describe() if self.policy and self.use['policy'] else None)
@@ -330,6 +345,7 @@ class Robot:
 
   def bind(self, model):
     """Finds the controllers' joints and actuators in a new world."""
+    self.model, self.overrides = model, {}
     if not self.key:
       return
     if self.use['policy'] and self.policy and not self.bind_controller('policy', model):
@@ -353,6 +369,52 @@ class Robot:
     if self.use['ik'] and self.ik.model is not None:
       out.append(self.ik)
     return out
+
+  def owners(self):
+    """{actuator: 'policy' | 'base' | 'ik'}: the actuators the switched-on
+    controllers write (drive.js owners)."""
+    m, out = self.model, {}
+    if m is None or not self.key:
+      return out
+    policy = self.policy if self.use['policy'] and self.policy is not None and self.policy.model is not None else None
+    base = self.base if self.use['base'] and self.base.model is not None else None
+    for a in range(m.nu):
+      if m.actuator_trntype[a] != mujoco.mjtTrn.mjTRN_JOINT:
+        continue
+      j = int(m.actuator_trnid[a, 0])
+      if policy is not None and policy.owns(j):
+        out[a] = 'policy'
+      elif base is not None and base.owns(j):
+        out[a] = 'base'
+    if self.use['ik'] and self.ik.model is not None and self.ik.enabled:
+      for c in self.ik.chains:
+        for dof in c['active']:
+          a = dof.get('act', -1)
+          if a is not None and a >= 0 and a not in out:
+            out[a] = 'ik'
+    return out
+
+  def joint_command(self, pairs, takeover, data):
+    """ROS joint commands [[actuator, ctrl], ...] (op joint_cmd): the
+    actuators no controller drives get them; the others only with
+    `takeover`, written over the controllers before every step (override)."""
+    owners, now, nu = self.owners(), time.monotonic(), self.model.nu if self.model is not None else 0
+    for a, u in pairs:
+      a, u = int(a), float(u)
+      if not 0 <= a < nu:
+        continue
+      if a not in owners:
+        data.ctrl[a] = u
+      elif takeover:
+        self.overrides[a] = (u, now)
+
+  def override(self, data, now):
+    """Joint commands taking over, while fresh (before every physics step)."""
+    for a, (u, at) in list(self.overrides.items()):
+      if now - at > JOINT_TIMEOUT:
+        self.overrides.pop(a, None)
+      else:
+        data.ctrl[a] = u
 
   def locomotion(self):
     """The switched-on controllers that take a drive command (teleop.js locomotion)."""
@@ -469,7 +531,7 @@ def compile_world(robots, physics):
 
 
 # ---------------------------------------------------------------------------
-# Stages (public/js/stage.js): folders under mjcf_assets/saved_stage/.
+# Stages (public/js/world/stage.js): folders under mjcf_assets/saved_stage/.
 
 STAGE_VERSION = 1
 STAGE_FILES = ('ik.json', 'base.json', 'cameras.json')
@@ -637,6 +699,7 @@ class World:
     self.clients = set()
     self.transports = {}  # ws -> its connection's transport (how much it still has to send)
     self.dynamics = set()  # clients that want qvel and qfrc_actuator in the states
+    self.ros_holds = {}  # robot id or 'clock' -> the client publishing its ROS (op ros_hold)
     self.lock = asyncio.Lock()  # one scene change at a time
     # The model and data belong to the stepping thread while it holds this
     # (run); requests that change or read them take it in between.
@@ -933,6 +996,17 @@ class World:
     elif op == 'ctrl':
       d.ctrl[int(msg['a'])] = float(msg['v'])
       self.dirty = True
+    elif op == 'ros_hold':  # the first browser to switch a robot's ROS on publishes it
+      key = 'clock' if msg['key'] == 'clock' else int(msg['key'])
+      holder = self.ros_holds.get(key)
+      if msg.get('on') and (holder is None or holder not in self.clients):
+        self.ros_holds[key] = ws
+      elif not msg.get('on') and holder is ws:
+        del self.ros_holds[key]
+      await self.send_holds()
+    elif op == 'joint_cmd':
+      self.robot(msg['id']).joint_command(msg.get('ctrl') or [], bool(msg.get('takeover')), d)
+      self.dirty = True
     elif op == 'dynamics':
       (self.dynamics.add if msg.get('on') else self.dynamics.discard)(ws)
     elif op == 'perturb':
@@ -946,7 +1020,7 @@ class World:
       raise ValueError(f'unknown op {op!r}')
 
   async def controller_op(self, ws, op, r, msg):
-    """Teleop panel requests for robot `r` (public/js/remote.js)."""
+    """Teleop panel requests for robot `r` (public/js/net/remote.js)."""
     if not r.key:
       raise ValueError(f'{r.label} has no controllers')
     ik, base, d = r.ik, r.base, self.data
@@ -1265,6 +1339,11 @@ class World:
         self.apply_perturbs()
         self.perturbed = bool(self.perturbs)
       substeps.step(d)  # software servos
+      overriding = [r for r in self.robots if r.overrides]
+      if overriding:  # ROS joint commands taking over (Robot.joint_command)
+        now = time.monotonic()
+        for r in overriding:
+          r.override(d, now)
       mujoco.mj_step(m, d)
     substeps.done()
     return reached, failed
@@ -1377,6 +1456,21 @@ class World:
 
   async def broadcast_scene(self, stage=None):
     await self.send_all(json.dumps(self.scene_msg(stage)))
+    await self.send_holds()
+
+  async def send_holds(self, only=None):
+    """Whose ROS is held (op ros_hold), to every client (or `only`) as
+    it sees it; holds of robots gone and of clients gone are dropped."""
+    ids = {r.id for r in self.robots}
+    for k, ws in list(self.ros_holds.items()):
+      if (k != 'clock' and k not in ids) or ws not in self.clients:
+        del self.ros_holds[k]
+    for ws in [only] if only else list(self.clients):
+      holds = {str(k): 'you' if h is ws else 'other' for k, h in self.ros_holds.items()}
+      try:
+        await ws.send_str(json.dumps({'type': 'ros', 'holds': holds}))
+      except (ConnectionError, RuntimeError):
+        pass
     await self.send_all(self.state_bytes())
 
   async def broadcast_meta(self):
@@ -1420,6 +1514,7 @@ async def ws_handler(request):
   world.transports[ws] = request.transport
   print(f'client joined ({len(world.clients)} connected)')
   await ws.send_str(json.dumps(world.scene_msg()))
+  await world.send_holds(ws)
   if world.model is not None:
     await ws.send_bytes(world.state_bytes())
   try:
@@ -1441,6 +1536,8 @@ async def ws_handler(request):
     world.clients.discard(ws)
     world.transports.pop(ws, None)
     world.dynamics.discard(ws)
+    if ws in world.ros_holds.values():  # its robots' ROS free for others
+      await world.send_holds()
     async with world.stepping:
       world.perturbs.pop(ws, None)
       world.expire_commands(time.monotonic(), gone=ws)
