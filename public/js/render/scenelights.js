@@ -1,12 +1,11 @@
 // The model's own lights (MJCF <light>) as Filament lights, while the Render
 // panel's Scene lights is on (lighting.js; off by default: the global sun and
-// ambient light every scene alike). On, they take the sun's place and the
-// ambient light drops to SCENE_AMBIENT of its setting (main.js
-// applyLighting): indoors the ambient light, the sky, is what washed a
-// room out, its glossy floor mirroring a blue sky through the roof. A model
-// without lights keeps the sun. Spot, point and directional lights; image
-// lights are left out. They follow their bodies (data.light_xpos,
-// light_xdir) and cast no shadows.
+// ambient light every scene alike). The global light is switched on its own
+// (Global light): indoors, the scene's lights alone (or with a dim ambient
+// light) show a room as lit, where the ambient light, the sky, washes it
+// out, its glossy floor mirroring a blue sky through the roof. Spot, point
+// and directional lights; image lights are left out. They follow their
+// bodies (data.light_xpos, light_xdir) and cast no shadows.
 //
 // Brightness: a light with an intensity (MuJoCo 3.2+: candela, lux for a
 // directional one) is that times SCENE_GAIN, which makes up for the
@@ -19,9 +18,9 @@
 // Network mode: the server's world tables carry the lights (server.py
 // world_tables), the page places them by their bodies (light_pos, light_dir
 // in the body's frame, as mode "fixed"; a tracking light is placed so too).
-// A server from before has none: the sun stays.
+// A server from before has none: no scene lights.
 
-export const SCENE_GAIN = 6, SCENE_AMBIENT = 0.2;
+export const SCENE_GAIN = 6;
 const LEGACY_CD = 30000, LEGACY_LUX = 130000;  // per unit of diffuse
 
 // Light `id`'s world position and direction from its body's pose (data.xpos,
@@ -43,13 +42,12 @@ export class SceneLights {
   }
 
   // Makes, updates or removes the lights for `model` / `data` (null: none)
-  // and the lighting settings `l` (l.scene: on, l.sceneLevel: %). Whether
-  // any shine.
+  // and the lighting settings `l` (l.scene: on, l.sceneLevel: %).
   sync(model, data, l) {
     const on = !!(l.scene && model?.nlight && model.light_type && (data?.light_xpos || data?.xmat));
     if (!on || this.key?.model !== model || this.key.level !== l.sceneLevel) {
       this.clear();
-      if (!on) return false;
+      if (!on) return;
       this.build(model, l.sceneLevel / 100);
       this.key = { model, level: l.sceneLevel };
     }
@@ -63,7 +61,6 @@ export class SceneLights {
       if (type !== 2) lm.setDirection(inst, dir);
       inst.delete();
     }
-    return this.lights.length > 0;
   }
 
   build(model, level) {
