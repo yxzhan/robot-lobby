@@ -130,6 +130,27 @@ export function loadPython(onProgress) {
         const r = robotOf(name), c = r?.use?.policy && r.policy;
         return c ? (c.activeSkill ?? c.skills?.default ?? null) : null;
       },
+      // IK chains (ik.js; remote.js in network mode): as JSON, poses in the world.
+      ik_chains: (name) => {
+        const r = robotOf(name) ?? fail(`no robot ${name}`), ik = ikOf(r, false), d = world.app.data;
+        return JSON.stringify((ik?.chains ?? []).map((c) => ({
+          name: c.cfg.name, tip: c.cfg.tip, gripper: !!c.gripper?.length, error: c.error || undefined,
+          target: poseOut(!c.error && ik.targetPose(c, d)), tip_pose: poseOut(!c.error && tipPose(ik, c, d)),
+          ...(c.err && { err: { pos: c.err[0], rot: c.err[1] } }),
+        })));
+      },
+      set_ik_target: (name, chain, pos, quat) => {
+        const r = robotOf(name) ?? fail(`no robot ${name}`), ik = ikOf(r), c = chainOf(r, ik, chain), d = world.app.data;
+        const p = plain(pos), q = quat == null ? null : plain(quat);
+        if (p.length !== 3 || p.some((v) => !Number.isFinite(v))) fail('pos: [x, y, z]');
+        const rot = q ? quatToMat(q) : (ik.targetPose(c, d) ?? tipPose(ik, c, d)).rot;
+        ik.setTargetPose(c, d, { pos: p, rot });
+      },
+      set_gripper: (name, chain, amount) => {
+        const r = robotOf(name) ?? fail(`no robot ${name}`), ik = ikOf(r), c = chainOf(r, ik, chain);
+        if (!c.gripper?.length) fail(`${c.cfg.name} of ${name} has no gripper`);
+        ik.setGripper(c, world.app.data, Math.min(1, Math.max(0, +amount)));
+      },
     });
     py.runPython(`
 import sys, types
@@ -152,6 +173,60 @@ const ask = (what) => { if (world?.confirm && !world.confirm(what)) fail('the us
 
 // A spawned thing by name (r2) or label (window.lobby's robots).
 const robotOf = (w) => (world ? window.lobby.robots().find((r) => r.prefix.slice(0, -1) === w || r.label === w) ?? null : null);
+
+// Robot `r`'s IK (its chains), on (else, with `strict`, an error saying so).
+function ikOf(r, strict = true) {
+  const name = r.prefix.slice(0, -1);
+  if (!r.ik) return strict ? fail(`${name} has no IK chains`) : null;
+  if (strict && !r.use?.ik) fail(`IK is off for ${name}: lobby.set_controller('${name}', 'ik', True)`);
+  return r.ik;
+}
+
+// The chain `which` (a name, or its index; null: the only one).
+function chainOf(r, ik, which) {
+  const chains = ik.chains ?? [], name = r.prefix.slice(0, -1);
+  const c = which == null ? (chains.length === 1 ? chains[0] : null)
+    : typeof which === 'number' ? chains[which] : chains.find((x) => x.cfg.name === which);
+  if (!c) fail(`${name}: no IK chain ${which ?? '(it has several: name one)'} (${chains.map((x) => x.cfg.name).join(', ')})`);
+  if (c.error) fail(`${name}'s IK chain ${c.cfg.name}: ${c.error}`);
+  return c;
+}
+
+// Where a chain's tip is: its TCP site, else its tip body moved by the
+// offset (in network mode from the server's site tables and the bodies'
+// poses: the page computes no sites).
+function tipPose(ik, c, d) {
+  if (ik.tipFrame) return ik.tipFrame(d, c);
+  const m = world.app.model, s = c.cfg.site ? ik.id('mjOBJ_SITE', c.cfg.site) : -1;
+  const b = s >= 0 ? m.site_bodyid[s] : ik.id('mjOBJ_BODY', c.cfg.tip);
+  if (b < 0) return null;
+  const R = Array.from(d.xmat.subarray(9 * b, 9 * b + 9));
+  const o = s >= 0 ? Array.from(m.site_pos.subarray(3 * s, 3 * s + 3)) : c.cfg.offset ?? [0, 0, 0];
+  const pos = [0, 1, 2].map((i) => d.xpos[3 * b + i] + R[3 * i] * o[0] + R[3 * i + 1] * o[1] + R[3 * i + 2] * o[2]);
+  if (s < 0) return { pos, rot: R };
+  const S = quatToMat(Array.from(m.site_quat.subarray(4 * s, 4 * s + 4)));
+  return { pos, rot: [0, 1, 2].flatMap((i) => [0, 1, 2].map((j) => R[3 * i] * S[j] + R[3 * i + 1] * S[3 + j] + R[3 * i + 2] * S[6 + j])) };
+}
+
+const poseOut = (p) => (p ? { pos: p.pos.map((v) => +v.toFixed(5)), quat: matToQuat(p.rot).map((v) => +v.toFixed(5)) } : undefined);
+
+// Row-major 3x3 <-> unit quaternion (w, x, y, z), as MuJoCo has them.
+function quatToMat([w, x, y, z]) {
+  const n = Math.hypot(w, x, y, z) || 1;
+  [w, x, y, z] = [w / n, x / n, y / n, z / n];
+  return [1 - 2 * (y * y + z * z), 2 * (x * y - w * z), 2 * (x * z + w * y),
+    2 * (x * y + w * z), 1 - 2 * (x * x + z * z), 2 * (y * z - w * x),
+    2 * (x * z - w * y), 2 * (y * z + w * x), 1 - 2 * (x * x + y * y)];
+}
+function matToQuat(m) {
+  const [a, b, c, d, e, f, g, h, i] = m, t = a + e + i;
+  let q;
+  if (t > 0) { const s = 2 * Math.sqrt(t + 1); q = [s / 4, (h - f) / s, (c - g) / s, (d - b) / s]; }
+  else if (a > e && a > i) { const s = 2 * Math.sqrt(1 + a - e - i); q = [(h - f) / s, s / 4, (b + d) / s, (c + g) / s]; }
+  else if (e > i) { const s = 2 * Math.sqrt(1 + e - a - i); q = [(c - g) / s, (b + d) / s, s / 4, (f + h) / s]; }
+  else { const s = 2 * Math.sqrt(1 + i - a - e); q = [(d - b) / s, (c + g) / s, (f + h) / s, s / 4]; }
+  return q[0] < 0 ? q.map((v) => -v) : q;
+}
 
 // {x, y, z, yaw, up} of the world body `name` ('r1/ball', or 'ball': the
 // first body of that name in any model), or null; up: the z of its z axis.

@@ -3,5 +3,6 @@
  {"name": "Swap places", "file": "swap_places.bt" },
  {"name": "Follow (py_trees)", "file": "follow.py" },
  {"name": "Patrol (py_trees)", "file": "patrol.py" },
- {"name": "Microduck skills test (py_trees)", "file": "microduck_skills.py" }
+ {"name": "Microduck skills test (py_trees)", "file": "microduck_skills.py" },
+ {"name": "Tracy pick and place (py_trees, IK)", "file": "tracy_pick.py" }
 ]

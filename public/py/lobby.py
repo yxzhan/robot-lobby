@@ -56,6 +56,11 @@ later, its default controllers on), models(query='', category=None) (the
 library: [{rel, name, category, source, group}] whose names have the
 words), physics(**changes) (the Physics panel's options: gravity=[0, 0,
 -1.6], speed=2, timestep, wind…; returns them).
+Arms (IK, its controller on): ik_chains(robot) ([{name, tip, gripper,
+target, tip_pose, err}]: poses in the world as {pos, quat (w, x, y, z)}),
+set_ik_target(robot, chain, pos, quat=None) (where the chain's tip is to
+go; no quat: its orientation kept), set_gripper(robot, chain, amount) (0
+open, 1 closed); chain: a name, an index, or None for a robot with one.
 Removing and resetting ask the user first in a tree the Agent runs (while
 its "Ask before removing or resetting" is on); declined, the tree fails.
 """
@@ -71,7 +76,7 @@ import lobby_js  # registered by pybt.js
 __all__ = ['GoTo', 'Move', 'Approach', 'Follow', 'Stop', 'Wait', 'robots', 'pose', 'time', 'distance',
            'body', 'upright', 'set_goal', 'stop', 'use_skill', 'reset_world', 'place', 'set_policy', 'policy',
            'active_skill', 'place_body', 'spawn', 'models', 'remove', 'clear_world', 'pause', 'physics',
-           'set_controller', 'controllers', 'inspect']
+           'set_controller', 'controllers', 'inspect', 'ik_chains', 'ik_target', 'set_ik_target', 'set_gripper']
 
 _STATUS = {'running': Status.RUNNING, 'success': Status.SUCCESS, 'failure': Status.FAILURE}
 
@@ -298,6 +303,40 @@ def inspect(robot, bodies=None):
   [{name, ctrl, range}]};
   `bodies`: only bodies whose name has this text."""
   return json.loads(lobby_js.inspect(str(robot), bodies and str(bodies)))
+
+
+def ik_chains(robot):
+  """The IK chains of `robot` (as the Teleop panel has them): [{name, tip
+  (its body), gripper (whether it has one), target and tip_pose (where its
+  tip is to go and is: {pos: [x, y, z], quat: [w, x, y, z]} in the world;
+  None until known), err ({pos (m), rot (rad)}: how far the tip is from
+  the target), error (why the chain does not work, if it does not)}].
+  Empty without chains."""
+  return json.loads(lobby_js.ik_chains(str(robot)))
+
+
+def ik_target(robot, chain=None):
+  """{pos, quat} where the tip of `robot`'s IK chain `chain` (a name, an
+  index, or None for its only one) is to go, or None."""
+  chains = ik_chains(robot)
+  c = (chains[chain] if isinstance(chain, int) else next((x for x in chains if x['name'] == chain), None)
+       if chain is not None else chains[0] if len(chains) == 1 else None)
+  return c and c.get('target')
+
+
+def set_ik_target(robot, chain, pos, quat=None):
+  """The tip of `robot`'s IK chain `chain` (a name, an index, or None for
+  its only one) to go to `pos` ([x, y, z], m, in the world), turned to
+  `quat` ([w, x, y, z]) or, without, keeping its orientation. The IK
+  controller must be on (set_controller(robot, 'ik', True)). The arm moves
+  there at its own pace: for a path, set targets along it."""
+  lobby_js.set_ik_target(str(robot), chain, [float(v) for v in pos], None if quat is None else [float(v) for v in quat])
+
+
+def set_gripper(robot, chain, amount):
+  """The gripper of `robot`'s IK chain `chain`: 0 open, 1 closed, or in
+  between."""
+  lobby_js.set_gripper(str(robot), chain, float(amount))
 
 
 def set_policy(robot, policy_id):

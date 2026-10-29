@@ -27,7 +27,7 @@ const RETRY_MAX = 10000;  // ms between reconnect attempts, at most
 // Stands in for the MuJoCo module where the page's code asks it for names
 // (inspect.js, teleop.js, main.js buildVisual): models made here carry them.
 export const NET_MUJOCO = {
-  mjtObj: Object.fromEntries(['BODY', 'JOINT', 'ACTUATOR', 'TEXTURE'].map((k) => [`mjOBJ_${k}`, { value: k.toLowerCase() }])),
+  mjtObj: Object.fromEntries(['BODY', 'JOINT', 'ACTUATOR', 'TEXTURE', 'SITE'].map((k) => [`mjOBJ_${k}`, { value: k.toLowerCase() }])),
   mj_id2name: (model, type, id) => model.names?.[type]?.[id] ?? '',
 };
 

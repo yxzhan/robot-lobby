@@ -109,7 +109,12 @@ Goals can also come from a script, for several robots at once:
   conditions of one's own, and what the panels do: `spawn`, `remove`,
   `clear_world`, `reset_world`, `pause`, `place`, `place_body`, `models`
   (the library), `physics`, `set_controller` / `controllers`,
-  `inspect`, `use_skill` (its docstring lists them all). The script defines `root` (a behaviour) or `tree` (a
+  `inspect`, `use_skill`, and arms by their IK: `ik_chains` (the chains,
+  their targets and tips in the world as pos and quaternion), `set_ik_target`
+  (a chain's target; its orientation kept without one) and `set_gripper`
+  (0 open, 1 closed) (its docstring lists them all; the Tracy pick and place
+  example, `tracy_pick.py`, walks the target along lines and turns noslip up
+  for the grasp). The script defines `root` (a behaviour) or `tree` (a
   `BehaviourTree`):
 
   ```python

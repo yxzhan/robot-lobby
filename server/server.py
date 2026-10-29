@@ -1315,10 +1315,11 @@ class World:
         'jnt_type', 'jnt_bodyid', 'jnt_qposadr', 'jnt_dofadr', 'jnt_limited', 'jnt_range',
         'body_jntnum', 'body_jntadr', 'body_mocapid', 'body_parentid', 'body_mass', 'body_subtreemass',
         'actuator_trntype', 'actuator_trnid', 'actuator_ctrllimited', 'actuator_ctrlrange', 'actuator_biasprm',
-        'geom_bodyid', 'geom_type', 'geom_size', 'geom_pos', 'geom_quat', 'geom_aabb', 'geom_contype', 'geom_conaffinity')}
-    out.update({k: int(getattr(m, k)) for k in ('nbody', 'njnt', 'ngeom', 'nu', 'nq', 'nv', 'na', 'nmocap')})
+        'geom_bodyid', 'geom_type', 'geom_size', 'geom_pos', 'geom_quat', 'geom_aabb', 'geom_contype', 'geom_conaffinity',
+        'site_bodyid', 'site_pos', 'site_quat')}
+    out.update({k: int(getattr(m, k)) for k in ('nbody', 'njnt', 'ngeom', 'nsite', 'nu', 'nq', 'nv', 'na', 'nmocap')})
     out['names'] = {'body': names(mujoco.mjtObj.mjOBJ_BODY, m.nbody), 'joint': names(mujoco.mjtObj.mjOBJ_JOINT, m.njnt),
-                    'actuator': names(mujoco.mjtObj.mjOBJ_ACTUATOR, m.nu)}
+                    'actuator': names(mujoco.mjtObj.mjOBJ_ACTUATOR, m.nu), 'site': names(mujoco.mjtObj.mjOBJ_SITE, m.nsite)}
     return out
 
   def scene_msg(self, stage=None):
