@@ -494,9 +494,14 @@ export class AgentPanel {
 
     this.keyInput = el('input', { type: 'password', placeholder: 'sk-ant-…', autocomplete: 'off', spellcheck: false,
       title: 'Your Claude API key (platform.claude.com → API keys): kept in this browser only, sent only to api.anthropic.com' });
-    this.keyInput.onkeydown = (e) => { typing(e); if (e.key === 'Enter') saveKey.click(); };
-    const saveKey = el('button', { type: 'button', textContent: 'Save' });
-    saveKey.onclick = () => {
+    this.keyInput.onkeydown = typing;
+    const saveKey = el('button', { type: 'submit', textContent: 'Save' });
+    // A form of its own: without one the browser's password manager takes
+    // the whole page for the login form, the Assets filter before it for
+    // the user name, and offers to fill that in.
+    const keyForm = el('form', { className: 'bar agent-key-entry', autocomplete: 'off' }, this.keyInput, saveKey);
+    keyForm.onsubmit = (e) => {
+      e.preventDefault();
       this.key = this.keyInput.value.trim();
       this.keyInput.value = '';
       try { localStorage.setItem(KEY, this.key); } catch { /* no storage: kept for this page only */ }
@@ -514,7 +519,7 @@ export class AgentPanel {
     this.claudeBox = el('div', { className: 'agent-provider' },
       el('div', { className: 'bar' }, this.claudeModel, this.effort, listModels),
       this.claudeNote,
-      el('div', { className: 'bar agent-key-entry' }, this.keyInput, saveKey),
+      keyForm,
       el('div', { className: 'bar agent-key-saved' }, el('span', { className: 'note ok', textContent: 'API key saved in this browser' }), forget),
       el('div', { className: 'hint agent-key-help' }, 'A Claude API key from ', el('a', { href: 'https://platform.claude.com/settings/keys', target: '_blank', rel: 'noopener', textContent: 'platform.claude.com' }),
         ' (billed to that account): kept in this browser only and sent only to the Anthropic API. Set a spending limit there.'));
