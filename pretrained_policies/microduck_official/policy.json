@@ -221,7 +221,10 @@
     0.0
    ],
    "key": "c",
-   "about": "sits down and stays seated (sitstand with its posture flag on); pick Walk to stand up"
+   "ends": {
+    "command_above": 0.05
+   },
+   "about": "sits down and stays seated (sitstand with its posture flag on); a drive command (or Walk) stands it up and walks"
   },
   "stand": {
    "onnx": "alpha_stand.onnx",

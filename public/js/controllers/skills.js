@@ -14,7 +14,7 @@
 // - One with `when` is automatic: it runs instead of the default while its
 //   condition holds (the first of them that does); no one picks it.
 //   Conditions: command_below: v, the drive twist's norm |(vx, vy, yaw
-//   rate)| under v.
+//   rate)| under v; command_above: v, over v.
 // - The others, the default too, are manual: picked with setSkill (on the
 //   controller; on the server a `skill` request), the Teleop panel's skill
 //   controls, given `skillMenu` when there are two or more: a button for
@@ -27,6 +27,9 @@
 //   then the default again, one
 //   without until another is picked; automatic skills only stand in for the
 //   default.
+// - ends: a condition (as `when`) that ends a manual skill: the default
+//   again once it holds, e.g. {command_above: 0.05} for Pollen's sit, which
+//   stands up when driven.
 // - reset_action: true: trained from episodes whose action history starts
 //   at zero; the controller's last action is zeroed when it starts (`started`),
 //   or it reads the previous model's last action as its own (the kick then
@@ -50,7 +53,9 @@ export const DURATION_RANGE = [0.1, 60];
 
 const CONDITIONS = {
   command_below: (v, c) => Math.hypot(...c.cmd) < v,
+  command_above: (v, c) => Math.hypot(...c.cmd) > v,
 };
+const holds = (cond, c) => Object.entries(cond).every(([k, v]) => CONDITIONS[k](v, c));
 
 // {name: session} of `skills`; `source(name)` is a file's URL (or bytes).
 export async function loadSessions(ort, source, skills) {
@@ -74,7 +79,7 @@ export class Skills {
     const names = Object.keys(skills);
     this.default = names[0];
     for (const [name, s] of Object.entries(skills)) {
-      for (const k of Object.keys(s.when ?? {})) {
+      for (const k of [...Object.keys(s.when ?? {}), ...Object.keys(s.ends ?? {})]) {
         if (!CONDITIONS[k]) throw new Error(`skill ${name}: no condition ${k} (${Object.keys(CONDITIONS).join(', ')})`);
       }
     }
@@ -126,14 +131,15 @@ export class Skills {
       this.picked = [want, time];
     }
     const d = this.specs[want]?.duration && (this.wantFor ?? this.specs[want].duration);
-    if (d && time - this.picked[1] >= d - 1e-9) {
+    const ends = want !== this.default && this.specs[want]?.ends;
+    if ((d && time - this.picked[1] >= d - 1e-9) || (ends && holds(ends, c))) {
       this.want = this.default;
       this.wantFor = null;
       this.picked = [this.default, time];
     }
     let run = this.picked[0];
     if (run === this.default) {
-      run = this.auto.find((n) => Object.entries(this.specs[n].when).every(([k, v]) => CONDITIONS[k](v, c))) ?? run;
+      run = this.auto.find((n) => holds(this.specs[n].when, c)) ?? run;
     }
     this.active = run;
     return run;

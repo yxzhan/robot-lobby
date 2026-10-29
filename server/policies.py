@@ -123,7 +123,12 @@ def observation(spec, parts, commands, command):
 SKILL_DURATION_RANGE = (0.1, 60.0)  # the durations a pick may ask for (s)
 SKILL_CONDITIONS = {
     'command_below': lambda v, c: math.hypot(*c.cmd) < v,
+    'command_above': lambda v, c: math.hypot(*c.cmd) > v,
 }
+
+
+def _holds(cond, c):
+  return all(SKILL_CONDITIONS[k](v, c) for k, v in cond.items())
 
 
 def load_skills(directory, file='policy.json'):
@@ -144,14 +149,15 @@ class Skills:
   """Which skill runs (see public/js/controllers/skills.js): the default (the first);
   an automatic one (`when`) instead of it while its condition holds; a
   manual one picked with request() (a client's `skill` request), for its
-  `duration` if any. Not commands: a skill picks the model."""
+  `duration` if any, or until its `ends` condition holds. Not commands: a
+  skill picks the model."""
 
   def __init__(self, skills):
     self.specs = skills
     names = list(skills)
     self.default = names[0]
     for name, s in skills.items():
-      for k in s.get('when', {}):
+      for k in [*s.get('when', {}), *s.get('ends', {})]:
         if k not in SKILL_CONDITIONS:
           raise ValueError(f"skill {name}: no condition {k} ({', '.join(SKILL_CONDITIONS)})")
     if skills[self.default].get('when'):
@@ -194,13 +200,14 @@ class Skills:
         self.started = want
       self.picked = (want, time)
     d = self.specs[want].get('duration') and (self.want_for or self.specs[want]['duration'])
-    if d and time - self.picked[1] >= d - 1e-9:
+    ends = want != self.default and self.specs[want].get('ends')
+    if (d and time - self.picked[1] >= d - 1e-9) or (ends and _holds(ends, c)):
       self.want = self.default
       self.want_for = None
       self.picked = (self.default, time)
     run = self.picked[0]
     if run == self.default:
-      run = next((n for n in self.auto if all(SKILL_CONDITIONS[k](v, c) for k, v in self.specs[n]['when'].items())), run)
+      run = next((n for n in self.auto if _holds(self.specs[n]['when'], c)), run)
     self.active = run
     return run
 
