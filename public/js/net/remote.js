@@ -73,6 +73,7 @@ export class RemoteIk {
       const was = old.get(c.cfg.name), t = this.remote.get(c.cfg.name);
       if (!was || !t || was.ref === c.ref || was.ref < 0 || c.ref < 0 || !this.app.data) continue;
       const from = this.refFrame(was, this.app.data), to = this.refFrame(c, this.app.data);
+      if (!from || !to) continue;
       const pos = mulMV(from.rot, t.pos).map((v, i) => v + from.pos[i]);
       this.remote.set(c.cfg.name, { pos: mulTV(to.rot, pos.map((v, i) => v - to.pos[i])), rot: mulTM(to.rot, mulMM(from.rot, t.rot)) });
     }
@@ -88,22 +89,27 @@ export class RemoteIk {
     for (const c of this.chains) c.err = err[c.cfg.name] ?? null;
   }
 
+  // The reference body's pose in the world, or null while the world has none
+  // yet (a rebuilt world until the server's first state: all zeros, which
+  // would put a target at the origin).
   refFrame(chain, data) {
-    const b = chain.ref;
-    return { pos: Array.from(data.xpos.subarray(3 * b, 3 * b + 3)), rot: Array.from(data.xmat.subarray(9 * b, 9 * b + 9)) };
+    const b = chain.ref, rot = Array.from(data.xmat.subarray(9 * b, 9 * b + 9));
+    return rot.some((v) => v !== 0) ? { pos: Array.from(data.xpos.subarray(3 * b, 3 * b + 3)), rot } : null;
   }
 
   // Target pose {pos, rot} in the world (for the markers), or null until the
-  // server has one.
+  // server has one (and the world its reference body's pose).
   targetPose(chain, data) {
     const t = !chain.error && chain.ref >= 0 && this.remote.get(chain.cfg.name);
-    if (!t) return null;
-    const ref = this.refFrame(chain, data);
+    const ref = t && this.refFrame(chain, data);
+    if (!ref) return null;
     return { pos: mulMV(ref.rot, t.pos).map((v, i) => v + ref.pos[i]), rot: mulMM(ref.rot, t.rot) };
   }
 
+  // (Nothing is sent while the reference body's pose is not known.)
   setTargetPose(chain, data, { pos, rot }) {
     const ref = this.refFrame(chain, data);
+    if (!ref) return;
     const t = { pos: mulTV(ref.rot, pos.map((v, i) => v - ref.pos[i])), rot: mulTM(ref.rot, rot) };
     this.remote.set(chain.cfg.name, t);
     this.setAt.set(chain.cfg.name, performance.now());
