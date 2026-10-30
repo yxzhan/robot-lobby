@@ -9,6 +9,6 @@
 (
   cd "${REPO_DIR:-$HOME}" &&
   node scripts/vendor.mjs > /tmp/index.log 2>&1 &&
-  if [ ! -d public/mjcf_assets/thumbs ]; then python3 scripts/thumbnails.py >> /tmp/index.log 2>&1; fi
+  python3 scripts/thumbnails.py >> /tmp/index.log 2>&1
 ) || echo "indexing the model library failed, see /tmp/index.log"
 exec "$@"
