@@ -385,7 +385,7 @@ export class TeleopPanel {
       this.active = added.at(-1);
       this.autoPicked = false;
     } else if (first || !robots.includes(this.active)) {
-      this.active = robots.find((r) => r.prefix === this.active?.prefix) ?? this.pick(robots);
+      this.active = robots.find((r) => r.prefix === this.active?.prefix) ?? this.pickRobot(robots);
     }
     this.dragging = this.hover = null;
     this.render();
@@ -393,7 +393,7 @@ export class TeleopPanel {
 
   // The robot to drive when none was chosen: in a shared world the newest
   // one this page holds, else the newest free one, else none.
-  pick(robots = this.controllable()) {
+  pickRobot(robots = this.controllable()) {
     const control = this.app.control;
     this.autoPicked = !!control;
     if (!control) return robots.at(-1) ?? null;
@@ -650,7 +650,7 @@ export class TeleopPanel {
     // Picked by itself and now someone else's (the holds came after the
     // world): pick again.
     if (control && this.autoPicked && (!this.active || control.blocked(this.active))) {
-      const next = this.pick();
+      const next = this.pickRobot();
       if (next !== this.active) { this.active = next; this.render(); return; }
     }
     const r = this.active;
