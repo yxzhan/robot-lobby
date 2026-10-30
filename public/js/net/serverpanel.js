@@ -79,7 +79,7 @@ export function launchBinder({ hub, repo, path = 'robot-lobby/' }, progress) {
     };
     events.onerror = () => {
       events.close();
-      reject(new Error(`no answer from ${hub}`));
+      reject(new Error('no answer from AICOR VRB'));
     };
   });
 }
@@ -116,8 +116,7 @@ export class ServerPanel {
         `Shared world on ${where} (MuJoCo ${server.info.mujoco}): every browser connected to it sees and moves the same robots.` }));
     } else {
       b.append(el('div', { className: 'hint', textContent:
-        `Local: physics runs in this browser, on the ${this.models} models that come with this page. ` +
-        'A server has the whole library and a world shared with everyone connected.' }));
+        `Local: physics runs in this browser, on the ${this.models} models that come with this page.` }));
     }
     if (problem) b.append(el('div', { className: 'note', textContent: `${problem}: running locally.` }));
     if (server) {
@@ -130,17 +129,16 @@ export class ServerPanel {
     if (this.online) {
       this.online.hidden = !binder;
       this.online.disabled = this.launching;
-      if (binder) this.online.title = `Go online: start a server on Binder (${binder.hub}) and take this scene there, for others to join`;
+      this.online.querySelector('.label').textContent = this.launching ? 'Starting the shared lobby…' : 'Start a shared lobby on AICOR VRB';
     }
     if (binder) {
-      b.append(el('div', { className: 'sub minor', textContent: 'Binder' }));
-      const start = el('button', { className: 'primary', textContent: this.launching ? 'Starting…' : 'Go online: start a server on Binder',
-        title: `${binder.hub}: ${binder.repo}`, disabled: this.launching });
+      b.append(el('div', { className: 'sub minor', textContent: 'AICOR VRB' }));
+      const start = el('button', { className: 'primary', textContent: this.launching ? 'Starting the shared lobby…' : 'Start a shared lobby on AICOR VRB',
+        disabled: this.launching });
       start.onclick = () => this.launch(binder);
       b.append(el('div', { className: 'hint', textContent:
-        'A new session of its own, with what is spawned here taken along (also kept in My stages). ' +
-        'Building it the first time takes minutes, starting it again tens of seconds; this page stays usable meanwhile. ' +
-        'It ends after a while without anyone connected.' }), el('div', { className: 'bar' }, start));
+        'Takes this scene online with the full asset library, for others to join. Starting takes seconds to a few minutes.' }),
+      el('div', { className: 'bar' }, start));
       if (this.log) b.append(el('div', { className: 'log' }, ...this.log.map(([phase, msg]) =>
         el('div', { className: phase === 'failed' ? 'error' : '', textContent: `${phase}${msg ? `: ${msg.trim()}` : ''}` }))));
     }
@@ -159,7 +157,7 @@ export class ServerPanel {
     go.onclick = connect;
     input.onkeydown = (e) => { input.setCustomValidity(''); if (e.key === 'Enter') connect(); };
     b.append(el('div', { className: 'bar' }, input, go),
-      el('div', { className: 'hint', textContent: 'server/server.py\'s address; on Binder its proxy path with the session\'s token.' }));
+      el('div', { className: 'hint', textContent: 'server/server.py\'s address; on AICOR VRB its proxy path with the session\'s token.' }));
   }
 
   // Again for new clients or holds, but not under the typing of a name.
@@ -207,10 +205,10 @@ export class ServerPanel {
       // Build logs come line by line: keep the phases and the last line.
       if (this.log.at(-1)?.[0] === phase) this.log[this.log.length - 1] = [phase, message];
       else this.log.push([phase, message]);
-      status.textContent = `going online: ${phase}${message ? ` · ${message.trim()}` : ''}`;
+      status.textContent = `starting the shared lobby: ${phase}${message ? ` · ${message.trim()}` : ''}`;
       this.render();
     };
-    progress('starting', `a session on ${new URL(binder.hub).host}`);
+    progress('starting', 'on AICOR VRB');
     try {
       const url = await launchBinder(binder, progress);
       // The scene as it is now (it went on while the session started).
