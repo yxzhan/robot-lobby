@@ -209,6 +209,43 @@
     #teleop .error { color: #f88; margin: 4px 0; }
     #teleop .bar.owner { margin: 2px 0; }
     #teleop .bar.owner button { padding: 0 6px; }
+    /* Shared world (net/control.js): who holds a robot, and the panel locked while someone else does. */
+    :is(#teleop, #share) .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; flex: none; }
+    #teleop .bar.hold { align-items: center; gap: 6px; }
+    #teleop .locked { opacity: .45; }
+    #share .person { display: flex; align-items: center; gap: 6px; margin: 2px 0; }
+    #share .person .note { margin-left: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #share .person.gone { opacity: .5; }
+    #share .person .device { color: #888; font-size: 11px; white-space: nowrap; }
+    /* Shared world, over the view (net/presence.js): tags over held robots,
+       the people row under the toolbar's status, notices at the bottom. */
+    #tags { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+    #tags .tag { position: absolute; left: 0; top: 0; display: flex; align-items: center; gap: 4px; white-space: nowrap;
+                 font: 600 11px system-ui, sans-serif; color: #fff; background: rgba(15,17,21,.72); padding: 2px 7px 2px 5px;
+                 border-radius: 9px; transition: opacity .3s; }
+    #tags .tag.idle { opacity: .45; }
+    #tags .tag[hidden] { display: none; }
+    #tags[hidden] { display: none; }
+    /* A person's mark (net/control.js): their kind of device in their color. */
+    svg.who { width: 14px; height: 14px; flex: none; fill: none; stroke: currentColor; stroke-width: 2;
+              stroke-linecap: round; stroke-linejoin: round; }
+    #tags svg.who { width: 13px; height: 13px; }
+    /* One line, as wide as the toolbar (never widening it), scrolling sideways when it does not fit. */
+    #people { flex: 1 1 100%; contain: inline-size; display: flex; flex-wrap: nowrap; justify-content: safe center; gap: 10px;
+              overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; font-size: 11px; color: #bbb; padding: 0 6px 2px; }
+    #people::-webkit-scrollbar { display: none; }
+    #people > * { flex: none; }
+    #people:empty { display: none; }
+    #people .person { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; cursor: default; }
+    #people .person.you { color: #fff; cursor: pointer; }
+    #people .person.you:hover .name { text-decoration: underline dotted; }
+    #people input { font: inherit; width: 12em; color: #eee; background: #222; border: 1px solid #555; border-radius: 4px; padding: 0 4px; }
+    #notices { position: absolute; left: 50%; bottom: 64px; transform: translateX(-50%); z-index: 6; display: flex;
+               flex-direction: column; align-items: center; gap: 4px; pointer-events: none; }
+    #notices .notice { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #eee; background: rgba(20,22,27,.88);
+                       border: 1px solid #444; border-radius: 6px; padding: 4px 10px; transition: opacity .4s; }
+    #notices .notice.warn { border-color: #c96; color: #fdb; }
+    #notices .notice.gone { opacity: 0; }
     #side > #ros .field { grid-template-columns: 64px 1fr; }
     #side > #ros input[type=text] { flex: 1; min-width: 0; font: inherit; color: #eee; background: #222; border: 1px solid #555;
                             border-radius: 4px; padding: 1px 4px; }
@@ -235,16 +272,16 @@
     #side > #ros .cams { display: flex; flex-wrap: wrap; gap: 2px 10px; }
     #side > #ros .cams label { display: flex; align-items: center; gap: 3px; color: #888; }
     #side > #ros .cams label .live { color: #eee; }
-    :is(#world, #cameras, #ros, #render, #server, #share, #behavior, #agent) { overflow: hidden auto; min-height: 0; flex: 0 5 auto; font-size: 12px; }
-    :is(#world, #cameras, #ros, #render, #server, #share, #behavior, #agent) h3 { margin: 0 0 6px; font-size: 13px; }
-    :is(#world, #cameras, #ros, #render, #server, #share, #behavior, #agent) .field { display: grid; grid-template-columns: 64px 1fr 38px; align-items: center; gap: 6px; margin: 3px 0; }
-    :is(#world, #cameras, #ros, #render, #server, #share, #behavior, #agent) .ctl { display: flex; gap: 4px; min-width: 0; }
-    :is(#world, #cameras, #ros, #render, #server, #share, #behavior, #agent) .unit { color: #888; font-size: 11px; }
-    :is(#world, #cameras, #ros, #render, #server, #share, #behavior, #agent) input[type=number] { width: 0; flex: 1; min-width: 0; font: inherit; color: #eee; background: #222;
+    :is(#world, #cameras, #ros, #render, #share, #behavior, #agent) { overflow: hidden auto; min-height: 0; flex: 0 5 auto; font-size: 12px; }
+    :is(#world, #cameras, #ros, #render, #share, #behavior, #agent) h3 { margin: 0 0 6px; font-size: 13px; }
+    :is(#world, #cameras, #ros, #render, #share, #behavior, #agent) .field { display: grid; grid-template-columns: 64px 1fr 38px; align-items: center; gap: 6px; margin: 3px 0; }
+    :is(#world, #cameras, #ros, #render, #share, #behavior, #agent) .ctl { display: flex; gap: 4px; min-width: 0; }
+    :is(#world, #cameras, #ros, #render, #share, #behavior, #agent) .unit { color: #888; font-size: 11px; }
+    :is(#world, #cameras, #ros, #render, #share, #behavior, #agent) input[type=number] { width: 0; flex: 1; min-width: 0; font: inherit; color: #eee; background: #222;
                                 border: 1px solid #555; border-radius: 4px; padding: 1px 3px; }
-    :is(#world, #cameras, #ros, #render, #server, #share, #behavior, #agent) select { flex: 1; min-width: 0; font: inherit; color: #eee; background: #222; border: 1px solid #555; border-radius: 4px; }
-    :is(#world, #cameras, #ros, #render, #server, #share, #behavior, #agent) .hint { color: #999; margin: 4px 0; line-height: 1.5; }
-    :is(#world, #cameras, #ros, #render, #server, #share, #behavior, #agent) .sub { margin-top: 8px; padding-top: 6px; border-top: 1px solid #3a3d44; font-weight: 600; }
+    :is(#world, #cameras, #ros, #render, #share, #behavior, #agent) select { flex: 1; min-width: 0; font: inherit; color: #eee; background: #222; border: 1px solid #555; border-radius: 4px; }
+    :is(#world, #cameras, #ros, #render, #share, #behavior, #agent) .hint { color: #999; margin: 4px 0; line-height: 1.5; }
+    :is(#world, #cameras, #ros, #render, #share, #behavior, #agent) .sub { margin-top: 8px; padding-top: 6px; border-top: 1px solid #3a3d44; font-weight: 600; }
     #cameras > .body > .field { grid-template-columns: 42px 1fr; }
     #cameras details.camera { border: 1px solid #3a3d44; border-radius: 5px; padding: 2px 6px; margin: 6px 0; }
     #cameras details.camera > summary { cursor: pointer; display: flex; align-items: center; gap: 4px; padding: 3px 0; list-style: none; }
@@ -308,17 +345,17 @@
     #behavior .bt-tree [data-status=failure] { color: #d99; }
     #world input[type=range] { flex: 1; min-width: 0; margin: 0; }
     #world input[type=color] { flex: 1; min-width: 0; height: 20px; padding: 0 2px; background: #222; border: 1px solid #555; border-radius: 4px; }
-    :is(#world, #cameras, #ros, #render, #server, #share, #behavior, #agent) .sub.minor { border-top: 0; margin-top: 4px; padding-top: 0; color: #aaa; font-weight: 400; }
-    :is(#world, #cameras, #ros, #render, #server, #share, #behavior, #agent) .bar { display: flex; align-items: center; gap: 4px; margin-top: 6px; }
-    :is(#world, #cameras, #ros, #render, #server, #share, #behavior, #agent) button { cursor: pointer; font: inherit; font-size: 11px; color: #ddd; background: #333;
+    :is(#world, #cameras, #ros, #render, #share, #behavior, #agent) .sub.minor { border-top: 0; margin-top: 4px; padding-top: 0; color: #aaa; font-weight: 400; }
+    :is(#world, #cameras, #ros, #render, #share, #behavior, #agent) .bar { display: flex; align-items: center; gap: 4px; margin-top: 6px; }
+    :is(#world, #cameras, #ros, #render, #share, #behavior, #agent) button { cursor: pointer; font: inherit; font-size: 11px; color: #ddd; background: #333;
                     border: 1px solid #555; border-radius: 4px; padding: 2px 8px; }
-    :is(#world, #cameras, #ros, #render, #server, #share, #behavior, #agent) button.primary { background: #2f5a3c; border-color: #4d8a5f; }
-    :is(#world, #cameras, #ros, #render, #server, #share, #behavior, #agent) button:disabled { opacity: .5; cursor: default; }
-    :is(#world, #cameras, #ros, #render, #server, #share, #behavior, #agent) .note { color: #c9a; font-size: 11px; }
-    #server input[type=url] { flex: 1; min-width: 0; font: inherit; color: #eee; background: #222; border: 1px solid #555;
+    :is(#world, #cameras, #ros, #render, #share, #behavior, #agent) button.primary { background: #2f5a3c; border-color: #4d8a5f; }
+    :is(#world, #cameras, #ros, #render, #share, #behavior, #agent) button:disabled { opacity: .5; cursor: default; }
+    :is(#world, #cameras, #ros, #render, #share, #behavior, #agent) .note { color: #c9a; font-size: 11px; }
+    #share input[type=url] { flex: 1; min-width: 0; font: inherit; color: #eee; background: #222; border: 1px solid #555;
                               border-radius: 4px; padding: 2px 4px; }
-    #server .log { margin-top: 6px; font: 11px ui-monospace, monospace; color: #9cd; overflow-wrap: anywhere; }
-    #server .log .error { color: #f88; }
+    #share .log { margin-top: 6px; font: 11px ui-monospace, monospace; color: #9cd; overflow-wrap: anywhere; }
+    #share .log .error { color: #f88; }
     #share .pair { text-align: center; margin: 6px 0; }
     #share .pair a { color: #6bf; font-family: ui-monospace, monospace; }
     #share .code { margin: 4px 0; font: 700 34px ui-monospace, monospace; letter-spacing: .35em; padding-left: .35em; color: #fff; }
@@ -327,7 +364,7 @@
     #share .qr[hidden] { display: none; }
     #share .note { color: #888; }
     #share .note.error { color: #f88; }
-    #share .bar { justify-content: center; }
+    #share .body .bar { justify-content: center; }
     #share input[type=text] { flex: 1; min-width: 0; font: inherit; color: #ccc; background: #222; border: 1px solid #555;
                               border-radius: 4px; padding: 2px 4px; }
     #share .warn { color: #ec6; margin-top: 6px; line-height: 1.5; }
@@ -441,23 +478,25 @@
     #sticks .left::before { content: 'walk'; }
     #sticks .right::before { content: 'turn'; }
     #sticks .knob { width: 50px; height: 50px; border-radius: 50%; background: rgba(255,255,255,.55); pointer-events: none; }
-    /* Phones: the toolbar on top (status on its own line), the panel toggles
+    /* Phones and narrow windows: the toolbar on top (status on its own line), the panel toggles
        under it, one panel at a time (main.js), across the width but
        for Assets, which keeps its desktop size. */
-    @media (max-width: 700px) {
+    @media (max-width: 960px) {
       #ui { top: 8px; left: 8px; right: 8px; width: auto; min-width: 0; gap: 4px; padding: 5px 6px; }
       #ui button { padding: 6px 11px; }
       #ui button .label { display: none; }  /* icons only: one row (their titles name them) */
       #status { font-size: 11px; color: #bbb; }
       /* The toggles scroll sideways when they do not fit (no scrollbar: the
          cut-off last one shows there is more). */
-      #toggles { display: flex; gap: 6px; position: absolute; top: 72px; left: 8px; right: 8px;
+      /* Under the toolbar, however tall it is (--ui-bottom: main.js). */
+      #toggles { display: flex; gap: 6px; position: absolute; top: calc(var(--ui-bottom, 64px) + 8px); left: 8px; right: 8px;
                  overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; }
       #toggles::-webkit-scrollbar { display: none; }
       #toggles .views { position: static; flex: none; }
       .views button { flex: none; padding: 5px 8px; }
-      #left, #side { top: 112px; left: 8px; right: 8px; width: auto; max-height: calc(100% - 112px - 12px); }
-      #left { height: calc(100% - 112px - 12px); }
+      #left, #side { top: calc(var(--ui-bottom, 64px) + 48px); left: 8px; right: 8px; width: auto;
+                     max-height: calc(100% - var(--ui-bottom, 64px) - 48px - 12px); }
+      #left { height: calc(100% - var(--ui-bottom, 64px) - 48px - 12px); }
       #left > #assets { align-self: flex-start; width: min(300px, 100%); }  /* as on desktop: two columns */
       #assets input[type=search], #teleop select, #world select, #world input, #render select, #teleop input[type=number], #ros input[type=text] { font-size: 16px; }  /* no zoom on focus (iOS) */
       #gizmo { width: 64px; height: 64px; left: 8px; bottom: 8px; }
@@ -475,7 +514,7 @@
     <button id="pause" title="Pause or resume the simulation"><svg class="i-pause solid" viewBox="0 0 24 24"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg><svg class="i-play solid" viewBox="0 0 24 24"><path d="M8 5.5v13a1 1 0 0 0 1.5.86l10.5-6.5a1 1 0 0 0 0-1.72L9.5 4.64A1 1 0 0 0 8 5.5z"/></svg><span class="label">Pause</span></button>
     <button id="reset" title="Reset: every robot back to its spawn pose"><svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 2.64-6.36L3 8.3"/><path d="M3 3v5.3h5.3"/></svg><span class="label">Reset</span></button>
     <button id="clear" title="Clear: remove all robots"><svg viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M10 11v6M14 11v6"/><path d="M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12"/><path d="M9 7V4.5A1.5 1.5 0 0 1 10.5 3h3A1.5 1.5 0 0 1 15 4.5V7"/></svg><span class="label">Clear</span></button>
-    <button id="record" title="Record the simulation for replay"><svg class="solid" viewBox="0 0 24 24"><circle cx="12" cy="12" r="6.5"/></svg><span class="label">Record</span></button>
+    <button id="record" hidden title="Record the simulation for replay"><svg class="solid" viewBox="0 0 24 24"><circle cx="12" cy="12" r="6.5"/></svg><span class="label">Record</span></button>
     <button id="restart" hidden title="Full restart of the shared world: the server reads the model files again and starts the simulation anew (time 0, every robot at its spawn point, controllers fresh), for everyone"><svg viewBox="0 0 24 24"><path d="M12 3v8"/><path d="M6.3 6.8a8 8 0 1 0 11.4 0"/></svg><span class="label">Full restart</span></button>
     <button id="vr" hidden title="Enter VR"><svg viewBox="0 0 24 24"><path d="M4 7h16a1 1 0 0 1 1 1v8a1 1 0 0 1-1 1h-5l-3-3-3 3H4a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1z"/><circle cx="8" cy="11.5" r="1.5"/><circle cx="16" cy="11.5" r="1.5"/></svg><span class="label">Enter VR</span></button>
     <button id="ar" hidden title="Enter AR: the robots in your room (passthrough, Quest 3)"><svg viewBox="0 0 24 24"><path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M4 7.5l8 4.5 8-4.5M12 12v9"/></svg><span class="label">Enter AR</span></button>
@@ -494,8 +533,7 @@
     <button data-panel="cameras" title="The robots' cameras: picture-in-picture windows, looking through one">Cameras</button>
     <button data-panel="ros" title="ROS: the rosbridge, /clock, and per robot its topics: joint states and TF out, joint commands and cmd_vel in">ROS</button>
     <button data-panel="render" title="Rendering quality: resolution, anti-aliasing, occlusion, shadows, textures">Render</button>
-    <button data-panel="share" title="Open this page on another device: a short code or a QR code">Share</button>
-    <button data-panel="server" hidden title="Where the world runs: in this browser, or on a server shared with others (Binder)">Server</button>
+    <button data-panel="share" title="Share this world: open it on another device (a short code or a QR code), who is here, and where the world runs (this browser or a server)">Share</button>
   </div>
   </div>
   <div id="left">
@@ -503,7 +541,7 @@
     <div class="tabs"></div>
     <input type="search" name="asset-filter" placeholder="Filter…" autocomplete="off">
     <ul></ul>
-    <div class="hint">Drag an item onto the floor to spawn it. While dragging: mouse wheel or Q/E turns it, Shift+wheel or R/F raises/lowers it, Esc cancels.</div>
+    <div class="hint">Drag an item onto the floor, or onto a table or shelf, to spawn it there. While dragging: mouse wheel or Q/E turns it, Shift+wheel or R/F raises/lowers it, Esc cancels.</div>
   </div>
   <div id="stage">
     <div class="stage-bar">
@@ -555,13 +593,10 @@
     <h3>Render</h3>
     <div class="body"></div>
   </div>
-  <div id="server" hidden>
-    <h3>Server</h3>
-    <div class="body"></div>
-  </div>
   <div id="share" hidden>
     <h3>Share</h3>
     <div class="body"></div>
+    <div class="server"></div>
   </div>
   </div>
   <canvas id="gizmo" title="World axes: click an axis to look along it"></canvas>

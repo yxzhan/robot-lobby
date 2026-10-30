@@ -13,7 +13,8 @@ here (its own forward kinematics); picking and everything else that needs
 the model are requests to this server.
 
 Protocol (client -> server, JSON {op, ...}; `rid` asks for a reply):
-  spawn {rel, label, pos, yaw}   remove {ids}         move {id, pos, yaw}
+  spawn {rel, label, pos, yaw}   (its spawner holds it: control.py)
+  remove {ids}         move {id, pos, yaw}
   place {id, pos, quat, spawn?}  reset {}             reset_robot {id}
   place_body {name, pos}         (a body on a free joint of its own, e.g. a ball in an environment)
   pause {paused}                 physics {physics}    qpos {adr, dof, v}
@@ -27,7 +28,7 @@ Protocol (client -> server, JSON {op, ...}; `rid` asks for a reply):
                     actuator a switched-on controller drives (item.owners) is
                     left to it, unless `takeover`: then written over it while
                     they come (JOINT_TIMEOUT)
-  ray {eye, dir} -> {body, point} or {body: -1}        ping {t} -> pong {t}
+  ray {eye, dir} -> {body, point, normal} or {body: -1}        ping {t} -> pong {t}
   Teleop (robot `id`): use {kind: policy|base|ik, on (policy: its id or '')}
   cmd {kind: policy|base, cmd: [vx, vy, yaw rate], height?} (repeated while
   not zero; stops after CMD_TIMEOUT without one; a moving one drops the goal)
@@ -44,6 +45,13 @@ Protocol (client -> server, JSON {op, ...}; `rid` asks for a reply):
   base_config {config}   base_save   base_defaults
   stage_load {id} or {bundle}   a published stage, or one the page has,
                     replaces the world (for everyone)
+  Control (control.py, docs/control.md): hello {id, name, touch} (first
+  thing; the id kept by the page's tab; touch: a touch screen, which tells
+  an iPad from a Mac)   rename {name}   hold {id, on: false}
+  (let go)   take {id} (a robot whose holder has been idle IDLE_TAKE s).
+  The robot ops above (the teleop ops, joint_cmd, reset_robot, move, place,
+  ctrl / qpos of a robot's actuators and joints, remove) need the robot's
+  hold, and take a free robot; refused: an error with code 'held'
 Server -> client:
   {type: 'scene', version, items, physics, paused, world, stage?}   the world
                               (`world`: names, joint and actuator tables for
@@ -64,7 +72,14 @@ Server -> client:
   {type: 'reset', id}            after reset (id null) / reset_robot {id}
   {type: 'ros', holds: {key: 'you' | 'other'}}  whose ROS is held, as this
                               client sees it (on joining, and on changes)
-  {type: 'reply', rid, ...} / {type: 'error', op, msg, rid?}
+  {type: 'clients', you, clients: [{id, name, color, here, device, kind}]}
+                              who is connected (and gone for less than
+                              GRACE); device from the User-Agent ('iPhone ·
+                              Safari'), kind PC | Mobile | VR | Script
+  {type: 'holds', take_after, holds: {robot id: {client, idle}}}  who holds
+                              which robot, and for how long it has been idle
+                              (on changes, and every second while any)
+  {type: 'reply', rid, ...} / {type: 'error', op, msg, rid?, code?, id?, holder?}
   {type: 'pong', t}
   binary state, physics['stateHz'] times a second (30 by default): int32 [version, epoch, nq, nmocap,
   nu, nv], float64 time, then float32 [qpos, mocap_pos, mocap_quat, ctrl,
@@ -121,6 +136,7 @@ from aiohttp import WSMsgType, web, web_fileresponse
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import base as BASE  # noqa: E402
+import control as CONTROL  # noqa: E402
 import goal as GOAL  # noqa: E402
 import ik as IK  # noqa: E402
 import policies as POL  # noqa: E402
@@ -261,6 +277,7 @@ def model_info(rel):
 class Robot:
   def __init__(self, rid, rel, label, pos, yaw):
     self.id, self.rel, self.label = rid, rel, label
+    self.by = None  # the client that spawned it (control.py; none: from a stage)
     self.prefix = f'r{rid}/'
     self.pos, self.yaw = [float(v) for v in pos], float(yaw)
     self.info = model_info(rel)
@@ -295,7 +312,7 @@ class Robot:
     return (self.body_offset, self.body_offset + self.info['nbody'] - 1)
 
   def item(self):
-    out = {'id': self.id, 'rel': self.rel, 'label': self.label, 'pos': self.pos, 'yaw': self.yaw}
+    out = {'id': self.id, 'rel': self.rel, 'label': self.label, 'pos': self.pos, 'yaw': self.yaw, 'by': self.by}
     if self.key:
       out.update(key=self.key, use=self.use, errors=self.errors, goal=self.goal, owners=self.owners(),
                  ik=self.ik.describe() if self.ik.model is not None else None,
@@ -700,6 +717,7 @@ class World:
     self.transports = {}  # ws -> its connection's transport (how much it still has to send)
     self.dynamics = set()  # clients that want qvel and qfrc_actuator in the states
     self.ros_holds = {}  # robot id or 'clock' -> the client publishing its ROS (op ros_hold)
+    self.control = CONTROL.Control()  # who drives which robot (control.py)
     self.lock = asyncio.Lock()  # one scene change at a time
     # The model and data belong to the stepping thread while it holds this
     # (run); requests that change or read them take it in between.
@@ -911,7 +929,46 @@ class World:
 
   # -- requests -------------------------------------------------------------
 
+  def op_robots(self, msg):
+    """The robots with controllers (those that can be held) an op acts on."""
+    op = msg.get('op')
+    if op in CONTROL.ROBOT_OPS:
+      rs = [self.robot(msg['id'])]
+    elif op == 'remove':
+      ids = set(msg['ids'])
+      rs = [r for r in self.robots if r.id in ids]
+    elif op in ('ctrl', 'qpos'):
+      field, size, at = ('ctrl', 'nu', int(msg['a'])) if op == 'ctrl' else ('qpos', 'nq', int(msg['adr']))
+      layout = state_layout(self.robots)
+      rs = [r for r in self.robots if layout[r.id][field] <= at < layout[r.id][field] + r.dims[size]]
+    else:
+      return []
+    return [r for r in rs if r.key]
+
   async def handle(self, ws, msg):
+    op, ctl = msg.get('op'), self.control
+    c = ctl.by_ws[ws]
+    if op == 'hello':
+      ctl.hello(ws, msg.get('id'), msg.get('name'), msg.get('touch'))
+      return
+    if op == 'rename':
+      ctl.rename(c, msg.get('name'))
+      return
+    if op in ('hold', 'take'):
+      r = self.robot(msg['id'])
+      if not r.key:
+        raise ValueError(f'{r.label} has no controllers to hold')
+      if op == 'take':
+        ctl.take(c, r)
+      elif msg.get('on'):
+        ctl.check(c, op, msg, [r])
+      else:
+        ctl.release(c, r)
+      return
+    if not ctl.check(c, op, msg, self.op_robots(msg)):
+      return
+    if op in ('stage_load', 'restart'):
+      ctl.clear()  # a new world: nobody holds its robots yet
     # These may rebuild the world: they take the stepping lock themselves,
     # around everything but compiling, so stepping goes on meanwhile.
     if msg['op'] in ('spawn', 'remove', 'physics', 'move', 'restart', 'stage_load'):
@@ -925,8 +982,12 @@ class World:
     if op == 'spawn':
       await asyncio.to_thread(model_info, msg['rel'])  # compile it off the event loop (cached)
       r = Robot(self.next_id, msg['rel'], msg.get('label') or msg['rel'], msg['pos'], msg.get('yaw', 0))
+      c = self.control.by_ws[ws]
+      r.by = c.id
       self.next_id += 1
       await self.set_scene([*self.robots, r], [r])
+      if r.key and r in self.robots:  # its spawner drives it first
+        self.control.claim(c, r)
     elif op == 'restart':
       await self.restart()
     elif op == 'stage_load':  # a published stage, or a bundle the page has (its own)
@@ -1179,13 +1240,13 @@ class World:
     await self.send_all(json.dumps({'type': 'robot', 'item': r.item()}))
 
   def ray(self, eye, direction):
-    """The first drawn geom (groups 0-2) along a ray: its body and the hit point."""
-    geom = np.zeros(1, np.int32)
+    """The first drawn geom (groups 0-2) along a ray: its body, the hit point and the surface normal there."""
+    geom, normal = np.zeros(1, np.int32), np.zeros(3)
     eye, direction = np.array(eye, float), np.array(direction, float)
-    dist = mujoco.mj_ray(self.model, self.data, eye, direction, np.array([1, 1, 1, 0, 0, 0], np.uint8), 1, -1, geom)
+    dist = mujoco.mj_ray(self.model, self.data, eye, direction, np.array([1, 1, 1, 0, 0, 0], np.uint8), 1, -1, geom, normal)
     if dist < 0 or geom[0] < 0:
       return {'body': -1}
-    return {'body': int(self.model.geom_bodyid[geom[0]]), 'point': (eye + dist * direction).tolist()}
+    return {'body': int(self.model.geom_bodyid[geom[0]]), 'point': (eye + dist * direction).tolist(), 'normal': normal.tolist()}
 
   def robot(self, rid):
     r = next((r for r in self.robots if r.id == rid), None)
@@ -1349,7 +1410,7 @@ class World:
     return reached, failed
 
   async def run(self):
-    next_broadcast, next_status, sent = 0, 0, 0
+    next_broadcast, next_status, next_control, sent = 0, 0, 0, 0
     while True:
       now = time.monotonic()
       if self.model is not None and not self.paused:
@@ -1370,6 +1431,9 @@ class World:
         next_broadcast = max(next_broadcast + 1 / hz, now)
         sent += 1
         await self.send_state(self.state_bytes(ctrl=sent % max(1, round(hz / CTRL_HZ)) == 0))
+      if now >= next_control:
+        next_control = now + 1
+        await self.sync_control(holds=True)
       if now >= next_status and self.model is not None:
         next_status = now + 1 / STATUS_HZ
         self.expire_commands(now)
@@ -1435,8 +1499,9 @@ class World:
   def robot_info(self, r):
     pose = GOAL.body_pose(self.data, r.body_offset) if self.data is not None else None
     res = r.goal_result and {k: r.goal_result[k] for k in ('phase', 'dist', 'dyaw')}
+    holder = self.control.holder(r.id)
     return {'id': r.id, 'name': f'r{r.id}', 'label': r.label, 'rel': r.rel, 'drives': bool(r.locomotion()),
-            'pose': pose, 'goal': r.goal, 'progress': res, 'arrived': r.arrived}
+            'pose': pose, 'goal': r.goal, 'progress': res, 'arrived': r.arrived, 'holder': holder and holder.name}
 
   async def set_goals(self, robots, goal=None, forward=0.0, left=0.0, turn=0.0):
     """Each robot's goal: `goal` ({x, y, yaw}, world frame) if given, else
@@ -1456,6 +1521,22 @@ class World:
       for kind in list(r.cmd_at):  # a goal replaces the keys' last command
         del r.cmd_at[kind]
       await self.send_all(json.dumps({'type': 'goal', 'id': r.id, 'goal': r.goal}))
+
+  async def sync_control(self, holds=False):
+    """Clients and holds to everyone when they changed (or the holds anyway:
+    their idle times)."""
+    ctl = self.control
+    ctl.expire(self.robots)
+    if ctl.changed:
+      ctl.changed = False
+      for ws, c in list(ctl.by_ws.items()):
+        try:
+          await ws.send_str(json.dumps(ctl.clients_msg(c)))
+        except (ConnectionError, RuntimeError):
+          pass
+    if ctl.moved or (holds and ctl.holds):
+      ctl.moved = False
+      await self.send_all(json.dumps(ctl.holds_msg()))
 
   async def broadcast_scene(self, stage=None):
     await self.send_all(json.dumps(self.scene_msg(stage)))
@@ -1515,6 +1596,7 @@ async def ws_handler(request):
   await ws.prepare(request)
   world.clients.add(ws)
   world.transports[ws] = request.transport
+  world.control.join(ws, request.headers.get('User-Agent', ''))
   print(f'client joined ({len(world.clients)} connected)')
   await ws.send_str(json.dumps(world.scene_msg()))
   await world.send_holds(ws)
@@ -1533,12 +1615,17 @@ async def ws_handler(request):
         if 'rid' in req:
           await ws.send_str(json.dumps({'type': 'reply', 'rid': req['rid'], **(reply or {})}))
       except Exception as err:  # a bad request fails alone
-        print(f'{req.get("op")} failed: {err}')
-        await ws.send_str(json.dumps({'type': 'error', 'op': req.get('op'), 'msg': str(err), 'rid': req.get('rid')}))
+        if not isinstance(err, CONTROL.Held):
+          print(f'{req.get("op")} failed: {err}')
+        await ws.send_str(json.dumps({'type': 'error', 'op': req.get('op'), 'msg': str(err), 'rid': req.get('rid'),
+                                      **getattr(err, 'info', {})}))
+      await world.sync_control()
   finally:
     world.clients.discard(ws)
     world.transports.pop(ws, None)
     world.dynamics.discard(ws)
+    world.control.leave(ws)
+    await world.sync_control()
     if ws in world.ros_holds.values():  # its robots' ROS free for others
       await world.send_holds()
     async with world.stepping:
@@ -1610,11 +1697,20 @@ async def api_goal(request):
     forward, left (m), turn (rad)   relative to each robot's current pose, or
     goal     {x, y, yaw} in the world frame, the same for all, or
     neither (or goal null)          clears their goals: they stop
+  A robot someone drives in a page (docs/control.md) is left out of 'all',
+  and named is refused (409) unless `force` is true.
   Replies with the robots as GET /api/robots. A robot's `arrived` turns true
   when it reaches its goal (which is then let go)."""
   try:
     msg = await request.json()
     robots = world.find_robots(msg.get('robots', 'all'))
+    if not msg.get('force'):  # robots someone drives in a page: left alone ('all'), or refused
+      held = [r for r in robots if world.control.holder(r.id)]
+      if held and msg.get('robots', 'all') == 'all':
+        robots = [r for r in robots if r not in held]
+      elif held:
+        raise web.HTTPConflict(text='; '.join(f'{r.label} (r{r.id}) is held by {world.control.holder(r.id).name}' for r in held)
+                               + ' (force: true to send it anyway)')
     goal = msg.get('goal')
     if goal is not None:
       goal = {k: float(goal[k]) for k in ('x', 'y', 'yaw')}

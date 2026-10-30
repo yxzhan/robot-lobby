@@ -38,6 +38,8 @@ import { FLOOR_STYLES, floorTexture, hexRgb, loadFloor, saveFloor } from '../ren
 import { AMBIENT, SUN_LUX, linearRgb, loadLighting, saveLighting, sunDirection } from '../render/lighting.js';
 import { SceneLights } from '../render/scenelights.js';
 import { ServerPanel } from '../net/serverpanel.js';
+import { Control } from '../net/control.js';
+import { Presence } from '../net/presence.js';
 import { SharePanel } from '../net/share.js';
 import { MARKER } from './marker.js';
 import { XrControls } from '../render/xr.js';
@@ -1248,6 +1250,25 @@ class App {
     return { eye, dir, forward: f };
   }
 
+  // Where world point p is on the page ({x, y} client px), or null behind
+  // the camera or while looking through a robot's camera (the inverse of
+  // pointerRay).
+  toScreen(p) {
+    if (this.cameras?.lookPose()) return null;
+    const rect = this.canvas.getBoundingClientRect();
+    const eye = this.orbit.eye(), c = this.orbit.center;
+    const norm = (v) => { const l = Math.hypot(...v); return v.map((k) => k / l); };
+    const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+    const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+    const f = norm(c.map((k, i) => k - eye[i]));
+    const r = norm(cross(f, [0, 0, 1])), u = cross(r, f);
+    const v = p.map((k, i) => k - eye[i]), z = dot(v, f);
+    if (z < 0.05) return null;
+    const t = Math.tan((45 / 2) * (Math.PI / 180)), aspect = rect.width / rect.height;
+    const x = dot(v, r) / (z * t * aspect), y = dot(v, u) / (z * t);
+    return { x: rect.left + (x + 1) / 2 * rect.width, y: rect.top + (1 - y) / 2 * rect.height };
+  }
+
   // Where the pointer ray hits the floor (or the plane at height z), or null
   // if it misses.
   pickFloor(clientX, clientY, z = 0) {
@@ -1276,7 +1297,7 @@ class App {
       const dist = mujoco.mj_ray(model, data, eye, dir, null, true, -1, geom, normal);
       const g = geom.GetView()[0];
       if (dist < 0 || g < 0) return null;
-      return { body: model.geom_bodyid[g], point: eye.map((v, i) => v + dist * dir[i]) };
+      return { body: model.geom_bodyid[g], point: eye.map((v, i) => v + dist * dir[i]), normal: [...normal.GetView()] };
     } finally {
       geom.delete();
       normal.delete();
@@ -1352,7 +1373,7 @@ class App {
   // to the floor when it is raised, or hides it (null). It has a fixed size
   // in the world (SPAWN_MARKER_RADIUS), so it looks bigger up close and
   // smaller far away, like the models it places.
-  setSpawnMarker(pos, yaw = 0) {
+  setSpawnMarker(pos, yaw = 0, base = 0) {  // base: the height of the surface it stands on
     const tcm = this.engine.getTransformManager();
     const put = (entity, m) => {
       const inst = tcm.getInstance(entity);
@@ -1361,8 +1382,8 @@ class App {
     };
     const k = SPAWN_MARKER_RADIUS, c = Math.cos(yaw) * k, s = Math.sin(yaw) * k;
     put(this.spawnMarker, pos && [c, s, 0, 0, -s, c, 0, 0, 0, 0, k, 0, pos[0], pos[1], pos[2] + 0.003, 1]);
-    const h = pos?.[2] ?? 0, w = 0.06 * k;
-    put(this.spawnPole, Math.abs(h) > 1e-3 ? [w, 0, 0, 0, 0, w, 0, 0, 0, 0, h, 0, pos[0], pos[1], h / 2, 1] : null);
+    const h = (pos?.[2] ?? 0) - base, w = 0.06 * k;  // the pole: from the surface up to the marker
+    put(this.spawnPole, Math.abs(h) > 1e-3 ? [w, 0, 0, 0, 0, w, 0, 0, 0, 0, h, 0, pos[0], pos[1], base + h / 2, 1] : null);
   }
 
   // Places the perturbation markers (see the constructor).
@@ -1571,6 +1592,7 @@ class App {
         this.orbit.update();  // follows the selection
         this.camera.lookAt(this.orbit.eye(), this.orbit.center, [0, 0, 1]);
       }
+      this.presence?.update();  // the tags over held robots (net/presence.js)
       if (this.renderer.beginFrame(this.swapChain)) {
         this.renderer.renderView(this.view);
         this.renderer.endFrame();
@@ -1890,7 +1912,7 @@ try {
   // The model library index written by scripts/vendor.mjs (empty without
   // mjcf_assets/).
   const [assets, recent] = await Promise.all([loadAssets(), loadRecent(), loadPolicyIndex()]);
-  new ServerPanel(app, document.getElementById('server'), { models: assets.length });
+  app.serverPanel = new ServerPanel(app, document.getElementById('share'), { models: assets.length });  // the Share panel's lower part
   new SharePanel(document.getElementById('share'));
 
   // Asset paths (`rel`) are under public/:
@@ -2644,6 +2666,7 @@ try {
           fresh.push(r);
         }
         list.push(r);
+        r.by = it.by ?? null;  // the client that spawned it (net/control.js)
         r.pendingItem = it;  // controllers: once the world below is in place
       }
       const model = worldModel(msg.world);
@@ -2817,13 +2840,16 @@ try {
   // On a phone they start hidden and show one at a time (index.html's
   // narrow layout puts each across the width).
   const PANELS_KEY = 'mujoco-filament/panels';  // localStorage: {panel id: open}
-  const narrow = matchMedia('(max-width: 700px)');
+  const narrow = matchMedia('(max-width: 960px)');  // (index.html's phone layout)
   // The toolbar's room between the two groups of toggles (index.html's #ui).
   const ui = document.getElementById('ui'), leftViews = document.getElementById('views-left'), rightViews = document.getElementById('views');
   const room = () => {
     ui.style.setProperty('--room-left', `${Math.ceil(leftViews.getBoundingClientRect().right) + 12}px`);
     ui.style.setProperty('--room-right', `${Math.ceil(innerWidth - rightViews.getBoundingClientRect().left) + 12}px`);
   };
+  // Where the toolbar ends (the phone layout puts the toggles and panels
+  // under it; its people row, status and wrapped buttons make it taller).
+  new ResizeObserver(() => document.documentElement.style.setProperty('--ui-bottom', `${Math.ceil(ui.getBoundingClientRect().bottom)}px`)).observe(ui);
   new ResizeObserver(room).observe(leftViews);
   new ResizeObserver(room).observe(rightViews);
   addEventListener('resize', room);
@@ -3047,8 +3073,20 @@ try {
         setBusy(null);
       }
     };
-    document.getElementById('restart').hidden = false;
+    // Who drives which robot (net/control.js): the Teleop panel shows a
+    // robot's holder, the Share panel who is connected; presence.js shows
+    // both over the view.
+    app.control = new Control(app);
+    app.presence = new Presence(app, app.control);  // tags, the people row, notices
+    app.control.onChange = (what) => {
+      app.teleop.showHold();
+      app.presence.changed(what);
+      if (what !== 'idle') app.serverPanel.refresh();
+    };
     app.net = new NetClient({
+      hello: () => app.control.hello(),
+      clients: (msg) => app.control.setClients(msg),
+      holds: (msg) => app.control.setHolds(msg),
       scene: (msg) => { scenes.push(msg); buildScenes(); },
       meta: (msg) => applyMeta(msg),
       robot: (msg) => {
@@ -3076,7 +3114,7 @@ try {
       // Reset by any client: goals set here would drive the robots off again.
       ros: (msg) => app.ros.setHolds(msg.holds),  // whose ROS is held (ros/robot.js)
       reset: (msg) => app.drive.clearGoals(msg.id == null ? robots : robots.filter((r) => r.netId === msg.id)),
-      error: (msg) => { status.textContent = `server: ${msg.op} failed: ${msg.msg}`; },
+      error: (msg) => { status.textContent = msg.code === 'held' ? `${msg.msg}: not yours to drive` : `server: ${msg.op} failed: ${msg.msg}`; },
       closed: (retryAt) => offline(retryAt),
       connected: () => offline(null),
     });
@@ -3096,7 +3134,7 @@ try {
     }
   } else {
     await rebuild([]);
-    status.textContent = problem ? `${problem}: running locally (Server panel)` : hint();
+    status.textContent = problem ? `${problem}: running locally (Share panel)` : hint();
     await migrateOldStage().catch((err) => console.warn('old stage:', err));
     // A linked stage (else an empty floor).
     const asked = new URLSearchParams(location.search).get('stage');

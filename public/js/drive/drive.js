@@ -78,6 +78,7 @@ export class Drive {
   // Sets robot r's goal ({x, y, yaw} or null); in network mode it goes to
   // the server, at most every GOAL_GAP_MS while it is dragged.
   setGoal(r, goal) {
+    if (this.app.control?.blocked(r)) return;  // someone else drives it (net/control.js)
     r.goal = goal;
     r.goalState = {};
     r.arrived = false;
@@ -168,7 +169,7 @@ export class Drive {
     const seen = this.commanded.get(r.prefix);
     if (seen?.model === model) { seen.at = now; for (const [a] of pairs) seen.acts.add(a); }
     else this.commanded.set(r.prefix, { model, at: now, acts: new Set(pairs.map(([a]) => a)) });
-    if (net) { net.send('joint_cmd', { id: r.netId, ctrl: pairs, takeover: !!takeover }); return; }
+    if (net) { if (!this.app.control?.blocked(r)) net.send('joint_cmd', { id: r.netId, ctrl: pairs, takeover: !!takeover }); return; }
     const owners = this.owners(r);
     let o = this.overrides.get(r.prefix);
     if (o?.model !== model) this.overrides.set(r.prefix, o = { model, ctrl: new Map() });

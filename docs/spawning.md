@@ -6,20 +6,23 @@ Objects (`public/js/world/assets.js`) — after a **Recent** tab (the default): 
 last 30 models spawned from the panel, newest first, kept in the browser's
 localStorage; a browser without that list starts from `public/json/recent.json`
 (model files relative to `public/`, edited by hand). Drag one onto the
-floor to spawn it there. While
-dragging, a marker on the floor shows the spawn point and heading (the model's
+floor to spawn it there, or onto something standing on it (a table, a
+shelf: the first surface under the pointer that faces up, from the
+collision geoms; walls and other steep faces leave it on the floor behind
+them). While
+dragging, a marker there shows the spawn point and heading (the model's
 +x, which starts out along the world +x axis); the mouse wheel or Q/E turns it in
 15° steps, Shift+wheel or R/F raises or lowers it in 5 cm steps (a pole
-shows the height; it is kept for the next drag), and Esc cancels. The drag
+from the surface shows the height; it is kept for the next drag), and Esc cancels. The drag
 label shows the spawn position and heading. The toolbar (top middle) runs the
 simulation: Clear removes every spawned item (the Stage panel's ✕ one of
-them), Reset puts every robot back in its spawn pose. In a shared world, **Full restart**
+them), Reset puts every robot back in its spawn pose. In a shared world, **Full restart** (its button hidden for now)
 (after a confirmation, for everyone) has the server read the model files
 again and start anew: a fresh MjData at time 0, every robot at its spawn
 point with fresh controllers (the same ones switched on), so edits to the
 MJCF files take effect without restarting the server.
 
-**Record** (red; Stop while it records) keeps the simulation's state, 30
+**Record** (its button hidden for now; red, Stop while it records) keeps the simulation's state, 30
 times a second of simulated time (qpos and the mocap poses, up to 5 minutes:
 the oldest goes), and the bar under the view replays it: ▶ / ❚❚, the
 timeline to drag, a speed (0.1× to 2×) and **Live**, back to the

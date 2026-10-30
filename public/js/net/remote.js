@@ -41,7 +41,7 @@ export class RemoteIk {
     this.focus = 0;
     this.remote = new Map();  // chain name -> {pos, rot} in its ref body frame
     this.setAt = new Map();   // chain name -> when it was last dragged here
-    const send = (op, args = {}) => app.net.send(op, { id: robot.netId, ...args });
+    const send = (op, args = {}) => { if (!app.control?.blocked(robot)) app.net.send(op, { id: robot.netId, ...args }); };
     this.send = send;
     // The panel deletes a target to put its marker back on the tip.
     this.targets = {
@@ -164,6 +164,7 @@ class RemoteDriver {
   set cmd(v) { this.cmdNow = v; this.push(); }
 
   push() {
+    if (this.app.control?.blocked(this.robot)) return;  // someone else drives it (control.js)
     const h = this.heightNow;
     const key = this.cmdNow.map((v) => v.toFixed(3)).join() + (h == null ? '' : `/${h.toFixed(3)}`);
     const moving = this.cmdNow.some((v) => Math.abs(v) > 1e-6);

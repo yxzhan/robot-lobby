@@ -71,6 +71,8 @@ export class NetClient {
       this.snaps = [];  // the server sends its scene and state anew (it may have restarted)
       this.renderTime = null;
       this.ctrl = null;
+      const hello = this.handlers.hello?.();  // who this page is (control.js), before anything else
+      if (hello) this.send('hello', hello);
       if (this.dynamicsFor?.size) this.send('dynamics', { on: true });  // (asked for before: again on a new connection)
       const ping = () => {
         this.checkAlive();

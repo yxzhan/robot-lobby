@@ -31,6 +31,7 @@ import { DURATION_RANGE } from '../controllers/skills.js';
 import { bodyPose } from './goal.js';
 import { locomotion } from './drive.js';
 import { ACTIONS, BINDINGS, GamepadMap, bindingName, gamepad } from './gamepad.js';
+import { mark } from '../net/control.js';
 
 // Per held key: [command index (vx, vy, yaw rate), direction, drive speed].
 const DRIVE = {
@@ -372,21 +373,38 @@ export class TeleopPanel {
     return (this.app.robots ?? []).filter((r) => r.use);
   }
 
-  // Called for every new world (App.setWorld).
+  // Called for every new world (App.setWorld). A robot spawned here is
+  // driven next; in a shared world not one someone else spawned, nor (when
+  // picking one by itself) one someone else holds.
   build() {
-    const robots = this.controllable();
-    const added = robots.filter((r) => !this.known.has(r));
+    const robots = this.controllable(), control = this.app.control;
+    const added = robots.filter((r) => !this.known.has(r) && (!control || r.by === control.you));
+    const first = !this.known.size;
     this.known = new Set(robots);
-    if (added.length) this.active = added.at(-1);
-    else if (!robots.includes(this.active)) this.active = robots.find((r) => r.prefix === this.active?.prefix) ?? robots.at(-1) ?? null;
+    if (added.length) {
+      this.active = added.at(-1);
+      this.autoPicked = false;
+    } else if (first || !robots.includes(this.active)) {
+      this.active = robots.find((r) => r.prefix === this.active?.prefix) ?? this.pick(robots);
+    }
     this.dragging = this.hover = null;
     this.render();
+  }
+
+  // The robot to drive when none was chosen: in a shared world the newest
+  // one this page holds, else the newest free one, else none.
+  pick(robots = this.controllable()) {
+    const control = this.app.control;
+    this.autoPicked = !!control;
+    if (!control) return robots.at(-1) ?? null;
+    return robots.findLast((r) => control.mine(r)) ?? robots.findLast((r) => !control.holder(r)) ?? null;
   }
 
   // Drives `robot` (e.g. double-clicked); an environment or object, or
   // nothing (the floor), releases control.
   drive(robot) {
     const next = robot?.use ? robot : null;
+    this.autoPicked = false;
     if (next === this.active) { this.render(); return; }  // the selected body may matter (IK chain editor)
     this.active = next;
     this.render();
@@ -580,7 +598,7 @@ export class TeleopPanel {
   render() {
     const robots = this.controllable();
     this.body.replaceChildren();
-    this.readout = this.jointsLine = this.driveLine = null;
+    this.readout = this.jointsLine = this.driveLine = this.holdLine = this.picker = null;
     this.errs = [];
     this.grips = [];
     this.cmdViews = [];
@@ -594,13 +612,84 @@ export class TeleopPanel {
       this.body.append(row);
       return controls[0];
     };
-    field('Robot', this.select(
-      [['', 'none'], ...robots.map((r) => [r.prefix, `${r.prefix.slice(0, -1)} · ${r.label}`])],
+    this.picker = field('Robot', this.select(
+      [['', 'none'], ...robots.map((r) => [r.prefix, this.robotName(r)])],
       this.active?.prefix ?? '',
-      (v) => { this.active = robots.find((r) => r.prefix === v) ?? null; this.render(); },
+      (v) => { this.active = robots.find((r) => r.prefix === v) ?? null; this.autoPicked = false; this.render(); },
     ));
     const r = this.active;
     if (!r) return;
+    // Shared world: who drives it (net/control.js). Held by someone else, the
+    // rest of the panel is locked until it is taken over.
+    const control = this.app.control;
+    this.blocked = !!control?.blocked(r);
+    if (control) {
+      this.holdLine = el('div', { className: 'bar owner hold' });
+      this.body.append(this.holdLine);
+      this.showHold();
+    }
+    const start = this.body.childElementCount;
+    this.renderRobot(r);
+    if (this.blocked) {
+      const rest = [...this.body.children].slice(start);
+      this.body.append(el('div', { className: 'locked', inert: true }, ...rest));
+    }
+  }
+
+  // The picker's name for a robot: in a shared world with its holder.
+  robotName(r) {
+    const h = this.app.control?.holder(r);
+    return `${r.prefix.slice(0, -1)} · ${r.label}` + (!h ? '' : this.app.control.mine(r) ? ' · you' : ` · ${h.name}`);
+  }
+
+  // The hold line (shared world): free, yours (Release), or someone else's
+  // (Take over once they have been idle). Updated in place as holds and
+  // idle times come in; re-rendered when this page may drive it or no longer.
+  showHold() {
+    const control = this.app.control;
+    // Picked by itself and now someone else's (the holds came after the
+    // world): pick again.
+    if (control && this.autoPicked && (!this.active || control.blocked(this.active))) {
+      const next = this.pick();
+      if (next !== this.active) { this.active = next; this.render(); return; }
+    }
+    const r = this.active;
+    if (!control || !r) return;
+    if (this.holdLine && control.blocked(r) !== this.blocked) { this.render(); return; }
+    for (const o of this.picker?.options ?? []) {
+      const x = this.controllable().find((q) => q.prefix === o.value);
+      if (x && o.text !== this.robotName(x)) o.text = this.robotName(x);
+    }
+    if (!this.holdLine?.isConnected) return;
+    const h = control.holder(r);
+    const parts = [];
+    if (!h) {
+      parts.push(el('span', { className: 'note', textContent: 'Free: driving it makes it yours' }));
+    } else if (control.mine(r)) {
+      parts.push(mark(h), el('span', { className: 'note', textContent: 'Yours: others cannot drive it' }),
+        this.button('Release', 'Let others drive it', () => control.release(r)));
+    } else {
+      const idle = control.idle(r.netId);
+      const take = this.button('Take over', `Make it yours (once ${h.name} has left it alone for ${control.takeAfter} s)`, () => control.take(r));
+      take.disabled = !control.canTake(r);
+      take.title += h.device ? ` · ${h.name} is on ${h.device}` : '';
+      parts.push(mark(h), el('span', { className: 'note', textContent:
+        `Held by ${h.name}${!h.here ? ' (gone)' : idle >= 2 ? ` · idle ${Math.floor(idle)} s` : ''}` }), take);
+    }
+    const key = `${h?.kind}${h?.color}|` + parts.map((p) => `${p.textContent}${p.disabled ?? ''}`).join('|');
+    if (this.holdLine.dataset.key !== key) {
+      this.holdLine.dataset.key = key;
+      this.holdLine.replaceChildren(...parts);
+    }
+  }
+
+  // The rest of the panel for the driven robot r.
+  renderRobot(r) {
+    const field = (label, ...controls) => {
+      const row = el('label', { className: 'field' }, el('span', { textContent: label }), ...controls);
+      this.body.append(row);
+      return controls[0];
+    };
     // Controllers: any of them on, or none (e.g. GR00T off to pose a G1 by hand).
     const chips = el('div', { className: 'chips' });
     for (const [kind, label, title] of CONTROLLERS) {
