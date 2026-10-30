@@ -37,7 +37,7 @@ import { addSwarm } from './swarm.js';
 import { FLOOR_STYLES, floorTexture, hexRgb, loadFloor, saveFloor } from '../render/floor.js';
 import { AMBIENT, SUN_LUX, linearRgb, loadLighting, saveLighting, sunDirection } from '../render/lighting.js';
 import { SceneLights } from '../render/scenelights.js';
-import { ServerPanel } from '../net/serverpanel.js';
+import { ServerPanel, takeCarried } from '../net/serverpanel.js';
 import { Control } from '../net/control.js';
 import { Presence } from '../net/presence.js';
 import { SharePanel } from '../net/share.js';
@@ -1912,7 +1912,8 @@ try {
   // The model library index written by scripts/vendor.mjs (empty without
   // mjcf_assets/).
   const [assets, recent] = await Promise.all([loadAssets(), loadRecent(), loadPolicyIndex()]);
-  app.serverPanel = new ServerPanel(app, document.getElementById('share'), { models: assets.length });  // the Share panel's lower part
+  app.serverPanel = new ServerPanel(app, document.getElementById('share'),  // the Share panel's lower part
+    { models: assets.length, online: document.getElementById('online') });
   new SharePanel(document.getElementById('share'));
 
   // Asset paths (`rel`) are under public/:
@@ -2472,6 +2473,13 @@ try {
     }
     refreshStages();
   }
+
+  // Go online (serverpanel.js): what is spawned, saved in My stages for the
+  // page to load once it is on the server; its id, or null (nothing spawned).
+  app.carryScene = async () => {
+    if (!robots.length) return null;
+    return browserStages.put(await sceneBundle(`${defaultName()} (taken online)`));
+  };
 
   // Publish (network mode): what is spawned, or one of My stages (`e`), to
   // the server's Community stages, which the server commits to the library.
@@ -3122,6 +3130,10 @@ try {
     console.log(`network mode: ${server.info.server}, MuJoCo ${server.info.mujoco}, at ${server.base}`);
     app.world.render();
     await refreshStages();
+    // The local scene Go online took along (asked first if the world has robots already).
+    const carried = takeCarried();
+    const taken = carried && (await browserStages.list().catch(() => [])).find((x) => x.id === carried);
+    if (taken) openStage(taken);
     // A link to a stage: load it for everyone, if this page's user agrees.
     const asked = new URLSearchParams(location.search).get('stage');
     if (asked) {

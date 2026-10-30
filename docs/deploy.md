@@ -73,11 +73,21 @@ uploads files through the Jupyter Contents API (`upload_file`).
 *Join a server* takes a session's `<url>robot-lobby/?token=…` (or any
 server.py's address); *Go local* leaves it; the link at the top of the
 panel (Copy) is this page on that server, token included, so others join
-the same world. *Start a server on Binder* (off for now: `BINDER_LAUNCH`
-in `serverpanel.js`, until BinderHub's build API answers other origins)
-calls that API, shows the build and launch, and reloads the page on the
-new session. A Binder session ends after a while without anyone connected (on
-mybinder.org about 10 minutes); the page then starts locally again.
+the same world.
+
+**Going online.** In local mode, with a Binder repository in
+`json/deploy.json`, the toolbar's *Go online* (and the same button in the
+Share panel) calls that API: the page stays usable while the session builds
+and starts, its phases in the status line and the panel. Once the session is
+ready, what is spawned is saved in this browser as a stage (My stages,
+"… (taken online)", all its parts) and the page reloads onto the new session,
+which loads that stage (asked first only if its world has robots already).
+The hub has to answer the page's origin: binder.intel4coro.de sends
+`Access-Control-Allow-Origin: https://yxzhan.github.io` (one origin; several
+need nginx to echo `$http_origin` from a whitelist, with `Vary: Origin`).
+`BINDER_LAUNCH` in `serverpanel.js` switches it off. A Binder session ends
+after a while without anyone connected (on mybinder.org about 10 minutes);
+the page then starts locally again.
 
 **Share panel.** Its upper part gets the page onto another device (a phone, a headset)
 without typing its URL (`public/js/net/share.js`, after bambot's `shareLink.ts`):
