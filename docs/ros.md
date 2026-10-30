@@ -143,3 +143,44 @@ Tried (local mode, wall time, joint states at 30 Hz): `demo.py`'s
 trajectories end within 0.02-0.03 rad of their goals (the controllers
 report success; the arm's position servos hold against gravity with a
 small offset), the hand closes to 0 and opens to 0.038 m.
+
+## giskardpy: GARMI as the real robot
+
+`scripts/garmi_lobby_bridge.py` gives the lobby's **GARMI** (`aicor/garmi`)
+the real robot's ROS interface (as `garmi_description`'s
+`docs/real_robot.md` describes it), on top of its plain topics (prefix
+`r1`), so giskardpy's `garmi_velocity` (`GarmiVelocityInterface`, closed
+loop) and coraplex's `RealGarmiPlanExecutor` drive it unchanged:
+`/garmi/joint_states` (the rollers left out), the base's odometry on
+`/r100_0603/platform/odom/filtered` (from the lobby's TF) and a static
+`map → odom` (where the plan has GARMI start), the arms' velocities from
+`/garmi/arms/{left,right}_arm_joint_velocity_controller/reference`
+(`MultiDOFCommand`) integrated into position targets as the real
+`JointVelocityIntegratorController` does, the base's `TwistStamped` from
+`/r100_0603/joy_teleop/cmd_vel`, and the hands as franka_gripper's
+`move`/`grasp`/`homing` actions under `/garmi/arms/{left,right}/franka_gripper`
+(`franka_msgs`, built from franka_ros2 in `ros_ws/`). Its ROS profile maps
+the finger joints onto the hands' tendon actuators. Lift and head are not
+commanded, as on the real robot. `scripts/garmi_lobby_demo.py` is coraplex's
+GARMI apartment demo with that executor; the lobby holds GARMI alone.
+
+In the lobby: spawn GARMI, switch its IK off (Teleop panel) and its ROS on.
+Then (Jazzy, `ros_ws` and the CRAM workspace sourced; CRAM main needs
+`garmi_description` 0.4 and `iai_maps` ros-jazzy of 2026-10-22 or later):
+
+```sh
+ros2 run rosbridge_server rosbridge_websocket
+python3 scripts/garmi_lobby_bridge.py
+python -m giskardpy.middleware.ros2.scripts.other_robots.garmi.garmi_velocity   # CRAM venv
+python scripts/garmi_lobby_demo.py                                               # CRAM venv
+```
+
+Tried (2026-10-30, CRAM main `318493665a`): the arms follow giskard's
+velocities (0.6 rad commanded, 0.607 reached), the base its twist (0.300 m,
+odometry 0.305 m), the hands grasp and move; a plan of `ParkArmsAction`
+ends with both arms on the park pose, once the model's coarse torso
+self-collision box (`body_link`, larger than the URDF's `body.stl`) is out of
+the way: with it, the arms stop on it. The whole demo stops in giskard
+before moving: the plan's underspecified actions carry krrood `Match`es that
+giskard cannot read back from JSON (`Match.__init__() missing … '_factory_'`),
+on the real robot as here.
