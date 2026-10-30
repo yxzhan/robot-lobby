@@ -128,9 +128,9 @@ Goals can also come from a script, for several robots at once:
   `inspect`, `use_skill`, and arms by their IK: `ik_chains` (the chains,
   their targets and tips in the world as pos and quaternion), `set_ik_target`
   (a chain's target; its orientation kept without one) and `set_gripper`
-  (0 open, 1 closed) (its docstring lists them all; the Tracy pick and place
-  example, `tracy_pick.py`, walks the target along lines and turns noslip up
-  for the grasp). The script defines `root` (a behaviour) or `tree` (a
+  (0 open, 1 closed) (its docstring lists them all; the Tracy pouring
+  example, `tracy_pick.py`, moves both arms together along lines, aims from
+  where the bodies are, and turns noslip up for the grasp). The script defines `root` (a behaviour) or `tree` (a
   `BehaviourTree`):
 
   ```python
