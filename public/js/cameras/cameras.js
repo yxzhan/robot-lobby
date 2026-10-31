@@ -377,7 +377,7 @@ export class Cameras {
     c.view = app.engine.createView();
     c.view.setCamera(c.camera);
     c.view.setScene(app.scene);
-    c.view.setVisibleLayers(0xff, 0x1);  // the world only, not the viewer's markers (main.js SCENE)
+    c.view.setVisibleLayers(0xff, 0x5);  // the world only, not the viewer's markers (main.js SCENE | HIDDEN)
     c.view.setViewport([0, 0, c.width, c.height]);
     app.viewQuality(c.view);  // anti-aliasing, SSAO and reflections as the Render panel says (App.setQuality keeps it so)
     c.rb = gl.createRenderbuffer();
@@ -542,7 +542,7 @@ export class Cameras {
     const entity = F.EntityManager.get().create(), camera = app.engine.createCamera(entity), view = app.engine.createView();
     view.setCamera(camera);
     view.setScene(app.scene);
-    view.setVisibleLayers(0xff, 0x1);  // the world only
+    view.setVisibleLayers(0xff, 0x5);  // the world only (SCENE | HIDDEN)
     view.setViewport([0, 0, size, size]);
     app.viewQuality(view);
     aim(camera);

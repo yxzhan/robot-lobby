@@ -7,7 +7,10 @@ page builds its Filament parts with the same code as from a WASM model
 (main.js buildVisual). Only what is drawn goes in: visible geoms (group < 3,
 alpha > 0, a supported type), the meshes they use, and the pixels of
 MuJoCo's own 2D textures (builtins); image file textures are sent as paths
-under public/ instead, the browser decodes them.
+under public/ instead, the browser decodes them. For the Render panel's
+debug overlays (public/js/render/debug.js): the geoms that collide as col_*
+tables, each mesh as its convex hull (the vertices it uses and its faces),
+and jnt_bodyid.
 
 Packed as: uint32 header length, JSON header ({arrays: {name: [dtype,
 offset, count]}, ...}), zero padding to 8 bytes, then the arrays (each at an
@@ -106,9 +109,44 @@ def build(spec, model, rel, public):
   arrays['tex_adr'] = np.array(tex_adr, np.int32)
   arrays['tex_data'] = np.concatenate(data) if data else np.zeros(0, np.uint8)
 
+  # The geoms that collide (debug overlays): their meshes as the convex hull
+  # MuJoCo collides with (mesh_graph), else all of the mesh.
+  cols = [g for g in range(m.ngeom) if (m.geom_contype[g] or m.geom_conaffinity[g]) and m.geom_type[g] in DRAWN_TYPES]
+  ci = np.array(cols, dtype=int)
+  for f in ('geom_type', 'geom_size', 'geom_bodyid', 'geom_pos', 'geom_quat'):
+    arrays['col_' + f] = getattr(m, f)[ci] if cols else np.zeros((0,) + getattr(m, f).shape[1:], getattr(m, f).dtype)
+  col_meshes = sorted({int(m.geom_dataid[g]) for g in cols if m.geom_type[g] == 7})
+  col_index = {k: i for i, k in enumerate(col_meshes)}
+  arrays['col_geom_dataid'] = np.array([col_index.get(int(m.geom_dataid[g]), -1) if m.geom_type[g] == 7 else -1 for g in cols], np.int32)
+  verts, faces, cadr = [], [], {k: [] for k in ('col_mesh_vertadr', 'col_mesh_vertnum', 'col_mesh_faceadr', 'col_mesh_facenum')}
+  nv_at = nf_at = 0
+  for k in col_meshes:
+    va, nv = m.mesh_vertadr[k], m.mesh_vertnum[k]
+    g = m.mesh_graphadr[k]
+    if g >= 0:
+      numvert, numface = int(m.mesh_graph[g]), int(m.mesh_graph[g + 1])
+      at = g + 2 + numvert + numvert + (numvert + 3 * numface)
+      face = m.mesh_graph[at:at + 3 * numface].reshape(-1, 3)
+    else:
+      fa, nf = m.mesh_faceadr[k], m.mesh_facenum[k]
+      face = m.mesh_face[fa:fa + nf]
+    used, face = np.unique(face, return_inverse=True)  # only the vertices the faces use
+    verts.append(m.mesh_vert[va:va + nv][used].astype(np.float32))
+    faces.append(face.reshape(-1, 3).astype(np.int32))
+    cadr['col_mesh_vertadr'].append(nv_at)
+    cadr['col_mesh_vertnum'].append(len(used))
+    cadr['col_mesh_faceadr'].append(nf_at)
+    cadr['col_mesh_facenum'].append(len(faces[-1]))
+    nv_at += len(used)
+    nf_at += len(faces[-1])
+  arrays['col_mesh_vert'] = np.concatenate(verts) if verts else np.zeros((0, 3), np.float32)
+  arrays['col_mesh_face'] = np.concatenate(faces) if faces else np.zeros((0, 3), np.int32)
+  for k, v in cadr.items():
+    arrays[k] = np.array(v, np.int32)
+
   # Kinematic tree (mj_kinematics).
   for f in ('body_parentid', 'body_pos', 'body_quat', 'body_jntnum', 'body_jntadr', 'body_mocapid',
-            'jnt_type', 'jnt_pos', 'jnt_axis', 'jnt_qposadr', 'qpos0'):
+            'jnt_type', 'jnt_pos', 'jnt_axis', 'jnt_qposadr', 'jnt_bodyid', 'qpos0'):
     arrays[f] = getattr(m, f)
 
   # Cameras (public/js/cameras/cameras.js, modelCameras).

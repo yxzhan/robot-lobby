@@ -1,0 +1,21 @@
+// Unlit lines coloured per vertex: the debug overlays (render/debug.js:
+// collision wireframes, body frames, joints), drawn over everything (no
+// depth test), a little see-through, so they show through the models.
+material {
+    name : unlit_lines,
+    shadingModel : unlit,
+    blending : transparent,
+    depthCulling : false,
+    depthWrite : false,
+    doubleSided : true,
+    requires : [ color ],
+    variantFilter : [ skinning, shadowReceiver, vsm, fog, ssr, stereo ]
+}
+
+fragment {
+    void material(inout MaterialInputs material) {
+        prepareMaterial(material);
+        material.baseColor = getColor();
+        material.baseColor.rgb *= material.baseColor.a;
+    }
+}

@@ -129,6 +129,7 @@ matc -a opengl -p mobile -o public/materials/lit_textured.filamat materials/lit_
 matc -a opengl -p mobile -o public/materials/lit_transparent.filamat materials/lit_transparent.mat
 matc -a opengl -p mobile -o public/materials/lit_textured_transparent.filamat materials/lit_textured_transparent.mat
 matc -a opengl -p mobile -o public/materials/unlit_textured.filamat materials/unlit_textured.mat
+matc -a opengl -p mobile -o public/materials/unlit_lines.filamat materials/unlit_lines.mat
 ```
 
 ## Relation to MuJoCo's own Filament renderer

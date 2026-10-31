@@ -33,6 +33,7 @@ import { WorldPanel } from '../world/worldpanel.js';
 import { BehaviorPanel } from '../behavior/btpanel.js';
 import { AgentPanel } from '../agent/agent.js';
 import { RenderPanel, loadQuality } from '../render/render.js';
+import { debugLines } from '../render/debug.js';
 import { addSwarm } from './swarm.js';
 import { FLOOR_STYLES, floorTexture, hexRgb, loadFloor, saveFloor } from '../render/floor.js';
 import { AMBIENT, SUN_LUX, linearRgb, loadLighting, saveLighting, sunDirection } from '../render/lighting.js';
@@ -61,6 +62,10 @@ const MAT_TRANSPARENT = 'materials/lit_transparent.filamat';
 const FOLLOW = 'mujoco-filament/follow-selection';  // localStorage: the camera follows the selection
 const MAT_TEXTURED_TRANSPARENT = 'materials/lit_textured_transparent.filamat';
 const MAT_UNLIT_TEXTURED = 'materials/unlit_textured.filamat';  // the WebXR menu panel
+// The debug overlays' lines (render/debug.js), fetched on their own: a page
+// without them (not compiled yet) still runs, with no overlays.
+const MAT_LINES = 'materials/unlit_lines.filamat';
+const OVERLAYS = 'mujoco-filament/overlays';  // localStorage: {visual, collision, frames, joints} shown
 // WebXR settings (the VR menu, xr.js), kept in this browser: MSAA samples of
 // the eyes, the layer's framebuffer scale (1: the headset's default) and the
 // sun's shadows (off by default: they cost a second pass of the scene).
@@ -497,20 +502,48 @@ function makeGeometry(engine, shape, uv = null) {
 // Several entities may share the same buffers and material instance.
 // Layers: the world on SCENE, the viewer's own markers (selection, IK and
 // goal markers, origin axes, WebXR controllers and menu) on OVERLAY, which
-// the window and WebXR views show and the robots' cameras do not (cameras.js).
-export const SCENE = 0x1, OVERLAY = 0x2;
+// the window and WebXR views show and the robots' cameras do not (cameras.js);
+// the robots' own geoms move to HIDDEN while the Render panel's Visual is
+// off: the robots' cameras still show them, the window does not.
+export const SCENE = 0x1, OVERLAY = 0x2, HIDDEN = 0x4;
 
-function makeEntity(engine, geo, matInstance, castShadows = true, layer = SCENE) {
+function makeEntity(engine, geo, matInstance, castShadows = true, layer = SCENE, primitive = Filament.RenderableManager$PrimitiveType.TRIANGLES) {
   const entity = Filament.EntityManager.get().create();
   Filament.RenderableManager.Builder(1)
     .boundingBox(geo.box)
     .layerMask(0xff, layer)
     .material(0, matInstance)
-    .geometry(0, Filament.RenderableManager$PrimitiveType.TRIANGLES, geo.vb, geo.ib)
+    .geometry(0, primitive, geo.vb, geo.ib)
     .castShadows(castShadows)
     .receiveShadows(true)
     .build(engine, entity);
   return entity;
+}
+
+// GPU buffers for line segments (render/debug.js): `pos` 6 floats and `col`
+// 8 bytes (RGBA at both ends) per segment; {vb, ib, box} like makeGeometry,
+// drawn as LINES.
+function makeLines(engine, pos, col) {
+  const n = pos.length / 3;
+  const AT = Filament.VertexBuffer$AttributeType, VA = Filament.VertexAttribute;
+  const vb = Filament.VertexBuffer.Builder()
+    .vertexCount(n).bufferCount(2)
+    .attribute(VA.POSITION, 0, AT.FLOAT3, 0, 12)
+    .attribute(VA.COLOR, 1, AT.UBYTE4, 0, 4)
+    .normalized(VA.COLOR)
+    .build(engine);
+  vb.setBufferAt(engine, 0, pos);
+  vb.setBufferAt(engine, 1, col);
+  const ib = Filament.IndexBuffer.Builder()
+    .indexCount(n).bufferType(Filament.IndexBuffer$IndexType.UINT)
+    .build(engine);
+  ib.setBuffer(engine, Uint32Array.from({ length: n }, (_, i) => i));
+  const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+  for (let i = 0; i < pos.length; i++) {
+    lo[i % 3] = Math.min(lo[i % 3], pos[i]);
+    hi[i % 3] = Math.max(hi[i % 3], pos[i]);
+  }
+  return { vb, ib, box: { center: lo.map((v, k) => (v + hi[k]) / 2), halfExtent: lo.map((v, k) => (hi[k] - v) / 2 + 1e-4) } };
 }
 
 // Row-major 3x3 rotation of a unit quaternion (w, x, y, z), like mju_quat2Mat.
@@ -830,9 +863,65 @@ class App {
     // Whether the camera follows the selection (the Render panel's switch,
     // saved in this browser), else turns to it once.
     try { this.follow = localStorage.getItem(FOLLOW) === '1'; } catch { this.follow = false; }
+    // What the window shows of the robots (the Render panel's Show; saved in
+    // this browser): their geoms (visual), and the debug overlays once their
+    // material is in.
+    this.overlays = { visual: true, collision: false, frames: false, joints: false };
+    try { Object.assign(this.overlays, JSON.parse(localStorage.getItem(OVERLAYS) ?? '{}')); } catch { /* none */ }
+    this.overlayEntities = [];
+    this.linesMi = null;
+    fetch(MAT_LINES).then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(new Error(`HTTP ${r.status}`)))).then((buf) => {
+      this.linesMi = engine.createMaterial(new Uint8Array(buf)).createInstance();
+      this.updateOverlays();
+    }).catch((err) => console.warn(`${MAT_LINES}: ${err.message ?? err} (no debug overlays)`));
     this.setSpawnMarker(null);
     this.setQuality(this.quality);  // sizes the canvas too
     window.addEventListener('resize', () => this.resize());
+  }
+
+  // Shows the robots' geoms and the debug overlays as `next` says ({visual,
+  // collision, frames, joints}).
+  setOverlays(next) {
+    this.overlays = { ...next };
+    try { localStorage.setItem(OVERLAYS, JSON.stringify(this.overlays)); } catch { /* no storage */ }
+    this.updateOverlays();
+  }
+
+  // The overlays' entities again, for the robots there are now: each robot
+  // file's lines (parts.debug, render/debug.js) as line buffers per body,
+  // built on first use and freed with its parts (freeVisual).
+  updateOverlays() {
+    const rcm = this.engine.getRenderableManager();
+    for (const r of this.robots ?? []) {
+      for (const e of r.entities ?? []) {
+        const inst = rcm.getInstance(e);
+        rcm.setLayerMask(inst, 0xff, this.overlays.visual === false ? HIDDEN : SCENE);
+        inst.delete();
+      }
+    }
+    this.removeEntities(this.overlayEntities);
+    this.overlayEntities = [];
+    for (const r of this.robots ?? []) {
+      r.overlay = [];
+      r.drawn = null;  // placed again on the next syncTransforms
+    }
+    if (!this.linesMi) return;
+    const kinds = ['collision', 'frames', 'joints'].filter((k) => this.overlays[k]);
+    for (const r of this.robots ?? []) {
+      const parts = r.visual?.parts, lines = parts?.debug;
+      if (!lines) continue;
+      parts.debugGpu ??= {};
+      for (const kind of kinds) {
+        parts.debugGpu[kind] ??= lines[kind].map(({ body, pos, col }) => ({ body, ...makeLines(this.engine, pos, col) }));
+        for (const g of parts.debugGpu[kind]) {
+          const e = makeEntity(this.engine, g, this.linesMi, false, OVERLAY, Filament.RenderableManager$PrimitiveType.LINES);
+          this.scene.addEntity(e);
+          this.overlayEntities.push(e);
+          r.overlay.push({ entity: e, body: g.body });
+        }
+      }
+    }
+    if (this.data) this.syncTransforms();
   }
 
   // The camera follows the selection (setFollow(true)) or not.
@@ -1021,6 +1110,12 @@ class App {
     }
     parts.textures = [...new Set(textures.values())];
     for (const e of parts.textures) e.users++;
+    // The debug overlays' lines (render/debug.js), while the model is at hand.
+    try {
+      parts.debug = debugLines(model);
+    } catch (err) {
+      console.warn('debug overlays:', err);
+    }
     return parts;
   }
 
@@ -1028,6 +1123,12 @@ class App {
   // removed already): buffers, material instances, and the textures no other
   // model shares.
   freeVisual(parts) {
+    for (const list of Object.values(parts.debugGpu ?? {})) {
+      for (const g of list) {
+        this.engine.destroyVertexBuffer(g.vb);
+        this.engine.destroyIndexBuffer(g.ib);
+      }
+    }
     const mis = new Set(parts.map((p) => p.mi));
     for (const p of parts) {
       this.engine.destroyVertexBuffer(p.vb);
@@ -1120,6 +1221,7 @@ class App {
     this.refreshControllers();
     this.nextControl = data.time;
     this.resync();
+    this.updateOverlays();
     this.syncTransforms();
     this.panel?.build();
     this.teleop?.build();
@@ -1137,6 +1239,7 @@ class App {
     this.data = data;
     this.robots = robots;
     this.controllers = [];
+    this.updateOverlays();
     this.panel?.build();
     this.teleop?.build();
     this.cameras?.build();
@@ -1491,6 +1594,19 @@ class App {
         const m = [R[0], R[3], R[6], 0, R[1], R[4], R[7], 0, R[2], R[5], R[8], 0, p[0], p[1], p[2], 1];
         const inst = tcm.getInstance(entities[i]);
         tcm.setTransform(inst, m);
+        inst.delete();
+      }
+      // The debug overlays: lines in their body's frame.
+      for (const { entity, body } of robot.overlay ?? []) {
+        if (!moved[body]) continue;
+        let B = Rz, t = pos;
+        if (body > 0) {
+          const b = bodyOffset + body - 1;
+          B = xmat.subarray(9 * b, 9 * b + 9);
+          t = xpos.subarray(3 * b, 3 * b + 3);
+        }
+        const inst = tcm.getInstance(entity);
+        tcm.setTransform(inst, [B[0], B[3], B[6], 0, B[1], B[4], B[7], 0, B[2], B[5], B[8], 0, t[0], t[1], t[2], 1]);
         inst.delete();
       }
     }

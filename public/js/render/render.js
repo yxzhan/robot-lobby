@@ -18,9 +18,11 @@
 // little difference. A browser without saved settings starts on Medium, a
 // phone or tablet (a finger for its main pointer) on Low.
 //
-// Below them: how the floor looks (floor.js), the lighting (lighting.js)
-// and whether the camera follows the selection, each saved in this browser
-// and applied as soon as a field changes.
+// Below them: how the floor looks (floor.js), the lighting (lighting.js),
+// what the window shows of the robots (their geoms, and the debug overlays
+// of debug.js: collision geoms, body frames, joints) and
+// whether the camera follows the selection, each saved in this browser and
+// applied as soon as a field changes.
 
 import { FLOOR_STYLES, floorDefaults } from './floor.js';
 import { LIGHTING_DEFAULTS } from './lighting.js';
@@ -121,7 +123,26 @@ export class RenderPanel {
       el('span', { textContent: label }), el('div', { className: 'ctl' }, ...inputs), el('span', { className: 'unit', textContent: unit }));
     this.floor(field, num);
     this.lighting(field);
+    this.overlays();
     this.camera(field);
+  }
+
+  // The Show section: the robots' geoms and the debug overlays
+  // (App.setOverlays; the overlays drawn over everything), switches side by
+  // side, wrapping.
+  overlays() {
+    this.body.append(el('div', { className: 'sub', textContent: 'Show' }));
+    const checks = el('div', { className: 'checks' });
+    const check = (k, label, title) => {
+      const box = el('input', { type: 'checkbox', checked: this.app.overlays?.[k] ?? k === 'visual', title });
+      box.onchange = () => this.app.setOverlays({ ...this.app.overlays, [k]: box.checked });
+      checks.append(el('label', { title }, box, ` ${label}`));
+    };
+    check('visual', 'Visual', 'the robots\' and objects\' own geoms (off: only the overlays; their cameras still see them)');
+    check('collision', 'Collision', 'the geoms that collide, as orange wireframes (meshes: the convex hull MuJoCo collides with), over everything');
+    check('frames', 'Body frames', 'each body\'s x, y and z axes (red, green, blue) at its origin');
+    check('joints', 'Joints', 'where the joints are: hinges their axis and a ring (yellow), slides their axis (cyan), ball joints three rings (magenta)');
+    this.body.append(checks);
   }
 
   // The Camera section, last: whether the camera follows the selection
