@@ -8,8 +8,7 @@ material {
     depthCulling : false,
     depthWrite : false,
     doubleSided : true,
-    requires : [ color ],
-    variantFilter : [ skinning, shadowReceiver, vsm, fog, ssr, stereo ]
+    requires : [ color ]
 }
 
 fragment {

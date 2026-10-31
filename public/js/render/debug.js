@@ -21,16 +21,22 @@
 // body index (0: its world body, placed by the robot's spawn pose).
 
 export const FRAME_LENGTH = 0.08;  // m, a body frame's axes
+// Body frames and joints are drawn as rods this thick (m, main.js
+// makeRods): WebGL draws lines one pixel wide whatever their width.
+export const ROD_WIDTH = { frames: 0.004, joints: 0.003 };
 const JOINT_LENGTH = 0.06;         // m, half a joint's axis
 const JOINT_RING = 0.02;           // m, the ring about a hinge
 const PLANE_SIZE = 1;              // m, half the side of an infinite plane's rectangle
 const CIRCLE = 32;                 // segments of a full circle
 
-const COLORS = {
+// sRGB, written linear: vertex colours reach the screen as linear values,
+// and sRGB ones would come out washed out.
+const linear = ([r, g, b, a]) => [...[r, g, b].map((c) => Math.round(255 * (c / 255) ** 2.2)), a];
+const COLORS = Object.fromEntries(Object.entries({
   collision: [255, 140, 30, 230],
   x: [235, 60, 60, 255], y: [60, 200, 80, 255], z: [70, 130, 255, 255],
   hinge: [255, 220, 40, 255], slide: [40, 220, 230, 255], ball: [230, 80, 230, 255],
-};
+}).map(([k, c]) => [k, linear(c)]));
 
 // Segments collected per body, then packed.
 class Lines {

@@ -33,7 +33,7 @@ import { WorldPanel } from '../world/worldpanel.js';
 import { BehaviorPanel } from '../behavior/btpanel.js';
 import { AgentPanel } from '../agent/agent.js';
 import { RenderPanel, loadQuality } from '../render/render.js';
-import { debugLines } from '../render/debug.js';
+import { ROD_WIDTH, debugLines } from '../render/debug.js';
 import { addSwarm } from './swarm.js';
 import { FLOOR_STYLES, floorTexture, hexRgb, loadFloor, saveFloor } from '../render/floor.js';
 import { AMBIENT, SUN_LUX, linearRgb, loadLighting, saveLighting, sunDirection } from '../render/lighting.js';
@@ -507,7 +507,7 @@ function makeGeometry(engine, shape, uv = null) {
 // off: the robots' cameras still show them, the window does not.
 export const SCENE = 0x1, OVERLAY = 0x2, HIDDEN = 0x4;
 
-function makeEntity(engine, geo, matInstance, castShadows = true, layer = SCENE, primitive = Filament.RenderableManager$PrimitiveType.TRIANGLES) {
+function makeEntity(engine, geo, matInstance, castShadows = true, layer = SCENE, primitive = Filament.RenderableManager$PrimitiveType.TRIANGLES, receiveShadows = true) {
   const entity = Filament.EntityManager.get().create();
   Filament.RenderableManager.Builder(1)
     .boundingBox(geo.box)
@@ -515,7 +515,7 @@ function makeEntity(engine, geo, matInstance, castShadows = true, layer = SCENE,
     .material(0, matInstance)
     .geometry(0, primitive, geo.vb, geo.ib)
     .castShadows(castShadows)
-    .receiveShadows(true)
+    .receiveShadows(receiveShadows)
     .build(engine, entity);
   return entity;
 }
@@ -544,6 +544,57 @@ function makeLines(engine, pos, col) {
     hi[i % 3] = Math.max(hi[i % 3], pos[i]);
   }
   return { vb, ib, box: { center: lo.map((v, k) => (v + hi[k]) / 2), halfExtent: lo.map((v, k) => (hi[k] - v) / 2 + 1e-4) } };
+}
+
+// Line segments as thin rods (a square prism of half width `r` about each),
+// drawn as TRIANGLES with the same unlit vertex-colour material: lines are
+// always one pixel wide in WebGL. {vb, ib, box} like makeLines.
+function makeRods(engine, pos, col, r) {
+  const nseg = pos.length / 6;
+  const P = new Float32Array(nseg * 8 * 3), C = new Uint8Array(nseg * 8 * 4), I = new Uint32Array(nseg * 24);
+  for (let s = 0; s < nseg; s++) {
+    const a = pos.subarray(6 * s, 6 * s + 3), b = pos.subarray(6 * s + 3, 6 * s + 6);
+    const d = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+    const t = Math.abs(d[0]) < 0.9 * Math.hypot(...d) ? [1, 0, 0] : [0, 1, 0];
+    let u = [d[1] * t[2] - d[2] * t[1], d[2] * t[0] - d[0] * t[2], d[0] * t[1] - d[1] * t[0]];
+    const nu = Math.hypot(...u) || 1;
+    u = u.map((x) => (x / nu) * r);
+    let v = [d[1] * u[2] - d[2] * u[1], d[2] * u[0] - d[0] * u[2], d[0] * u[1] - d[1] * u[0]];
+    const nv = Math.hypot(...v) || 1;
+    v = v.map((x) => (x / nv) * r);
+    const around = [u, v, u.map((x) => -x), v.map((x) => -x)];  // the four corners about the axis
+    for (let end = 0; end < 2; end++) {
+      const p = end ? b : a;
+      for (let k = 0; k < 4; k++) {
+        const vi = 8 * s + 4 * end + k;
+        for (let i = 0; i < 3; i++) P[3 * vi + i] = p[i] + around[k][i];
+        C.set(col.subarray(8 * s + 4 * end, 8 * s + 4 * end + 4), 4 * vi);
+      }
+    }
+    for (let k = 0; k < 4; k++) {  // the four sides, two triangles each
+      const a0 = 8 * s + k, a1 = 8 * s + (k + 1) % 4, b0 = a0 + 4, b1 = a1 + 4;
+      I.set([a0, a1, b1, a0, b1, b0], 24 * s + 6 * k);
+    }
+  }
+  const AT = Filament.VertexBuffer$AttributeType, VA = Filament.VertexAttribute;
+  const vb = Filament.VertexBuffer.Builder()
+    .vertexCount(P.length / 3).bufferCount(2)
+    .attribute(VA.POSITION, 0, AT.FLOAT3, 0, 12)
+    .attribute(VA.COLOR, 1, AT.UBYTE4, 0, 4)
+    .normalized(VA.COLOR)
+    .build(engine);
+  vb.setBufferAt(engine, 0, P);
+  vb.setBufferAt(engine, 1, C);
+  const ib = Filament.IndexBuffer.Builder()
+    .indexCount(I.length).bufferType(Filament.IndexBuffer$IndexType.UINT)
+    .build(engine);
+  ib.setBuffer(engine, I);
+  const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+  for (let i = 0; i < P.length; i++) {
+    lo[i % 3] = Math.min(lo[i % 3], P[i]);
+    hi[i % 3] = Math.max(hi[i % 3], P[i]);
+  }
+  return { vb, ib, box: { center: lo.map((x, k) => (x + hi[k]) / 2), halfExtent: lo.map((x, k) => (hi[k] - x) / 2 + 1e-4) } };
 }
 
 // Row-major 3x3 rotation of a unit quaternion (w, x, y, z), like mju_quat2Mat.
@@ -912,9 +963,12 @@ class App {
       if (!lines) continue;
       parts.debugGpu ??= {};
       for (const kind of kinds) {
-        parts.debugGpu[kind] ??= lines[kind].map(({ body, pos, col }) => ({ body, ...makeLines(this.engine, pos, col) }));
+        // Collision as lines; frames and joints as rods (lines are one pixel wide).
+        const rods = ROD_WIDTH[kind];
+        parts.debugGpu[kind] ??= lines[kind].map(({ body, pos, col }) => ({ body, ...(rods ? makeRods(this.engine, pos, col, rods / 2) : makeLines(this.engine, pos, col)) }));
+        const P = Filament.RenderableManager$PrimitiveType;
         for (const g of parts.debugGpu[kind]) {
-          const e = makeEntity(this.engine, g, this.linesMi, false, OVERLAY, Filament.RenderableManager$PrimitiveType.LINES);
+          const e = makeEntity(this.engine, g, this.linesMi, false, OVERLAY, rods ? P.TRIANGLES : P.LINES, false);
           this.scene.addEntity(e);
           this.overlayEntities.push(e);
           r.overlay.push({ entity: e, body: g.body });
