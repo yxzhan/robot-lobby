@@ -1,0 +1,32 @@
+// The hologram of a materialising robot (render/reveal.js): its triangles'
+// edges, additive orange, between the solid line (lit_reveal.mat) and the
+// scan line above it, brightest just under the scan line, with moving
+// scanline stripes and a flicker. Colours linear (the Microduck's sRGB
+// orange), dimmer than there: dense meshes add up to white otherwise.
+material {
+    name : unlit_reveal_wire,
+    shadingModel : unlit,
+    blending : add,
+    depthWrite : false,
+    doubleSided : true,
+    parameters : [
+        { type : float, name : scanZ },
+        { type : float, name : solidZ },
+        { type : float, name : spanK },
+        { type : float, name : time },
+        { type : float, name : flicker }
+    ]
+}
+
+fragment {
+    void material(inout MaterialInputs material) {
+        prepareMaterial(material);
+        float z = getUserWorldPosition().z, k = materialParams.spanK;
+        if (z > materialParams.scanZ || z < materialParams.solidZ) discard;
+        float lead = 1.0 - smoothstep(0.0, 0.06 * k, materialParams.scanZ - z);
+        float tail = smoothstep(0.0, 0.018 * k, z - materialParams.solidZ);
+        float stripes = 0.7 + 0.3 * sin(z * 900.0 / k - materialParams.time * 45.0);
+        float a = (0.10 + 0.40 * lead) * stripes * tail * materialParams.flicker;
+        material.baseColor = vec4(vec3(1.0, 0.095, 0.005) * (0.55 + 1.6 * lead) * a * 0.5, a);
+    }
+}

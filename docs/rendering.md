@@ -103,6 +103,23 @@ materials are compiled `doubleSided`, their instances set one-sided by default).
 renderables back to front per renderable, so a self-overlapping or
 interpenetrating transparent mesh can blend in the wrong order.
 
+## Spawn effect
+
+A robot or object that is spawned or reset materialises from its feet up
+(`public/js/render/reveal.js`, after the Microduck simulator's scan-up): an
+orange hologram of its triangles' edges rises with a scan line, and its own
+surfaces follow 0.3 s behind, with a hot orange edge at the line. It takes
+0.9 s for a Microduck; a taller robot's takes longer (with the square root of
+its height: a G1 1.8 s), its bands wider. Environments are left out.
+
+While it runs, the robot's parts are drawn with their own material instances
+of `lit_reveal` / `lit_textured_reveal` (masked: cut above the line, their
+shadow too; the shared instances of the robot file stay as they are, so its
+other copies are untouched) and an additive `unlit_reveal_wire` entity each,
+a child of the part's entity; transparent parts are hidden until it ends.
+The lines ride with the robot's root body. In network mode Reset shows it on
+the page that pressed it; a spawn shows it on every page.
+
 ## How it works
 
 `public/js/app/main.js`: for each visible geom (group < 3) of a robot's own model a
@@ -130,6 +147,9 @@ matc -a opengl -p mobile -o public/materials/lit_transparent.filamat materials/l
 matc -a opengl -p mobile -o public/materials/lit_textured_transparent.filamat materials/lit_textured_transparent.mat
 matc -a opengl -p mobile -o public/materials/unlit_textured.filamat materials/unlit_textured.mat
 matc -a opengl -p mobile -o public/materials/unlit_lines.filamat materials/unlit_lines.mat
+matc -a opengl -p mobile -o public/materials/lit_reveal.filamat materials/lit_reveal.mat
+matc -a opengl -p mobile -o public/materials/lit_textured_reveal.filamat materials/lit_textured_reveal.mat
+matc -a opengl -p mobile -o public/materials/unlit_reveal_wire.filamat materials/unlit_reveal_wire.mat
 ```
 
 ## Relation to MuJoCo's own Filament renderer

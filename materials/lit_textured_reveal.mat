@@ -1,0 +1,31 @@
+// lit_textured.mat while a robot materialises: see lit_reveal.mat.
+material {
+    name : mujoco_lit_textured_reveal,
+    shadingModel : lit,
+    doubleSided : true,  // instances are one-sided unless set (environments: one-sided walls)
+    blending : masked,
+    postLightingBlending : add,
+    requires : [ uv0 ],
+    parameters : [
+        { type : float4,    name : baseColor },
+        { type : sampler2d, name : baseColorMap },
+        { type : float,     name : roughness },
+        { type : float,     name : metallic },
+        { type : float,     name : solidZ },
+        { type : float,     name : spanK }
+    ]
+}
+
+fragment {
+    void material(inout MaterialInputs material) {
+        prepareMaterial(material);
+        float below = materialParams.solidZ - getUserWorldPosition().z;
+        vec4 color = materialParams.baseColor * texture(materialParams_baseColorMap, getUV0());
+        material.baseColor = vec4(color.rgb, below < 0.0 ? 0.0 : 1.0);
+        material.roughness = materialParams.roughness;
+        material.metallic = materialParams.metallic;
+        float k = materialParams.spanK;
+        float edge = 1.0 - smoothstep(0.002 * k, 0.018 * k, below);
+        material.postLightingColor = vec4(edge * vec3(0.89, 0.084, 0.004), 0.0);
+    }
+}

@@ -34,6 +34,7 @@ import { BehaviorPanel } from '../behavior/btpanel.js';
 import { AgentPanel } from '../agent/agent.js';
 import { RenderPanel, loadQuality } from '../render/render.js';
 import { ROD_WIDTH, debugLines } from '../render/debug.js';
+import { Reveal } from '../render/reveal.js';
 import { addSwarm } from './swarm.js';
 import { FLOOR_STYLES, floorTexture, hexRgb, loadFloor, saveFloor } from '../render/floor.js';
 import { AMBIENT, SUN_LUX, linearRgb, loadLighting, saveLighting, sunDirection } from '../render/lighting.js';
@@ -65,6 +66,8 @@ const MAT_UNLIT_TEXTURED = 'materials/unlit_textured.filamat';  // the WebXR men
 // The debug overlays' lines (render/debug.js), fetched on their own: a page
 // without them (not compiled yet) still runs, with no overlays.
 const MAT_LINES = 'materials/unlit_lines.filamat';
+// The spawn and reset effect's (render/reveal.js), likewise: without them robots just appear.
+const MAT_REVEAL = { solid: 'materials/lit_reveal.filamat', solidTextured: 'materials/lit_textured_reveal.filamat', wire: 'materials/unlit_reveal_wire.filamat' };
 const OVERLAYS = 'mujoco-filament/overlays';  // localStorage: {visual, collision, frames, joints} shown
 // WebXR settings (the VR menu, xr.js), kept in this browser: MSAA samples of
 // the eyes, the layer's framebuffer scale (1: the headset's default) and the
@@ -925,6 +928,12 @@ class App {
       this.linesMi = engine.createMaterial(new Uint8Array(buf)).createInstance();
       this.updateOverlays();
     }).catch((err) => console.warn(`${MAT_LINES}: ${err.message ?? err} (no debug overlays)`));
+    this.reveal = null;
+    Promise.all(Object.entries(MAT_REVEAL).map(([k, url]) => fetch(url)
+      .then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(new Error(`${url}: HTTP ${r.status}`))))
+      .then((buf) => [k, engine.createMaterial(new Uint8Array(buf))]))).then((mats) => {
+      this.reveal = new Reveal(engine, this.scene, Object.fromEntries(mats), makeEntity, this.whiteTexture, this.sampler);
+    }).catch((err) => console.warn(`${err.message ?? err} (no spawn effect)`));
     this.setSpawnMarker(null);
     this.setQuality(this.quality);  // sizes the canvas too
     window.addEventListener('resize', () => this.resize());
@@ -1151,12 +1160,18 @@ class App {
         mi = (transparent ? this.matTransparent : this.matLit).createInstance();
       }
       if (doubleSided) mi.setDoubleSided(true);
-      mi.setColor4Parameter('baseColor', Filament.RgbaType.sRGB, [rgba[0], rgba[1], rgba[2], transparent ? rgba[3] : 1]);
+      const color = [rgba[0], rgba[1], rgba[2], transparent ? rgba[3] : 1];
+      mi.setColor4Parameter('baseColor', Filament.RgbaType.sRGB, color);
       const { roughness, metallic } = surface(model, matid);
       mi.setFloatParameter('roughness', roughness);
       mi.setFloatParameter('metallic', metallic);
       parts.push({
         ...makeGeometry(this.engine, shape, uv), mi, transparent,
+        // What the spawn effect (render/reveal.js) draws it with: the same
+        // look, and its triangles for the wireframe (not in environments,
+        // which it leaves out).
+        look: { rgba: color, roughness, metallic, tex: textured ? textures.get(texid) : null, doubleSided },
+        tri: doubleSided ? null : Uint32Array.from(shape.idx),
         body: model.geom_bodyid[g],
         pos: Array.from(model.geom_pos.subarray(3 * g, 3 * g + 3)),
         rot: quatToMat(model.geom_quat.subarray(4 * g, 4 * g + 4)),
@@ -1187,6 +1202,7 @@ class App {
     for (const p of parts) {
       this.engine.destroyVertexBuffer(p.vb);
       this.engine.destroyIndexBuffer(p.ib);
+      if (p.wireIb) this.engine.destroyIndexBuffer(p.wireIb);
       this.engine.destroyMaterialInstance(p.mi);
     }
     for (const e of parts.textures ?? []) {
@@ -1251,6 +1267,7 @@ class App {
   }
 
   removeEntities(entities) {
+    this.reveal?.forget(entities);
     for (const e of entities) {
       this.scene.remove(e);
       this.engine.destroyEntity(e);
@@ -1310,6 +1327,7 @@ class App {
 
   // Every robot back to its spawn pose (robot.initial), time back to 0.
   reset() {
+    this.revealRobots(this.robots);
     if (this.net) { this.net.send('reset'); return; }
     this.mujoco.mj_resetData(this.model, this.data);
     const layout = stateLayout(this.robots);
@@ -1322,8 +1340,15 @@ class App {
     this.syncTransforms();  // frame() only syncs while running
   }
 
+  // The spawn effect (render/reveal.js) on `robots`, environments left out.
+  revealRobots(robots) {
+    const layer = this.overlays.visual === false ? HIDDEN : SCENE;
+    for (const r of robots) if (r.entities && !isEnvironment(r.visual.rel)) this.reveal?.start(r, layer);
+  }
+
   // One robot back to its spawn pose, at rest; the others and time go on.
   resetRobot(robot) {
+    this.revealRobots([robot]);
     if (this.net) { this.net.send('reset_robot', { id: robot.netId }); return; }
     const { mujoco, model, data } = this;
     const at = stateLayout(this.robots).get(robot);
@@ -1747,6 +1772,7 @@ class App {
     this.showStats();
     this.syncMarkers();
     this.sceneLights.sync(this.model, this.data, this.lighting);  // the model's lights, where their bodies are
+    if (this.data) this.reveal?.update(performance.now(), this.robots, this.data);
     this.panel?.update(performance.now());
     this.teleop?.update(performance.now());  // the panel's inputs, pushed into the drive layer
     this.drive.tick();
@@ -2315,6 +2341,7 @@ try {
       for (const r of fresh) app.removeEntities(r.entities);
       throw err;
     }
+    app.revealRobots(fresh);
     function init(data) {
       if (old) copySharedState(old, data, list);
       for (const r of fresh) startPose(data, r);
@@ -2863,6 +2890,7 @@ try {
       for (const r of fresh) r.entities = app.addEntities(r.visual.parts);
       for (const r of robots) if (!list.includes(r)) app.removeEntities(r.entities);
       app.setNetWorld(model, worldData(model), list);
+      app.revealRobots(fresh);
       robots.splice(0, robots.length, ...list);
       dropUnused();
       app.netVersion = msg.version;

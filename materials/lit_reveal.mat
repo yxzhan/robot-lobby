@@ -1,0 +1,31 @@
+// lit.mat while a robot materialises (render/reveal.js): the part of it
+// below a line rising in world Z is drawn, with a hot orange edge at the
+// line; above it, nothing (masked, so its shadow is cut too). Used only by
+// the reveal's own instances, so the scene's lit.mat stays without discard.
+material {
+    name : mujoco_lit_reveal,
+    shadingModel : lit,
+    doubleSided : true,  // instances are one-sided unless set (environments: one-sided walls)
+    blending : masked,
+    postLightingBlending : add,
+    parameters : [
+        { type : float4, name : baseColor },
+        { type : float,  name : roughness },
+        { type : float,  name : metallic },
+        { type : float,  name : solidZ },  // world Z of the line
+        { type : float,  name : spanK }    // band widths: the robot's height / a Microduck's (>= 1)
+    ]
+}
+
+fragment {
+    void material(inout MaterialInputs material) {
+        prepareMaterial(material);
+        float below = materialParams.solidZ - getUserWorldPosition().z;
+        material.baseColor = vec4(materialParams.baseColor.rgb, below < 0.0 ? 0.0 : 1.0);
+        material.roughness = materialParams.roughness;
+        material.metallic = materialParams.metallic;
+        float k = materialParams.spanK;
+        float edge = 1.0 - smoothstep(0.002 * k, 0.018 * k, below);
+        material.postLightingColor = vec4(edge * vec3(0.89, 0.084, 0.004), 0.0);
+    }
+}
