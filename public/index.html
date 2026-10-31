@@ -27,10 +27,10 @@
           display: flex; flex-wrap: wrap; justify-content: center; gap: 4px; align-items: center; box-sizing: border-box;
           min-width: min(300px, calc(100% - var(--room-left, 270px) - var(--room-right, 540px)));
           color: #ddd; background: rgba(0,0,0,.45); padding: 4px; border-radius: 8px; --c: #8a94a6; }
-    /* The status on its own line under the buttons, as wide as they are (or
-       the toolbar's least width): its text never widens the toolbar into the
-       panel toggles; too long, it ends in … (the whole text is its tooltip). */
-    #status { flex: 1 1 100%; contain: inline-size; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    /* The status after the buttons, wrapping onto the next line like them
+       when it does not fit; never wider than the toolbar (which stays between
+       the panels): too long, it ends in … (the whole text is its tooltip). */
+    #status { flex: 0 1 auto; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
               font-size: 12px; color: #aaa; text-align: center; padding: 1px 6px 2px; }
     /* Toolbar buttons: an icon and a label, each tinted with its colour
        (--c): pause amber, resume green, reset blue, clear red, full restart
@@ -224,7 +224,7 @@
     #share .person.gone { opacity: .5; }
     #share .person .device { color: #888; font-size: 11px; white-space: nowrap; }
     /* Shared world, over the view (net/presence.js): tags over held robots,
-       the people row under the toolbar's status, notices at the bottom. */
+       the people row after the toolbar's status, notices at the bottom. */
     #tags { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
     #tags .tag { position: absolute; left: 0; top: 0; display: flex; align-items: center; gap: 4px; white-space: nowrap;
                  font: 600 11px system-ui, sans-serif; color: #fff; background: rgba(15,17,21,.72); padding: 2px 7px 2px 5px;
@@ -236,8 +236,8 @@
     svg.who { width: 14px; height: 14px; flex: none; fill: none; stroke: currentColor; stroke-width: 2;
               stroke-linecap: round; stroke-linejoin: round; }
     #tags svg.who { width: 13px; height: 13px; }
-    /* One line, as wide as the toolbar (never widening it), scrolling sideways when it does not fit. */
-    #people { flex: 1 1 100%; contain: inline-size; display: flex; flex-wrap: nowrap; justify-content: safe center; gap: 10px;
+    /* After the status, wrapping like the buttons; one line at most as wide as the toolbar, scrolling sideways when it does not fit. */
+    #people { flex: 0 1 auto; min-width: 0; max-width: 100%; display: flex; flex-wrap: nowrap; justify-content: safe center; gap: 10px;
               overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; font-size: 11px; color: #bbb; padding: 0 6px 2px; }
     #people::-webkit-scrollbar { display: none; }
     #people > * { flex: none; }
@@ -484,7 +484,7 @@
     #sticks .left::before { content: 'walk'; }
     #sticks .right::before { content: 'turn'; }
     #sticks .knob { width: 50px; height: 50px; border-radius: 50%; background: rgba(255,255,255,.55); pointer-events: none; }
-    /* Phones and narrow windows: the toolbar on top (status on its own line), the panel toggles
+    /* Phones and narrow windows: the toolbar on top (status and people wrap like its buttons), the panel toggles
        under it, one panel at a time (main.js), across the width but
        for Assets, which keeps its desktop size. */
     @media (max-width: 960px) {
