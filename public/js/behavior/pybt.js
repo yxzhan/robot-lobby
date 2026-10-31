@@ -201,6 +201,7 @@ function tipPose(ik, c, d) {
   const b = s >= 0 ? m.site_bodyid[s] : ik.id('mjOBJ_BODY', c.cfg.tip);
   if (b < 0) return null;
   const R = Array.from(d.xmat.subarray(9 * b, 9 * b + 9));
+  if (R.every((v) => v === 0)) return null;  // a rebuilt shared world before the server's first state
   const o = s >= 0 ? Array.from(m.site_pos.subarray(3 * s, 3 * s + 3)) : c.cfg.offset ?? [0, 0, 0];
   const pos = [0, 1, 2].map((i) => d.xpos[3 * b + i] + R[3 * i] * o[0] + R[3 * i + 1] * o[1] + R[3 * i + 2] * o[2]);
   if (s < 0) return { pos, rot: R };

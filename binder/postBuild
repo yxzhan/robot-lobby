@@ -8,7 +8,7 @@ set -euo pipefail
 
 npm ci  # its postinstall indexes an empty library here
 npm cache clean --force
-ln -sfn "${MJCF_ASSETS:-/mnt/dev-tools/mjcf_assets}" public/mjcf_assets
+ln -sfn "${MJCF_ASSETS:-/shared/mjcf_assets}" public/mjcf_assets
 
 mkdir -p ~/.jupyter
 cp binder/jupyter_server_config.py ~/.jupyter/

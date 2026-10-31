@@ -7,8 +7,9 @@
 // panel, newest first, kept in this browser's localStorage; a browser
 // without one starts from public/json/recent.json (a list of `rel`s, edited by
 // hand).
-// An item is spawned by dragging it onto the floor: while dragging, a marker
-// on the floor shows the spawn point and heading, which starts out along the
+// An item is spawned by dragging it onto the floor, or onto what stands on it
+// (a table, a shelf: the first surface under the pointer that faces up):
+// while dragging, a marker there shows the spawn point and heading, which starts out along the
 // world +x axis and turns in 15° steps with the mouse wheel or Q/E; Shift+wheel or
 // R/F raise and lower it in 5 cm steps (the height is kept for the next
 // drag); Esc cancels. The drag label shows the position and heading.
@@ -63,6 +64,7 @@ export async function loadAssets(index = 'json/assets.json') {
 export const thumbPath = (m) => `mjcf_assets/thumbs/${m.category}/${m.source}/${m.name}.webp`;  // scripts/thumbnails.py
 
 const STEP = Math.PI / 12, HEIGHT_STEP = 0.05, MAX_HEIGHT = 5;
+const UP = 0.7;  // a surface whose normal is this close to +z can be spawned on (cos ~45°)
 
 export class AssetPanel {
   // `onDrop(asset, pos, yaw)` spawns; `canDrop()` says whether that is possible now.
@@ -238,15 +240,34 @@ export class AssetPanel {
     this.pick();
   }
 
-  // The spawn point: the floor point under the pointer, raised to the spawn
-  // height (changing the height moves only z; the pole marks the floor point).
+  // The spawn point: the surface under the pointer (the first one that
+  // faces up: a table top, else the floor behind it), raised by the spawn
+  // height (changing the height moves only z; the pole marks the surface
+  // point). In a shared world the server casts the ray: one at a time, the
+  // floor point meanwhile.
   pick() {
     const d = this.drag;
     const overCanvas = document.elementFromPoint(d.x, d.y) === this.app.canvas;
     const floor = overCanvas ? this.app.pickFloor(d.x, d.y) : null;
-    d.pos = floor && [floor[0], floor[1], this.height];
-    d.ghost.classList.toggle('placing', !!d.pos);
-    this.show();
+    const place = (base) => {
+      d.pos = base && [base[0], base[1], base[2] + this.height];
+      d.base = base?.[2] ?? 0;
+      d.ghost.classList.toggle('placing', !!d.pos);
+      this.show();
+    };
+    const surface = (hit) => (hit?.point && hit.normal?.[2] >= UP && hit.point[2] > 1e-3 ? hit.point : floor);
+    if (!overCanvas) { place(null); return; }
+    const ray = this.app.pointerRay(d.x, d.y);
+    if (!this.app.net) { place(surface(this.app.castRay(ray))); return; }
+    place(d.surface ?? floor);  // the last answer while the next is on its way
+    if (d.casting) { d.again = true; return; }
+    d.casting = true;
+    this.app.castRay(ray).then((h) => {
+      if (this.drag !== d) return;
+      d.casting = false;
+      d.surface = surface(h);
+      if (d.again) { d.again = false; this.pick(); } else place(d.surface);
+    });
   }
 
   raise(delta) {
@@ -267,7 +288,7 @@ export class AssetPanel {
   show() {
     const d = this.drag;
     const yaw = d?.pos ? this.yaw() : 0;
-    this.app.setSpawnMarker(d?.pos ?? null, yaw);
+    this.app.setSpawnMarker(d?.pos ?? null, yaw, d?.base ?? 0);
     if (!d) return;
     if (!d.pos) {
       d.readout.textContent = `z ${this.height.toFixed(2)} m · drop on the floor`;

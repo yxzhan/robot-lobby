@@ -69,16 +69,27 @@ the volume) only when there are none yet; the log is `/tmp/index.log`.
 (`binder_session.py`): it runs commands in the session's terminal and
 uploads files through the Jupyter Contents API (`upload_file`).
 
-**Joining.** The Server panel is hidden for now (its button in
-`index.html` has `hidden`). *Start a server on Binder* there calls
-BinderHub's build API, shows the build and launch, and reloads the page on
-the new session's `<url>robot-lobby/?token=…`. *Join a server* takes such a URL
-directly (or any server.py's). *Copy link* gives a link to the page on that
-server, token included, so others join the same world; *Go local* leaves
-it. A Binder session ends after a while without anyone connected (on
-mybinder.org about 10 minutes); the page then starts locally again.
+**Joining.** The Share panel's Server part says where the world runs.
+*Join a server* takes a session's `<url>robot-lobby/?token=…` (or any
+server.py's address); *Go local* leaves it; the link at the top of the
+panel (Copy) is this page on that server, token included, so others join
+the same world.
 
-**Share panel.** Gets the page onto another device (a phone, a headset)
+**Going online.** In local mode, with a Binder repository in
+`json/deploy.json`, the toolbar's *Go online* (and the same button in the
+Share panel) calls that API: the page stays usable while the session builds
+and starts, its phases in the status line and the panel. Once the session is
+ready, what is spawned is saved in this browser as a stage (My stages,
+"… (taken online)", all its parts) and the page reloads onto the new session,
+which loads that stage (asked first only if its world has robots already).
+The hub has to answer the page's origin: binder.intel4coro.de sends
+`Access-Control-Allow-Origin: https://yxzhan.github.io` (one origin; several
+need nginx to echo `$http_origin` from a whitelist, with `Vary: Origin`).
+`BINDER_LAUNCH` in `serverpanel.js` switches it off. A Binder session ends
+after a while without anyone connected (on mybinder.org about 10 minutes);
+the page then starts locally again.
+
+**Share panel.** Its upper part gets the page onto another device (a phone, a headset)
 without typing its URL (`public/js/net/share.js`, after bambot's `shareLink.ts`):
 the pairing service at join.aicor.dev (`?pair=<url>` for another) keeps a
 short code for the link for 30 minutes; the other device opens the service

@@ -223,7 +223,7 @@ export class StagePanel {
     const publish = el.querySelector('.publish');
     publish.onclick = onPublish;
     publish.disabled = !onPublish;
-    if (!onPublish) publish.title = 'Publishing shares a stage with everyone on a server: it needs one (Server panel)';
+    if (!onPublish) publish.title = 'Publishing shares a stage with everyone on a server: it needs one (Share panel)';
     el.querySelector('.import').onclick = onImport;
     this.empty = el.querySelector('.empty');
     this.open = new Set();  // robot prefixes whose section is expanded

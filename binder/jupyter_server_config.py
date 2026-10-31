@@ -1,5 +1,5 @@
 # The shared-world server behind the session's jupyter-server-proxy, at
-# <session URL>/robot-lobby/ (the path the page's Server panel connects to:
+# <session URL>/robot-lobby/ (the path the Share panel's Join a server connects to:
 # "path" in deploy.json). It starts on the first request there, and again
 # after it has died. It is also where the session opens (default_url)
 # instead of JupyterLab, which stays at <session URL>/lab. postBuild copies

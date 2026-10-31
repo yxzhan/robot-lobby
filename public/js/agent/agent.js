@@ -11,9 +11,10 @@
 //           http://localhost:11434, which must allow this page's origin:
 //           OLLAMA_ORIGINS).
 // The conversation is kept as the Claude API takes it (content blocks);
-// for Ollama it is turned into its messages on each request. Tools that
-// remove things (remove, clear_scene, reset_scene) ask first while "Ask
-// before removing" is on.
+// for Ollama it is turned into its messages on each request. It is kept in
+// this browser (CHAT) and shown again after a reload, its screenshots left
+// out (too big for localStorage). Tools that remove things (remove,
+// clear_scene, reset_scene) ask first while "Ask before removing" is on.
 
 import { POLICIES } from '../controllers/policy.js';
 import { setView, viewOf } from '../world/stage.js';
@@ -31,6 +32,8 @@ const CLAUDE_MODELS = [['claude-opus-5-5', 'Claude Opus 5.5'], ['claude-sonnet-5
 const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
 const SETTINGS = 'mujoco-filament/agent';      // localStorage: {provider, model, effort, ask, ollamaUrl, ollamaModel}
 const KEY = 'mujoco-filament/anthropic-key';   // localStorage: the Claude API key
+const CHAT = 'mujoco-filament/agent-chat';     // localStorage: {provider, messages}, the conversation
+const NO_PICTURE = '(a picture, not kept after a reload)';
 const OLLAMA_URL = 'http://localhost:11434';
 const OLLAMA_CONTEXT = 32768;  // tokens (num_ctx): the tools' descriptions alone are some 5000
 const CLAUDE_MAX_TOKENS = 16000;
@@ -554,6 +557,7 @@ export class AgentPanel {
         el('label', { className: 'agent-ask', title: 'Remove, clear and reset ask you first' }, ask, ' Ask before removing or resetting'),
         this.note));
     this.tools = tools(this);
+    this.restore();
     this.update();
     if (this.settings.provider === 'ollama') this.refreshOllama();
     if (this.key) this.refreshClaude();
@@ -655,9 +659,50 @@ export class AgentPanel {
   newChat(note) {
     this.stop();
     this.messages = [];
+    this.save();
     this.log.replaceChildren();
     if (note) this.entry('note', note);
     this.note.textContent = '';
+  }
+
+  // Keeps the conversation in this browser, its pictures left out.
+  save() {
+    const lean = (b) => (b.type === 'tool_result' && Array.isArray(b.content)
+      ? { ...b, content: b.content.map((c) => (c.type === 'image' ? { type: 'text', text: NO_PICTURE } : c)) } : b);
+    const messages = this.messages.map((m) => (Array.isArray(m.content) ? { ...m, content: m.content.map(lean) } : m));
+    try {
+      if (messages.length) localStorage.setItem(CHAT, JSON.stringify({ provider: this.settings.provider, messages }));
+      else localStorage.removeItem(CHAT);
+    } catch (err) {
+      console.warn('agent: the conversation is not kept', err);
+    }
+  }
+
+  // The conversation kept from before a reload, into the log (of the
+  // provider it was with: their histories do not mix).
+  restore() {
+    let saved = null;
+    try { saved = JSON.parse(localStorage.getItem(CHAT)); } catch { /* none */ }
+    if (!Array.isArray(saved?.messages) || saved.provider !== this.settings.provider) return;
+    this.messages = saved.messages;
+    this.settle();  // a turn cut by the reload
+    const items = new Map();  // tool_use id -> its log entry
+    for (const m of this.messages) {
+      if (m.role === 'assistant') {
+        this.show(m);
+        for (const use of m.content.filter((b) => b.type === 'tool_use')) items.set(use.id, this.toolEntry(use));
+      } else if (typeof m.content === 'string') {
+        this.entry('user', m.content);
+      } else {
+        for (const r of m.content.filter((b) => b.type === 'tool_result')) {
+          const e = items.get(r.tool_use_id);
+          if (!e) continue;
+          e.result.textContent = typeof r.content === 'string' ? r.content : r.content.filter((c) => c.type === 'text').map((c) => c.text).join('\n');
+          if (r.is_error) e.item.classList.add('failed');
+        }
+      }
+    }
+    this.entry('note', '(the conversation before the reload; the world may have changed since)');
   }
 
   // Appends an entry to the log: kind user | assistant | thinking | tool | error | note.
@@ -691,6 +736,7 @@ export class AgentPanel {
         this.note.textContent = 'thinking…';
         const msg = await this.turn(abort.signal);
         this.messages.push({ role: 'assistant', content: msg.content });  // as it came: thinking blocks go back unchanged
+        this.save();
         this.show(msg);
         if (msg.stop_reason === 'refusal') { this.entry('error', 'The model declined this request.'); break; }
         if (msg.stop_reason === 'max_tokens') { this.entry('error', 'The answer was cut off (too long).'); break; }
@@ -700,6 +746,7 @@ export class AgentPanel {
           results.push(await this.runTool(use, abort.signal));
         }
         this.messages.push({ role: 'user', content: results });
+        this.save();
         if (abort.signal.aborted) break;
         if (step === MAX_STEPS - 1) this.entry('error', `Stopped after ${MAX_STEPS} steps.`);
       }
@@ -712,6 +759,7 @@ export class AgentPanel {
       }
       this.settle();
     } finally {
+      this.save();
       this.running = null;
       this.update();
     }
@@ -741,12 +789,18 @@ export class AgentPanel {
     if (u) this.note.title = `last request: ${u.input_tokens} in (+${u.cache_read_input_tokens ?? 0} cached), ${u.output_tokens} out`;
   }
 
-  async runTool(use, signal) {
-    const tool = this.tools.find(([def]) => def.name === use.name);
+  // A tool call's entry in the log: {item, result (where its result goes)}.
+  toolEntry(use) {
     const args = JSON.stringify(use.input);
     const result = el('div', { className: 'result' });
     const item = this.entry('tool', el('details', {}, el('summary', {},
       el('span', { className: 'name', textContent: use.name }), el('span', { className: 'args', textContent: args === '{}' ? '' : ` ${args}` })), result));
+    return { item, result };
+  }
+
+  async runTool(use, signal) {
+    const tool = this.tools.find(([def]) => def.name === use.name);
+    const { item, result } = this.toolEntry(use);
     this.note.textContent = `${use.name}…`;
     try {
       if (!tool) throw new Error(`no tool ${use.name}`);
