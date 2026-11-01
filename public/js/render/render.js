@@ -20,7 +20,8 @@
 //
 // Below them: how the floor looks (floor.js), the lighting (lighting.js),
 // what the window shows of the robots (their geoms, and the debug overlays
-// of debug.js: collision geoms, body frames, joints) and
+// of debug.js: collision geoms, body frames, joints; the spawn effect of
+// reveal.js) and
 // whether the camera follows the selection, each saved in this browser and
 // applied as soon as a field changes.
 
@@ -142,6 +143,7 @@ export class RenderPanel {
     check('collision', 'Collision', 'the geoms that collide, as orange wireframes (meshes: the convex hull MuJoCo collides with), over everything');
     check('frames', 'Body frames', 'each body\'s x, y and z axes (red, green, blue) at its origin');
     check('joints', 'Joints', 'where the joints are: hinges their axis and a ring (yellow), slides their axis (cyan), ball joints three rings (magenta)');
+    check('reveal', 'Spawn effect', 'a spawned or reset robot materialises from its feet up, an orange hologram scanning ahead of its surfaces');
     this.body.append(checks);
   }
 

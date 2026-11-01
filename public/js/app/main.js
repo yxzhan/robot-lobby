@@ -918,9 +918,9 @@ class App {
     // saved in this browser), else turns to it once.
     try { this.follow = localStorage.getItem(FOLLOW) === '1'; } catch { this.follow = false; }
     // What the window shows of the robots (the Render panel's Show; saved in
-    // this browser): their geoms (visual), and the debug overlays once their
-    // material is in.
-    this.overlays = { visual: true, collision: false, frames: false, joints: false };
+    // this browser): their geoms (visual), the debug overlays once their
+    // material is in, and whether they reveal on spawn and reset (reveal).
+    this.overlays = { visual: true, collision: false, frames: false, joints: false, reveal: false };
     try { Object.assign(this.overlays, JSON.parse(localStorage.getItem(OVERLAYS) ?? '{}')); } catch { /* none */ }
     this.overlayEntities = [];
     this.linesMi = null;
@@ -1340,8 +1340,10 @@ class App {
     this.syncTransforms();  // frame() only syncs while running
   }
 
-  // The spawn effect (render/reveal.js) on `robots`, environments left out.
+  // The spawn effect (render/reveal.js) on `robots`, environments left out;
+  // only while the Render panel's Show says so.
   revealRobots(robots) {
+    if (!this.overlays.reveal) return;
     const layer = this.overlays.visual === false ? HIDDEN : SCENE;
     for (const r of robots) if (r.entities && !isEnvironment(r.visual.rel)) this.reveal?.start(r, layer);
   }

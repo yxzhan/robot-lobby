@@ -105,7 +105,8 @@ interpenetrating transparent mesh can blend in the wrong order.
 
 ## Spawn effect
 
-A robot or object that is spawned or reset materialises from its feet up
+With **Spawn effect** on (the Render panel's Show, saved in this browser, off
+by default), a robot or object that is spawned or reset materialises from its feet up
 (`public/js/render/reveal.js`, after the Microduck simulator's scan-up): an
 orange hologram of its triangles' edges rises with a scan line, and its own
 surfaces follow 0.3 s behind, with a hot orange edge at the line. It takes
