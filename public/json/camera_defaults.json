@@ -26,7 +26,10 @@
   },
   "aicor/garmi/garmi.xml": {
     "cameras": [
-      { "name": "camera1", "link": "head", "follow": "link", "pos": [0.11, 0.035, -0.01], "rpy": [0, 0, 0], "fovy": 60, "width": 256, "height": 256, "hz": 10 }
+      { "name": "olive_camera_left", "link": "olive_camera_link", "follow": "link", "pos": [0.01, 0.0315, 0], "rpy": [0, 0, 0], "fovy": 45, "width": 256, "height": 256, "hz": 10 },
+      { "name": "olive_camera_right", "link": "olive_camera_link", "follow": "link", "pos": [0.01, -0.0315, 0], "rpy": [0, 0, 0], "fovy": 45, "width": 256, "height": 256, "hz": 10 },
+      { "name": "camera_d435i_left_color", "link": "camera_d435i_left_link", "follow": "link", "pos": [0, 0.015, 0], "rpy": [0, 0, 0], "fovy": 42, "width": 256, "height": 256, "hz": 10 },
+      { "name": "camera_d435i_right_color", "link": "camera_d435i_right_link", "follow": "link", "pos": [0, 0.015, 0], "rpy": [0, 0, 0], "fovy": 42, "width": 256, "height": 256, "hz": 10 }
     ]
   },
   "mujoco_menagerie/unitree_g1/g1_with_hands.xml": {
