@@ -57,13 +57,14 @@ REACH = (0.30, 0.12)        # each bottle from the robot when it works: forward,
 SIDE = 0.10                 # m: a hand opens this far outside its bottle
 PALM = 0.035                # m: and closes this far (the tip is on the palm: at the middle, it pushes the bottle away)
 LIFT = 0.12                 # m: a bottle lifted this much
-PLACE_DZ = 0.02             # m: a bottle let go this much over the table (lowered onto it, it may be pushed into it and tip)
+PLACE_DZ = 0.05             # m: a bottle let go this much over the table (lowered onto it, it may be pushed into it and tip)
 # Its default pose holds both forearms out at table height: walking up to the
 # table, a hand sweeps a bottle over. So they are up out of the way first.
 CARRY = (0.25, 0.20, 1.05)  # where a hand is carried, with a bottle or not: forward, to its side, height (m)
 SPEED = 0.25                # m/s of a hand's target
 REACHED, SETTLE = 0.015, 1.5  # m: a move is done this near; or this long (s) after its end
 RETRIES = 2
+NEAR = 0.12                 # m: a bottle further than this from where it was spawned is not taken
 NOSLIP = 10
 plan = {"grip": {}, "has": {}, "held": {}}  # robot, bottles [(name, model)] noted by Setup; per hand: gripper, bottle in it, where it sits
 
@@ -130,7 +131,7 @@ class Setup(py_trees.behaviour.Behaviour):
         self.spots = [(model, *spot(m, PICK_YAW, c)) for m, kinds in zip(PICKS, KINDS) for c, model in zip((LEFT, RIGHT), kinds)]
         self.todo = ([(TABLE_MODEL, x, y, 0.0, 0.0) for x, y in TABLES] + [(ROBOT_MODEL, 0.0, 1.3, PICK_YAW, 0.0)]
                      + [(model, x, y, 0.0, TABLE_Z) for model, x, y in self.spots])
-        self.step, self.count = "clear", 0
+        self.step, self.count, self.known, self.names = "clear", 0, set(), []
         lobby.clear_world()
 
     def update(self):
@@ -143,6 +144,13 @@ class Setup(py_trees.behaviour.Behaviour):
         if self.step == "spawn":
             if len(listed) < self.count:  # (the one spawned last not in yet)
                 return Status.RUNNING
+            # The one spawned last: the name robots() did not list before.
+            new = [r["name"] for r in listed if r["name"] not in self.known]
+            if self.count and len(new) != 1:
+                self.feedback_message = f"spawned {len(new)} at once: {new}"
+                return Status.FAILURE
+            self.names += new
+            self.known |= set(new)
             if self.todo:
                 model, x, y, yaw, z = self.todo.pop(0)
                 lobby.spawn(model, x, y, yaw, z)
@@ -150,10 +158,10 @@ class Setup(py_trees.behaviour.Behaviour):
                 self.feedback_message = f"spawning {model.split('/')[-1]}"
                 return Status.RUNNING
             plan["robot"] = first(ROBOT_MODEL)["name"]
-            # Each spot's bottle: the one of its model nearest it.
-            plan["bottles"] = [(min((r for r in listed if r["label"] == model),
-                                    key=lambda r: math.hypot(r["pose"]["x"] - x, r["pose"]["y"] - y))["name"], model)
-                               for model, x, y in self.spots]
+            # Each spot's bottle: the one spawned there, by spawn order (the
+            # nearest one of its model could be the same for two spots).
+            plan["bottles"] = [(name, model) for name, (model, x, y) in zip(self.names[-len(self.spots):], self.spots)]
+            plan["spots"] = [(x, y) for _, x, y in self.spots]
             lobby.physics(noslip_iterations=NOSLIP)
             if not lobby.controllers(plan["robot"])["ik"]:
                 lobby.set_controller(plan["robot"], "ik", True)
@@ -252,14 +260,20 @@ class Grip(py_trees.behaviour.Behaviour):
 
 
 class Upright(py_trees.behaviour.Behaviour):
-    """Whether bottle i stands (a fallen one is left: it cannot be taken from the side)."""
+    """Whether bottle i stands on table 1 by its spot (a fallen one is left: it
+    cannot be taken from the side; one gone elsewhere is not reached for)."""
 
     def __init__(self, i):
-        super().__init__(f"bottle {i + 1} standing?")
+        super().__init__(f"bottle {i + 1} standing at its spot?")
         self.i = i
 
     def update(self):
-        up = bottle(self.i)["up"]
+        b, (x, y) = bottle(self.i), plan["spots"][self.i]
+        off = math.hypot(b["x"] - x, b["y"] - y)
+        if off > NEAR or abs(b["z"] - middle_z(self.i)) > 0.05:
+            self.feedback_message = f'{off * 100:.0f} cm from its spot, {b["z"]:.2f} m high: not there, left'
+            return Status.FAILURE
+        up = b["up"]
         self.feedback_message = "standing" if up > 0.9 else "fallen over: left where it is"
         return Status.SUCCESS if up > 0.9 else Status.FAILURE
 
