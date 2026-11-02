@@ -1305,6 +1305,10 @@ class App {
   // state the server sends; nothing is compiled here.
   setNetWorld(model, data, robots) {
     this.perturb.clear();
+    // The time goes on until the server's first state of it (it keeps its
+    // time over a rebuild): a 0 meanwhile would look like a reset (a
+    // tree's running time would count from the server's start).
+    if (this.data && !data.time) data.time = this.data.time;
     this.mujoco = NET_MUJOCO;
     this.model = model;
     this.data = data;
