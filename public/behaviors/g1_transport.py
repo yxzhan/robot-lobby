@@ -55,13 +55,14 @@ DEST = {WATER: 1, DRINK: 2}            # the table each goes on
 # one, the standing table's +y one (only 0.7 m wide, x 1.49 to 2.19). Facing -y
 # there, the robot's left is +x: the first drink (left hand) goes at 1.77, the
 # second (right hand) at 2.05, 0.28 m apart.
-PLACES = {1: [(0.75, 1.3), (1.25, 1.3)], 2: [(1.65, -1.5), (2.17, -1.5)]}
+PLACES = {1: [(0.75, 1.3), (1.2, 1.3)], 2: [(1.85, -1.55), (1.8, -1.55)]}
 PICK_YAW = math.pi                                # facing the counter
 PLACE_YAW = {1: math.pi / 2, 2: -math.pi / 2}     # facing each table
 # m: it steps back this much after putting down, and comes to a table to put
 # down from APPROACH further out first (walking along a table's edge, its legs catch on it)
 BACK, APPROACH = 0.35, 0.40
 WALK_TIMEOUT = 40.0         # s: a walk not there by then fails (stuck on something)
+STILL = 1.0                 # s: after a walk, it stands this long to settle before its hands move
 REACH = (0.30, 0.12)        # each bottle from the robot when it works: forward, to its hand's side (m)
 SIDE = 0.03                 # m: a hand opens this far outside its bottle
 PALM = 0.02                # m: and closes this far (the tip is on the palm: at the middle, it pushes the bottle away)
@@ -71,7 +72,7 @@ PLACE_DZ = 0.08             # m: a bottle let go this much over the table (lower
 # table, a hand sweeps a bottle over. So they are up out of the way first.
 # A carried bottle's base is ~0.1 m below the tip: over the standing table's top (1.05 m).
 CARRY = (0.25, 0.20, 1.22)  # where a hand is carried with a bottle: forward, to its side, height (m)
-READY_Z = 1.05              # m: and an empty one (the ready pose), there but lower
+READY_Z = 1.15              # m: and an empty one (the ready pose), there but lower
 SPEED = 0.25                # m/s of a hand's target
 REACHED, SETTLE = 0.015, 1.5  # m: a move is done this near; or this long (s) after its end
 RETRIES = 2
@@ -188,8 +189,9 @@ class Setup(py_trees.behaviour.Behaviour):
 
 class Walk(py_trees.behaviour.Behaviour):
     """The robot to where(), {x, y, yaw}, by its goal; done once it has arrived
-    there. (Right after the goal is set, robots() can still say it has arrived,
-    at the last one: that counts only once the new goal has shown, or near it.)"""
+    there and stood STILL. (Right after the goal is set, robots() can still say
+    it has arrived, at the last one: that counts only once the new goal has
+    shown, or near it.)"""
 
     def __init__(self, name, where):
         super().__init__(name)
@@ -197,7 +199,7 @@ class Walk(py_trees.behaviour.Behaviour):
 
     def initialise(self):
         self.goal = self.where()
-        self.t0, self.seen = lobby.time(), False
+        self.t0, self.seen, self.there = lobby.time(), False, None
         lobby.set_goal(plan["robot"], self.goal["x"], self.goal["y"], self.goal["yaw"])
 
     def update(self):
@@ -208,8 +210,10 @@ class Walk(py_trees.behaviour.Behaviour):
         far = math.hypot(p["x"] - self.goal["x"], p["y"] - self.goal["y"])
         self.feedback_message = f'{far:.2f} m to go'
         self.seen = self.seen or r.get("goal") is not None
-        if r.get("arrived") and (self.seen or far < 0.05):
-            return Status.SUCCESS
+        if self.there is not None or (r.get("arrived") and (self.seen or far < 0.05)):
+            self.there = self.there if self.there is not None else lobby.time()
+            self.feedback_message = "there, settling"
+            return Status.SUCCESS if lobby.time() - self.there >= STILL else Status.RUNNING
         if lobby.time() - self.t0 > WALK_TIMEOUT:
             self.feedback_message += f": stuck, not there after {WALK_TIMEOUT:.0f} s"
             lobby.stop(plan["robot"])
