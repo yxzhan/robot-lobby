@@ -55,7 +55,7 @@ DEST = {WATER: 1, DRINK: 2}            # the table each goes on
 # one, the standing table's +y one (only 0.7 m wide, x 1.49 to 2.19). Facing -y
 # there, the robot's left is +x: the first drink (left hand) goes at 1.77, the
 # second (right hand) at 2.05, 0.28 m apart.
-PLACES = {1: [(0.75, 1.3), (1.2, 1.3)], 2: [(1.85, -1.55), (1.8, -1.55)]}
+PLACES = {1: [(0.75, 1.3), (1.2, 1.3)], 2: [(1.75, -1.55), (1.8, -1.55)]}
 PICK_YAW = math.pi                                # facing the counter
 PLACE_YAW = {1: math.pi / 2, 2: -math.pi / 2}     # facing each table
 # m: it steps back this much after putting down, and comes to a table to put
@@ -64,7 +64,7 @@ BACK, APPROACH = 0.35, 0.40
 WALK_TIMEOUT = 40.0         # s: a walk not there by then fails (stuck on something)
 STILL = 1.0                 # s: after a walk, it stands this long to settle before its hands move
 REACH = (0.30, 0.12)        # each bottle from the robot when it works: forward, to its hand's side (m)
-SIDE = 0.03                 # m: a hand opens this far outside its bottle
+SIDE = 0.05                 # m: a hand opens this far outside its bottle
 PALM = 0.02                # m: and closes this far (the tip is on the palm: at the middle, it pushes the bottle away)
 LIFT = 0.12                 # m: a bottle lifted this much
 PLACE_DZ = 0.08             # m: a bottle let go this much over the table (lowered onto it, it may be pushed into it and tip)
@@ -77,7 +77,7 @@ SPEED = 0.25                # m/s of a hand's target
 REACHED, SETTLE = 0.015, 1.5  # m: a move is done this near; or this long (s) after its end
 RETRIES = 2
 NEAR = 0.12                 # m: a bottle further than this from where it was spawned is not taken
-NOSLIP = 10
+NOSLIP = 1
 plan = {"grip": {}, "has": {}, "held": {}}  # robot, bottles [(name, model)] noted by Setup; per hand: gripper, bottle in it, where it sits
 
 
