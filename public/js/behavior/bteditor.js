@@ -112,7 +112,7 @@ export class BtEditor {
           check,
           lintGutter(),
           EditorView.theme({
-            '&': { height: '260px', fontSize: '11px', border: '1px solid #555', borderRadius: '4px', backgroundColor: '#1e2127' },
+            '&': { height: '260px', fontSize: 'var(--fs-small)', border: '1px solid #555', borderRadius: '4px', backgroundColor: '#1e2127' },
             '.cm-scroller': { fontFamily: 'ui-monospace, Menlo, Consolas, monospace', lineHeight: '1.45' },
             '.cm-gutters': { backgroundColor: '#1e2127' },
           }, { dark: true }),
