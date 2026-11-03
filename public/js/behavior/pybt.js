@@ -7,6 +7,7 @@
 // while the simulation runs, as bt.js's Runner does a text tree.
 
 import { FAILURE, IDLE, POLL_MS, RUNNING, SUCCESS, context, due, leaf } from './bt.js';
+import { every } from '../app/ticker.js';
 
 const VENDOR = new URL('../../vendor/pyodide/', import.meta.url);
 const WHEEL = 'py_trees-2.6.0-py2.py3-none-any.whl';
@@ -302,7 +303,7 @@ export class PyRunner {
     } finally {
       scope.destroy();
     }
-    this.timer = setInterval(() => this.step(), POLL_MS);
+    this.timer = every(POLL_MS, () => this.step());  // (on in a hidden tab too: ticker.js)
     this.step();
   }
 
@@ -311,7 +312,7 @@ export class PyRunner {
     this.error = lastLine(msg);
     this.errorLine = err.line ?? errorLine(msg);
     this.status = FAILURE;
-    clearInterval(this.timer);
+    this.timer?.();
   }
 
   step() {
@@ -333,7 +334,7 @@ export class PyRunner {
   }
 
   finish(status) {
-    clearInterval(this.timer);
+    this.timer?.();
     this.status = status;
   }
 

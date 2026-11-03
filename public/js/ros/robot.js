@@ -70,6 +70,7 @@
 // server's states while a robot is on here (NetClient.wantDynamics).
 
 import { RosBridge } from './bridge.js';
+import { every } from '../app/ticker.js';
 
 const WORLD_STORE = 'robot-lobby/ros-world';
 const STORE = 'robot-lobby/ros';  // per robot file
@@ -265,8 +266,8 @@ export class RosWorld {
   }
 
   restartTimer() {
-    clearInterval(this.timer);
-    this.timer = setInterval(() => this.tick(), 1000 / this.settings.rate);
+    this.timer?.();
+    this.timer = every(1000 / this.settings.rate, () => this.tick());  // (on in a hidden tab too: ticker.js)
   }
 
   // `rate` times a second: every robot's states, and /clock.

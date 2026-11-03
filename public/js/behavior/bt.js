@@ -54,6 +54,8 @@
 // Halting a node (a Timeout, a Parallel done, Stop in the panel) clears the
 // goals it set.
 
+import { every } from '../app/ticker.js';
+
 export const TICK_SIM = 0.1;  // s of simulated time between ticks
 export const POLL_MS = 10;    // ms of wall time between looks at the time
 
@@ -464,7 +466,7 @@ export class Runner {
     this.status = RUNNING;
     this.error = null;
     this.start = null;  // sim time it started
-    this.timer = setInterval(() => this.step(), POLL_MS);
+    this.timer = every(POLL_MS, () => this.step());  // (on in a hidden tab too: ticker.js)
     this.step();
   }
 
@@ -500,7 +502,7 @@ export class Runner {
   }
 
   finish(status) {
-    clearInterval(this.timer);
+    this.timer?.();
     this.status = status;
   }
 

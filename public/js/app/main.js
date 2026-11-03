@@ -17,6 +17,7 @@ import loadMujoco from '../../vendor/mujoco/mujoco.js';
 import { loadModelFiles, readFirst, urlSource } from './vfs.js';
 import { bodyInertia, compileWorld, firstKey, referencedNames } from '../world/world.js';
 import { CONTROL_DT } from '../controllers/groot.js';
+import { every } from './ticker.js';
 import { POLICIES, defaultPolicy, isInstalled, loadPolicy, loadPolicyIndex, policyById, policyId } from '../controllers/policy.js';
 import { Perturb, StagePanel, describeRobot } from './inspect.js';
 import { AssetPanel, loadAssets, loadRecent } from '../world/assets.js';
@@ -56,6 +57,8 @@ import { RemoteBase, RemoteIk, RemotePolicy } from '../net/remote.js';
 
 // Filament.init() replaces the global with the loaded module, so re-read it after init.
 let Filament = window.Filament;
+// ms between the steps of a hidden tab (watchVisibility).
+const BACKGROUND_MS = 16;
 const MAT_LIT = 'materials/lit.filamat';
 const MAT_TEXTURED = 'materials/lit_textured.filamat';
 // Alpha-blended variants, for geoms whose rgba alpha is below 1.
@@ -1762,19 +1765,7 @@ class App {
   frame(xrFrame = null) {
     if (this.xr && !xrFrame) return;
     this.stats?.begin();
-    if (this.recorder?.replaying) {
-      this.recorder.frame(performance.now());  // a recording shown in place of the live world (recorder.js)
-    } else {
-      if (this.net) {
-        // The server steps; show its state (interpolated) once this world matches it.
-        if (this.model && this.net.apply(this.model, this.data, this.netVersion, this.robots)) this.syncTransforms();
-      } else if (this.model && !this.paused && !this.stepping) {
-        this.stepping = this.advance()
-          .catch((err) => { this.paused = true; console.error('simulation stopped', err); })
-          .finally(() => { this.stepping = null; });
-      }
-      this.recorder?.frame(performance.now());  // recording, if it is
-    }
+    this.live();
     this.showStats();
     this.syncMarkers();
     this.sceneLights.sync(this.model, this.data, this.lighting);  // the model's lights, where their bodies are
@@ -1806,6 +1797,42 @@ class App {
     this.stats?.end();
     if (xrFrame) this.xrLoop(this.xr);
     else requestAnimationFrame(() => this.frame());
+  }
+
+  // The world going on: the simulation stepped here, or the server's state
+  // taken in (network mode), recording; a recording replayed instead.
+  live() {
+    if (this.recorder?.replaying) {
+      this.recorder.frame(performance.now());  // a recording shown in place of the live world (recorder.js)
+      return;
+    }
+    if (this.net) {
+      // The server steps; show its state (interpolated) once this world matches it.
+      if (this.model && this.net.apply(this.model, this.data, this.netVersion, this.robots)) this.syncTransforms();
+    } else if (this.model && !this.paused && !this.stepping) {
+      this.stepping = this.advance()
+        .catch((err) => { this.paused = true; console.error('simulation stopped', err); })
+        .finally(() => { this.stepping = null; });
+    }
+    this.recorder?.frame(performance.now());  // recording, if it is
+  }
+
+  // In a hidden tab, where the animation frames stop: frame() without
+  // drawing, on a worker's timer (ticker.js), so that the world goes on and
+  // with it what follows its time (behaviour trees, ROS, the drive layer).
+  // The panels are not updated, and a WebXR session keeps its own loop.
+  watchVisibility() {
+    let stop = null;
+    const sync = () => {
+      stop?.();
+      stop = document.hidden ? every(BACKGROUND_MS, () => {
+        if (!document.hidden || this.xr) return;
+        this.live();
+        this.drive.tick();
+      }) : null;
+    };
+    document.addEventListener('visibilitychange', sync);
+    sync();
   }
 
   // The next frame of session `xr`'s loop (none once it has ended; a frame
@@ -3398,6 +3425,7 @@ try {
     setBusy(null);
   }
   app.frame();
+  app.watchVisibility();
 } catch (err) {
   status.textContent = `error: ${err.message ?? err}`;
   setBusy(`error: ${err.message ?? err}`, true);

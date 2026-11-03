@@ -15,6 +15,7 @@
 // protocol. Which server, if any, endpoint.js decides.
 
 import { serverUrl, wsUrl } from '../app/endpoint.js';
+import { every } from '../app/ticker.js';
 
 const MIN_DELAY = 0.04, MAX_DELAY = 0.25;  // s of server time the view runs behind the newest snapshot
 const LAG_JUMP = 0.15;  // s (wall, at the sim rate): the view this much (or twice its delay) further behind jumps
@@ -80,13 +81,13 @@ export class NetClient {
         this.send('ping', { t: performance.now() });
       };
       ping();
-      this.pinger = setInterval(ping, PING_EVERY);
+      this.pinger = every(PING_EVERY, ping);  // (on in a hidden tab too: ticker.js)
       this.onOpen();
       this.handlers.connected?.();
     };
     ws.onclose = () => {
       if (ws !== this.ws) return;
-      clearInterval(this.pinger);
+      this.pinger?.();
       for (const { reject } of this.replies.values()) reject(new Error('disconnected'));
       this.replies.clear();
       // Try again after 1, 2, 4, 8, then every 10 s.
