@@ -5,7 +5,8 @@
 // The text and the format are kept in this browser; Save keeps them under
 // a name there too (My trees), next to the examples (public/behaviors:
 // index.json lists the files; .py ones are py_trees, .xml XML, the others
-// the text form). window.bt does the same from the devtools console:
+// the text form). Both are listed above the editor, each with its format, the
+// first lines of its leading comment and Open / Run. window.bt does the same from the devtools console:
 //   bt.run('Move all forward=1', 'text')  bt.stop()  bt.status()
 
 import { IDLE, RUNNING, Runner, parse } from './bt.js';
@@ -37,6 +38,22 @@ const EXAMPLES = new URL('../../behaviors/', import.meta.url);  // index.json: [
 // [format, label]: the first is the default.
 const FORMATS = [['python', 'py_trees (Python)'], ['text', 'Text form'], ['xml', 'BehaviorTree.CPP XML']];
 const formatOfFile = (file) => (/\.py$/.test(file) ? 'python' : /\.xml$/.test(file) ? 'xml' : 'text');
+const BADGES = { python: 'PY', text: 'BT', xml: 'XML' };
+const FORMAT_NAMES = { python: 'py_trees', text: 'text form', xml: 'BehaviorTree.CPP XML' };
+
+// What a tree's leading comment (# or <!-- -->) says, on one line, or ''.
+function describe(text) {
+  const xml = /^\s*<!--([\s\S]*?)-->/.exec(text);
+  if (xml) return xml[1].replace(/\s+/g, ' ').trim();
+  const lines = [];
+  for (const line of text.split('\n')) {
+    const m = /^\s*#\s?(.*)$/.exec(line);
+    if (!m) break;
+    lines.push(m[1]);
+  }
+  return lines.join(' ').replace(/\s+/g, ' ').trim();
+}
+const OPEN_KEY = 'mujoco-filament/behavior-lists';  // {examples, mine}: the lists unfolded
 
 const DEFAULT = `import py_trees
 from lobby import Move
@@ -77,19 +94,12 @@ export class BehaviorPanel {
       this.formatPicker.blur();
     };
 
-    // Open: an example or a saved tree into the editor (its text replaced).
-    this.picker = el('select', { title: 'Put an example or one of your saved trees in the editor (the text there is replaced)' });
-    this.picker.onchange = () => {
-      const [kind, name] = [this.picker.value.slice(0, 3), this.picker.value.slice(3)];
-      const tree = kind === 'ex:' ? this.examples[name] : kind === 'my:' ? readSaved()[name] : null;
-      if (tree) this.setText(tree.text, tree.format);
-      this.picker.blur();
-      this.update();
-    };
+    // The examples and the saved trees, each opened into the editor (its text
+    // replaced) or opened and run.
+    this.current = '';      // the one last opened: 'ex:<name>' or 'my:<name>'
+    this.lists = el('div', { className: 'bt-lists' });
     const save = el('button', { type: 'button', textContent: 'Save', title: 'Keep the editor\'s tree in this browser under a name (My trees)' });
     save.onclick = () => this.saveAs();
-    this.deleteButton = el('button', { type: 'button', textContent: 'Delete', title: 'Forget the saved tree picked on the left' });
-    this.deleteButton.onclick = () => this.remove();
     this.runButton = el('button', { type: 'button', className: 'primary', title: 'Start the tree from the top (Ctrl+Enter)' });
     this.runLabel = el('span', { textContent: 'Run' });
     this.runButton.append(icon('<path d="M2 1.2v9.6a.8.8 0 0 0 1.2.7l8-4.8a.8.8 0 0 0 0-1.4l-8-4.8A.8.8 0 0 0 2 1.2z"/>'), this.runLabel);
@@ -114,7 +124,8 @@ export class BehaviorPanel {
     try { folded = localStorage.getItem(FOLDED) === '1'; } catch { /* no storage */ }
     setFolded(folded);
     this.body.append(
-      el('div', { className: 'bar' }, fold, this.formatPicker, this.picker, save, this.deleteButton),
+      this.lists,
+      el('div', { className: 'bar' }, fold, this.formatPicker, save),
       editorBox,
       el('div', { className: 'bar' }, this.runButton, this.stopButton, this.note),
       this.tree);
@@ -167,23 +178,60 @@ export class BehaviorPanel {
     } catch { /* no storage */ }
   }
 
-  // The picker's entries: the examples, then the saved trees; `pick` selected.
-  listTrees(pick = this.picker.value) {
-    const group = (label, kind, names) => {
-      const g = el('optgroup', { label });
-      for (const n of names) g.append(new Option(n, kind + n));
-      return g;
+  // The lists: the examples, then the saved trees; `pick` marked as open.
+  listTrees(pick = this.current) {
+    this.current = pick;
+    let unfolded = { examples: true, mine: true };
+    try { unfolded = { ...unfolded, ...JSON.parse(localStorage.getItem(OPEN_KEY)) }; } catch { /* defaults */ }
+    const list = (key, label, kind, trees, empty) => {
+      const d = el('details', { className: 'bt-list', open: unfolded[key] },
+        el('summary', {}, label, ' ', el('span', { className: 'count', textContent: String(trees.length) })));
+      d.ontoggle = () => {
+        unfolded[key] = d.open;
+        try { localStorage.setItem(OPEN_KEY, JSON.stringify(unfolded)); } catch { /* no storage */ }
+      };
+      const items = el('div', { className: 'bt-items' });
+      if (!trees.length) items.append(el('div', { className: 'hint', textContent: empty }));
+      for (const [name, tree] of trees) items.append(this.item(kind + name, name, tree));
+      d.append(items);
+      return d;
     };
-    const saved = Object.keys(readSaved()).sort((a, b) => a.localeCompare(b));
-    this.picker.replaceChildren(new Option('Open…', ''), group('Examples', 'ex:', Object.keys(this.examples)),
-      ...(saved.length ? [group('My trees', 'my:', saved)] : []));
-    this.picker.value = [...this.picker.options].some((o) => o.value === pick) ? pick : '';
+    const saved = Object.entries(readSaved()).sort(([a], [b]) => a.localeCompare(b));
+    this.lists.replaceChildren(
+      list('examples', 'Examples', 'ex:', Object.entries(this.examples), 'Loading…'),
+      list('mine', 'My trees', 'my:', saved, 'None yet: Save keeps the editor\'s tree here, in this browser.'));
     this.update();
   }
 
-  // Saves the editor's tree under a name asked for (the picked saved tree's by default).
+  // One tree of the lists: its format, name, what its comment says, and its buttons.
+  item(id, name, tree) {
+    const open = () => {
+      this.setText(tree.text, tree.format);
+      this.listTrees(id);
+    };
+    const desc = describe(tree.text);
+    const buttons = el('div', { className: 'buttons' });
+    const openButton = el('button', { type: 'button', textContent: 'Open', title: 'Put it in the editor (the text there is replaced)' });
+    openButton.onclick = open;
+    const runButton = el('button', { type: 'button', className: 'run', textContent: 'Run', title: 'Put it in the editor and run it' });
+    runButton.onclick = () => { open(); this.run(); };
+    buttons.append(openButton, runButton);
+    if (id.startsWith('my:')) {
+      const del = el('button', { type: 'button', className: 'remove', textContent: 'Delete', title: 'Forget this saved tree' });
+      del.onclick = () => this.remove(name);
+      buttons.append(del);
+    }
+    return el('div', { className: 'bt-item' + (id === this.current ? ' current' : ''), title: desc || name },
+      el('div', { className: `badge ${tree.format}`, textContent: BADGES[tree.format] ?? '?' }),
+      el('div', { className: 'info' },
+        el('div', { className: 'name', textContent: name }),
+        el('div', { className: 'meta', textContent: desc || FORMAT_NAMES[tree.format] || '' }),
+        buttons));
+  }
+
+  // Saves the editor's tree under a name asked for (the open saved tree's by default).
   async saveAs() {
-    const picked = this.picker.value.startsWith('my:') ? this.picker.value.slice(3) : '';
+    const picked = this.current.startsWith('my:') ? this.current.slice(3) : '';
     const name = await askName('Save behavior tree', picked, { hint: 'Saved in this browser (My trees).' });
     if (!name) return;
     const saved = readSaved();
@@ -198,13 +246,12 @@ export class BehaviorPanel {
     this.listTrees(`my:${name}`);
   }
 
-  remove() {
-    const name = this.picker.value.slice(3);
-    if (!this.picker.value.startsWith('my:') || !confirm(`Delete your tree "${name}"?`)) return;
+  remove(name) {
+    if (!confirm(`Delete your tree "${name}"?`)) return;
     const saved = readSaved();
     delete saved[name];
     try { localStorage.setItem(SAVED, JSON.stringify(saved)); } catch { /* no storage */ }
-    this.listTrees('');
+    this.listTrees(this.current === `my:${name}` ? '' : this.current);
   }
 
   // A Python script in the editor: Pyodide loads (in the background, once)
@@ -292,7 +339,6 @@ export class BehaviorPanel {
       this.rows[i].info.textContent = x.info;
     });
     const running = r?.status === RUNNING;
-    this.deleteButton.disabled = !this.picker.value.startsWith('my:');
     this.stopButton.disabled = !running;
     this.runLabel.textContent = running ? 'Restart' : 'Run';
     if (!r && !this.error && this.loadingPython && !this.py) return;  // (the loading message)
