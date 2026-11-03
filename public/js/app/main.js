@@ -3057,8 +3057,9 @@ try {
     });
   };
   const goalInfo = (r) => ({
-    name: r.prefix.slice(0, -1), label: r.label, drives: locomotion(r).length > 0,
-    pose: bodyPose(app.data, r.bodyOffset), goal: r.goal ?? null, arrived: !!r.arrived,
+    name: r.prefix.slice(0, -1), label: r.label, model: r.visual.rel, drives: locomotion(r).length > 0,
+    pose: bodyPose(app.data, r.bodyOffset), spawned: r.pos ? { x: r.pos[0], y: r.pos[1], yaw: r.yaw ?? 0 } : null,  // (where Reset puts it)
+    goal: r.goal ?? null, arrived: !!r.arrived,
   });
   window.goals = {
     list: () => robots.map(goalInfo),

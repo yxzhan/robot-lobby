@@ -62,6 +62,13 @@ export function loadPython(onProgress) {
       set_goal: (name, x, y, yaw) => { world.goals.set(name, { x, y, yaw }); },
       stop: (name) => { world.goals.clear(name); },
       reset: () => { ask('The behaviour tree wants to reset the scene.'); window.lobby.reset(); },
+      reset_robots: (names) => {
+        const list = String(names).split(',').map((n) => robotOf(n) ?? fail(`no robot ${n}`));
+        if (!list.length) return;
+        ask(`The behaviour tree wants to reset ${list.map((r) => r.prefix.slice(0, -1)).join(', ')}.`);
+        for (const r of list) world.app.resetRobot(r);
+      },
+      rel: (model) => window.lobby.assets().find((a) => a.rel === model || a.name === model)?.rel ?? null,
       search: (query, category) => window.lobby.search(query, category || null),
       remove: (names) => {
         const list = String(names).split(',').map((n) => robotOf(n) ?? fail(`no robot ${n}`));

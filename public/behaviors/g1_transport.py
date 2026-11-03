@@ -2,11 +2,12 @@
 # drink, from the kitchen counter of IAI's apartment onto two tables in it,
 # the water onto the dining table and the drinks onto the standing table,
 # two at a time, one in each hand (the lobby's goals, IK targets and
-# grippers). The tree clears the world, spawns the apartment (at 5, -5,
-# turned 180 degrees), the G1 and the bottles on the counter mixed (each pair
-# of them one of each), one at a time (a spawn while another one is still
-# being added can lose it), and turns its IK on and the noslip post-pass up
-# (a held bottle creeps less).
+# grippers). The tree spawns the apartment (at 5, -5, turned 180 degrees),
+# the G1 and the bottles on the counter mixed (each pair of them one of
+# each), one at a time (lobby.Spawn); run again, those it spawned are only
+# reset (back where they were spawned), and nothing else in the world is
+# touched. Then it turns the G1's IK on and the noslip post-pass up (a held
+# bottle creeps less).
 #
 # Both hands go up first: the G1's default pose holds its forearms out at
 # table height, and walking up to the table they would sweep a bottle over.
@@ -78,11 +79,7 @@ REACHED, SETTLE = 0.015, 1.5  # m: a move is done this near; or this long (s) af
 RETRIES = 2
 NEAR = 0.12                 # m: a bottle further than this from where it was spawned is not taken
 NOSLIP = 1
-plan = {"grip": {}, "has": {}, "held": {}}  # robot, bottles [(name, model)] noted by Setup; per hand: gripper, bottle in it, where it sits
-
-
-def first(label):
-    return next((r for r in lobby.robots() if r["label"] == label), None)
+plan = {"grip": {}, "has": {}, "held": {}}  # robot, bottles [(name, model)] noted by Ready; per hand: gripper, bottle in it, where it sits
 
 
 def bottle(i):
@@ -132,59 +129,33 @@ def tip(c):
 
 # -- behaviours --------------------------------------------------------------
 
-class Setup(py_trees.behaviour.Behaviour):
-    """An empty world, then the apartment, the G1 and the bottles, one at a time;
-    the G1's IK on, noslip up."""
+# The pairs' bottles: (model, x, y), the left hand's, then the right's, pair by pair.
+SPOTS = [(model, *spot(m, PICK_YAW, c)) for m, kinds in zip(PICKS, KINDS) for c, model in zip((LEFT, RIGHT), kinds)]
+things = lobby.Spawn("apartment, G1, bottles",
+                     [(APARTMENT, *APARTMENT_POSE, 0.0), (ROBOT_MODEL, *START, 0.0)]
+                     + [(model, x, y, 0.0, TOP[0]) for model, x, y in SPOTS])
+
+
+class Ready(py_trees.behaviour.Behaviour):
+    """The G1's IK on, noslip up; done once the IK chains and the bottles are in."""
 
     def __init__(self):
-        super().__init__("Apartment, G1, bottles")
+        super().__init__("IK on")
 
     def initialise(self):
-        self.spots = [(model, *spot(m, PICK_YAW, c)) for m, kinds in zip(PICKS, KINDS) for c, model in zip((LEFT, RIGHT), kinds)]
-        self.todo = ([(APARTMENT, *APARTMENT_POSE, 0.0), (ROBOT_MODEL, *START, 0.0)]
-                     + [(model, x, y, 0.0, TOP[0]) for model, x, y in self.spots])
-        self.step, self.count, self.known, self.names = "clear", 0, set(), []
-        lobby.clear_world()
+        plan["robot"] = things.names[1]
+        plan["bottles"] = [(name, model) for name, (model, _, _) in zip(things.names[2:], SPOTS)]
+        plan["spots"] = [(x, y) for _, x, y in SPOTS]
+        lobby.physics(noslip_iterations=NOSLIP)
+        if not lobby.controllers(plan["robot"])["ik"]:
+            lobby.set_controller(plan["robot"], "ik", True)
 
     def update(self):
-        listed = lobby.robots()
-        if self.step == "clear":
-            if listed:
-                self.feedback_message = "clearing the world"
-                return Status.RUNNING
-            self.step = "spawn"
-        if self.step == "spawn":
-            if len(listed) < self.count:  # (the one spawned last not in yet)
-                return Status.RUNNING
-            # The one spawned last: the name robots() did not list before.
-            new = [r["name"] for r in listed if r["name"] not in self.known]
-            if self.count and len(new) != 1:
-                self.feedback_message = f"spawned {len(new)} at once: {new}"
-                return Status.FAILURE
-            self.names += new
-            self.known |= set(new)
-            if self.todo:
-                model, x, y, yaw, z = self.todo.pop(0)
-                lobby.spawn(model, x, y, yaw, z)
-                self.count = len(listed) + 1
-                self.feedback_message = f"spawning {model.split('/')[-1]}"
-                return Status.RUNNING
-            plan["robot"] = first(ROBOT_MODEL)["name"]
-            # Each spot's bottle: the one spawned there, by spawn order (the
-            # nearest one of its model could be the same for two spots).
-            plan["bottles"] = [(name, model) for name, (model, x, y) in zip(self.names[-len(self.spots):], self.spots)]
-            plan["spots"] = [(x, y) for _, x, y in self.spots]
-            lobby.physics(noslip_iterations=NOSLIP)
-            if not lobby.controllers(plan["robot"])["ik"]:
-                lobby.set_controller(plan["robot"], "ik", True)
-            self.step = "ik"
-        if self.step == "ik":
-            if (any(None in tip(c) for c in (LEFT, RIGHT))
-                    or any(bottle(i) is None for i in range(2 * len(PICKS)))):
-                self.feedback_message = "waiting for the IK chains and the bottles"
-                return Status.RUNNING
-            return Status.SUCCESS
-        return Status.RUNNING
+        if (any(None in tip(c) for c in (LEFT, RIGHT))
+                or any(bottle(i) is None for i in range(2 * len(PICKS)))):
+            self.feedback_message = "waiting for the IK chains and the bottles"
+            return Status.RUNNING
+        return Status.SUCCESS
 
 
 class Walk(py_trees.behaviour.Behaviour):
@@ -484,7 +455,8 @@ def pair(k):
 
 
 root = py_trees.composites.Sequence("G1 sorts four bottles onto two tables", memory=True, children=[
-    Setup(),
+    things,
+    Ready(),
     # The hands open on the way up: open already, they need not at each bottle.
     both("both hands up and open", lambda c: py_trees.composites.Parallel(
         f"the {NAME[c]} hand up and open", py_trees.common.ParallelPolicy.SuccessOnAll(), children=[

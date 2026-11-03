@@ -24,19 +24,22 @@ Behaviours (each also takes name=...):
   Stop(robot)                            clears the goals
   Wait(seconds)                          simulated time (py_trees.timers.Timer
                                          counts wall time: not paused, not sped up)
+  Spawn(name, things, near=0.1)          the tree's things in the world: those
+                                         there reset, the others spawned
 robot: a name ('r1'), a label (every robot of it), 'all', or a list. A move
 succeeds when its goals are reached, fails when one is taken from it, and
 clears its goals when interrupted. Angles in rad, or a string '90deg'.
 
-The world: robots() lists {name, label, drives, pose: {x, y, yaw}, goal,
-arrived} of every spawned thing, pose(name) one's pose, distance(a, b)
-between two, body(name) any body of the world ('r1/ball', or 'ball': the
-first so named) as {x, y, z, yaw, up}, upright(robot) the z of its trunk's
+The world: robots() lists {name, label, model, drives, pose: {x, y, yaw},
+spawned (where Reset puts it: {x, y, yaw}), goal, arrived} of every spawned
+thing, pose(name) one's pose, distance(a, b) between two, body(name) any
+body of the world ('r1/ball', or 'ball': the first so named) as {x, y, z, yaw, up}, upright(robot) the z of its trunk's
 up axis (1 standing, 0 lying on its side), time() the simulated time (s).
 Acting outside the behaviours: set_goal(robot, x, y, yaw) and stop(robot)
 (its goal marker, as GoTo / Stop do), use_skill(robot, skill, duration=None)
 (a policy skill, e.g. the Microduck's 'kick_right'), reset_world() (the
 toolbar's Reset: everything back to where it was spawned, time back to 0),
+reset(robot) (only those back where they were spawned; time goes on),
 remove(robot) and clear_world() (removed: those, or everything spawned;
 names start again at r1 once nothing is left), pause() (the simulation,
 and with it this tree: only the Pause button or the Agent resumes it),
@@ -67,6 +70,7 @@ its "Ask before removing or resetting" is on); declined, the tree fails.
 
 import json
 import math
+import time as _clock  # (time() here is the simulated one)
 
 import py_trees
 from py_trees.common import Status
@@ -85,7 +89,7 @@ def _py(v):
 
 
 __all__ = ['GoTo', 'Move', 'Approach', 'Follow', 'Stop', 'Wait', 'robots', 'pose', 'time', 'distance',
-           'body', 'upright', 'set_goal', 'stop', 'use_skill', 'reset_world', 'place', 'set_policy', 'policy',
+           'body', 'upright', 'set_goal', 'stop', 'use_skill', 'reset_world', 'reset', 'Spawn', 'place', 'set_policy', 'policy',
            'active_skill', 'place_body', 'spawn', 'models', 'remove', 'clear_world', 'pause', 'physics',
            'set_controller', 'controllers', 'inspect', 'ik_chains', 'ik_target', 'set_ik_target', 'set_gripper']
 
@@ -227,6 +231,81 @@ def use_skill(robot, skill, duration=None):
 def reset_world():
   """The toolbar's Reset: every spawned thing back where it was spawned, time back to 0."""
   lobby_js.reset()
+
+
+def reset(robot):
+  """Spawned things back where they were spawned, at rest, their controllers
+  reset (as the Inspect panel's Reset): a name ('r3'), a label (every one of
+  it) or a list. The others and time go on."""
+  names = robot if isinstance(robot, (list, tuple, set)) else [robot]
+  rows = robots()
+  picked = [r['name'] for r in rows if any(r['name'] == str(n) or r['label'] == str(n) for n in names)]
+  missing = [str(n) for n in names if not any(r['name'] == str(n) or r['label'] == str(n) for r in rows)]
+  if missing:
+    raise KeyError(f'no {", ".join(missing)}')
+  if picked:
+    lobby_js.reset_robots(','.join(picked))
+
+
+class Spawn(py_trees.behaviour.Behaviour):
+  """Sees that the world has `things`, [(model, x, y, yaw, z)] (z: the base's
+  height, 0 on the floor), or a function returning them (called as it
+  starts): one already there (a spawned thing of that model whose spawn pose
+  is within `near` m of x, y; near=None: anywhere) is reset (reset()), the
+  others are spawned, one at a time (a spawn while another one is still
+  being added can lose it; one not seen in `wait` s of wall time is asked
+  for again). Nothing else in the world is touched. Once it succeeds,
+  `names` has the name of each of `things`, in their order: what the tree
+  spawned, to reset again next time."""
+
+  def __init__(self, name, things, near=0.1, wait=60.0, settle=1.0):
+    super().__init__(name)
+    self.things, self.near, self.wait, self.settle = things, near, wait, settle
+    self.names = []
+
+  def initialise(self):
+    things = self.things() if callable(self.things) else self.things
+    self.todo = [(i, lobby_js.rel(str(t[0])) or str(t[0]), *t[1:]) for i, t in enumerate(things)]
+    self.names = [None] * len(self.todo)
+    rows, taken, old = robots(), set(), []
+    for i, rel, x, y, *_ in self.todo:
+      r = next((r for r in rows if r['name'] not in taken and r.get('model') == rel and r.get('spawned')
+                and (self.near is None or math.hypot(r['spawned']['x'] - x, r['spawned']['y'] - y) <= self.near)), None)
+      if r:
+        self.names[i] = r['name']
+        taken.add(r['name'])
+        old.append(r['name'])
+    self.todo = [t for t in self.todo if self.names[t[0]] is None]
+    if old:
+      reset(old)
+    self.pending = None  # (index, model, the names before it, wall time): a spawn on its way
+    self.until = _clock.monotonic() + self.settle  # (the reset's poses first)
+
+  def update(self):
+    now = _clock.monotonic()
+    if self.pending is not None:
+      i, rel, before, t0 = self.pending
+      new = [r['name'] for r in robots() if r['name'] not in before and r.get('model') == rel]
+      if not new:
+        if now - t0 < self.wait:
+          self.feedback_message = f'spawning {rel.split("/")[-1]}'
+          return Status.RUNNING
+        self.todo.insert(0, self.pending_thing)  # lost: again
+      else:
+        self.names[i] = new[0]
+      self.pending = None
+      self.until = now + self.settle  # (its pose arriving)
+    if now < self.until:
+      return Status.RUNNING
+    if self.todo:
+      self.pending_thing = t = self.todo.pop(0)
+      i, rel, x, y, yaw, z = (list(t) + [0.0, 0.0])[:6]
+      self.pending = (i, rel, {r['name'] for r in robots()}, now)
+      spawn(rel, x, y, yaw, z)
+      self.feedback_message = f'spawning {rel.split("/")[-1]}'
+      return Status.RUNNING
+    self.feedback_message = ', '.join(self.names)
+    return Status.SUCCESS
 
 
 def place(robot, x, y, yaw, spawn=False, pitch=None, z=None):

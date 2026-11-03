@@ -1,6 +1,8 @@
 # Duck football 3v3 (on the microduck_football_1v1 stage, or anywhere: the
-# tree spawns the pitch if there is none and the ducks each team lacks, all
-# on Pollen's policy set, microduck-official): the graphite Microducks attack the +x goal, the white
+# tree spawns the pitch if there is none, and the ducks on their spots of it,
+# all on Pollen's policy set, microduck-official; lobby.Spawn: run again,
+# the ducks it spawned are only reset, and other robots in the world are
+# not touched, nor played with): the graphite Microducks attack the +x goal, the white
 # ones the -x goal (in the pitch's own frame, however it is placed). In each
 # team the duck nearest the ball attacks: it lines up behind the ball for a
 # kick with the nearer foot (the ball in front of that toe, where the kick was
@@ -9,28 +11,25 @@
 # enough; of the other two the one nearer its own goal defends (between that
 # goal and the ball) and the other supports (behind the ball, to one side).
 # A duck that falls gets back up by itself (velstand). A referee scores goals
-# and restarts (Reset: the kick-off again) when the ball goes out. Each
-# kick-off (the first one too: the tree starts with a Reset) puts the ball at
-# a random spot of the pitch, clear of the ducks, which start on their spots
-# (Reset itself puts the ball back on the centre spot).
+# and restarts (a Reset of the pitch and the tree's ducks only: the kick-off
+# again) when the ball goes out. Each kick-off (the first one too: the tree
+# starts with one) puts the ball at a random spot of the pitch, clear of the
+# ducks, which start on their spots (the Reset itself puts the ball back on
+# the centre spot).
 import math
 import random
-import time
 import py_trees
 from py_trees.common import Status
 import lobby
 
 TEAMS = [("microduck_lavender", +1, "host"), ("microduck", -1, "guest")]  # label (= model), attacks +x / -x, name
 PER_TEAM = 3
-PITCH = "microduck_football"       # the model spawned when there is no pitch,
-PITCH_AT = (0.0, 2.0, 0.0)         # with its centre spot here (x, y, z; on the floor)
-# Where ducks are spawned (pitch frame, for the team attacking +x; the other's are mirrored through the
-# centre spot): the first one clear of every duck. The first is the stage's spot.
-SPOTS = [(-0.6, 0.2), (-1.2, 0.6), (-1.2, -0.6), (-0.3, 0.9), (-1.5, 0.0)]
-SPOT_CLEAR = 0.35                  # m: a spot with a duck closer than this is taken
-SPAWN_WAIT = 60.0                  # s (wall time): a spawn not seen by then is asked for again
-SPAWN_SETTLE = 1.0                 # s (wall time) after a spawn shows before the next: in a shared world the
-                                   # poses come a moment after the new scene (all at the origin until then)
+PITCH = "microduck_football"       # the model spawned when there is no pitch (one anywhere is used),
+PITCH_AT = (0.0, 2.0)              # with its centre spot here (x, y; on the floor)
+# Where the ducks are spawned (pitch frame, for the team attacking +x; the other's are mirrored through
+# the centre spot): the first PER_TEAM. The first is the stage's spot.
+SPOTS = [(-0.6, 0.2), (-1.2, 0.6), (-1.2, -0.6), (-0.3, 0.9), (-1.5, 0.0)][:PER_TEAM]
+SPOT_NEAR = 0.35                   # m: a duck of the team spawned this near a spot is the one there
 SWITCH_MARGIN = 0.2                # m: a teammate takes over the attack once this much nearer the ball
 DEFEND_OUT = 0.6                   # m out from its goal, on the line to the ball (at most half way)
 SUPPORT_BACK, SUPPORT_SIDE = 0.7, 0.5  # m behind the ball (toward its own goal) and to its side
@@ -75,13 +74,15 @@ def wrap(a):
 
 
 def pitch():
-    return next((r for r in lobby.robots() if "football" in r["label"]), None)
+    return next((r for r in lobby.robots() if r["name"] in the_pitch.names), None)
 
 
 def team(label):
-    """The team's ducks (lobby.robots() entries), in spawn order."""
-    num = lambda r: int(r["name"][1:]) if r["name"][1:].isdigit() else 0
-    return sorted((r for r in lobby.robots() if r["label"] == label), key=num)
+    """The team's ducks (lobby.robots() entries: the ones the tree spawned), in SPOTS' order."""
+    k = next(k for k, (l, _, _) in enumerate(TEAMS) if l == label)
+    names = ducks.names[k * len(SPOTS):(k + 1) * len(SPOTS)]
+    rows = {r["name"]: r for r in lobby.robots()}
+    return [rows[n] for n in names if n in rows]
 
 
 def dist(r, x, y):
@@ -136,7 +137,7 @@ class Player(py_trees.behaviour.Behaviour):
         me = ducks[self.index]
         name, t = me["name"], lobby.time()
         if kickoff["placing"]:
-            self.last = self.foot = self.set_at = None
+            self.last = self.foot = self.set_at = self.kicked = self.at_spot = None
             self.feedback_message = "kick-off"
             return Status.RUNNING
         for k in ("kicked", "at_spot", "set_at"):  # time went back (Reset): forget
@@ -251,56 +252,17 @@ class Player(py_trees.behaviour.Behaviour):
         return self.go(name, fr, tx, ty, math.atan2(by - ty, bx - tx), role, math.hypot(mx - bx, my - by), moved=0.08)
 
 
-class Teams(py_trees.behaviour.Behaviour):
-    """Spawns the pitch if there is none, then the ducks the teams lack, one at a time (each spawn rebuilds
-    the world), each on the first free spot of SPOTS; done when every team has PER_TEAM."""
+def duck_spots():
+    """Each team's ducks, on SPOTS of the pitch as it was spawned."""
+    p = next(r for r in lobby.robots() if r["name"] in the_pitch.names)
+    fr = Frame(p["spawned"] or p["pose"])
+    return [(label, *fr.world(sign * u, sign * v), fr.yaw + (0.0 if sign > 0 else math.pi), 0.0)
+            for label, sign, _ in TEAMS for u, v in SPOTS]
 
-    def __init__(self):
-        super().__init__(f"Teams of {PER_TEAM}")
-        self.pending = None  # (what: a label or PITCH, how many there were, wall time): a spawn on its way
-        self.asked = []      # the spots spawned on: taken (a new duck's pose shows a moment after it does)
-        self.settle = 0.0    # wall time until which the last spawn settles (its poses arriving)
-        self.frame = None    # the pitch's frame, noted once settled (it does not move)
 
-    def initialise(self):
-        self.settle = time.monotonic() + SPAWN_SETTLE  # (the world may have just changed: its poses first)
-
-    def count(self, what):
-        return (1 if pitch() else 0) if what == PITCH else len(team(what))
-
-    def update(self):
-        if self.pending is not None:  # one spawn at a time: until it shows (wall time: a rebuild may set the simulated one back)
-            what, had, t0 = self.pending
-            if self.count(what) <= had and time.monotonic() - t0 < SPAWN_WAIT:
-                self.feedback_message = f"spawning {what}"
-                return Status.RUNNING
-            self.pending = None
-            self.settle = time.monotonic() + SPAWN_SETTLE
-        if time.monotonic() < self.settle:
-            return Status.RUNNING
-        f = pitch()
-        if f is None:
-            lobby.spawn(PITCH, PITCH_AT[0], PITCH_AT[1], 0.0)
-            self.pending = (PITCH, 0, time.monotonic())
-            self.feedback_message = f"spawning {PITCH}"
-            return Status.RUNNING
-        counts = {label: len(team(label)) for label, _, _ in TEAMS}
-        self.feedback_message = ", ".join(f"{name} {counts[label]}" for label, _, name in TEAMS)
-        missing = next(((label, sign) for label, sign, _ in TEAMS if counts[label] < PER_TEAM), None)
-        if missing is None:
-            return Status.SUCCESS
-        label, sign = missing
-        fr = self.frame = self.frame or Frame(f["pose"])
-        ducks = [r for l, _, _ in TEAMS for r in team(l)]
-        spots = [fr.world(sign * u, sign * v) for u, v in SPOTS]
-        clear = lambda p: min([dist(r, *p) for r in ducks] + [math.hypot(p[0] - ax, p[1] - ay) for ax, ay in self.asked],
-                              default=math.inf)
-        x, y = next((p for p in spots if clear(p) >= SPOT_CLEAR), max(spots, key=clear))  # (else the least crowded)
-        lobby.spawn(label, x, y, fr.yaw + (0.0 if sign > 0 else math.pi))
-        self.asked.append((x, y))
-        self.pending = (label, counts[label], time.monotonic())
-        self.feedback_message += f"; spawning {label}"
-        return Status.RUNNING
+# The pitch (any one there), then the ducks: those the tree spawned before are reset, the others spawned.
+the_pitch = lobby.Spawn("pitch", [(PITCH, *PITCH_AT, 0.0, 0.0)], near=None)
+ducks = lobby.Spawn(f"teams of {PER_TEAM}", duck_spots, near=SPOT_NEAR)
 
 
 class Referee(py_trees.behaviour.Behaviour):
@@ -316,7 +278,7 @@ class Referee(py_trees.behaviour.Behaviour):
         self.last = why
         self.quiet_until = t + COOLDOWN
         self.out_since = None
-        lobby.reset_world()                     # the kick-off again
+        lobby.reset(the_pitch.names + ducks.names)  # the kick-off again: the ball and the ducks only
         self.landing = (t, 0)
         kickoff["placing"] = True
 
@@ -370,7 +332,8 @@ class Referee(py_trees.behaviour.Behaviour):
 
 
 root = py_trees.composites.Sequence("Duck football", memory=True, children=[
-    Teams(),
+    the_pitch,
+    ducks,
     py_trees.composites.Parallel(
         "Play",
         policy=py_trees.common.ParallelPolicy.SuccessOnAll(),
