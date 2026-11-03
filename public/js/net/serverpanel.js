@@ -104,20 +104,20 @@ export class ServerPanel {
     this.online = online;
     this.deploy = {};
     this.launching = false;
-    this.log = null;      // the last Binder launch: [phase, message] lines
+    this.error = null;    // why the last Binder launch failed
     this.failed = false;  // the last launch failed (an automatic one shows the button again)
     this.render();
     if (online) online.onclick = () => this.launch(this.deploy.binder);
-    if (!server && BINDER_LAUNCH) loadDeploy().then((d) => {
+    if (BINDER_LAUNCH) loadDeploy().then((d) => {
       this.deploy = d;
       this.render();
-      if (AUTO_LAUNCH) this.launch(this.binder);
+      if (AUTO_LAUNCH && !server) this.launch(this.binder);
     });
   }
 
   get binder() {
     const b = this.deploy.binder;
-    return BINDER_LAUNCH && b?.hub && b?.repo && !server ? b : null;
+    return BINDER_LAUNCH && b?.hub && b?.repo ? b : null;
   }
 
   render() {
@@ -142,20 +142,22 @@ export class ServerPanel {
 
     const binder = this.binder;
     if (this.online) {
-      this.online.hidden = !binder || (AUTO_LAUNCH && !this.failed);
+      this.online.hidden = !binder || !!server || (AUTO_LAUNCH && !this.failed);
       this.online.disabled = this.launching;
       this.online.querySelector('.label').textContent = this.launching ? 'Starting shared world…' : 'Start shared world';
     }
     if (binder) {
+      // On a server: another shared world, of this page's own.
+      const label = server ? 'Start a new shared world' : 'Start shared world';
       b.append(el('div', { className: 'sub minor', textContent: 'AICOR VRB' }));
-      const start = el('button', { className: 'primary', textContent: this.launching ? 'Starting shared world…' : 'Start shared world',
+      const start = el('button', { className: 'primary', textContent: this.launching ? 'Starting shared world…' : label,
         disabled: this.launching });
       start.onclick = () => this.launch(binder);
-      b.append(el('div', { className: 'hint', textContent:
-        'Takes this scene online with the full asset library, for others to join. Starting takes seconds to a few minutes.' }),
+      b.append(el('div', { className: 'hint', textContent: server
+        ? 'Starts another shared world on AICOR VRB and moves this page to it, with this scene; this one goes on for the others. Starting takes seconds to a few minutes.'
+        : 'Takes this scene online with the full asset library, for others to join. Starting takes seconds to a few minutes.' }),
       el('div', { className: 'bar' }, start));
-      if (this.log) b.append(el('div', { className: 'log' }, ...this.log.map(([phase, msg]) =>
-        el('div', { className: phase === 'failed' ? 'error' : '', textContent: `${phase}${msg ? `: ${msg.trim()}` : ''}` }))));
+      if (this.error) b.append(el('div', { className: 'log' }, el('div', { className: 'error', textContent: `failed: ${this.error}` })));
     }
 
     b.append(el('div', { className: 'sub minor', textContent: 'Join a server' }));
@@ -215,21 +217,22 @@ export class ServerPanel {
     if (!binder || this.launching) return;
     this.launching = true;
     this.failed = false;
-    this.log = [];
+    this.error = null;
     const status = document.getElementById('status');
-    const progress = (phase, message) => {
-      // Build logs come line by line: keep the phases and the last line.
-      if (this.log.at(-1)?.[0] === phase) this.log[this.log.length - 1] = [phase, message];
-      else this.log.push([phase, message]);
-      status.textContent = `starting shared world: ${phase}${message ? ` · ${message.trim()}` : ''}`;
-      if (phase !== 'failed') this.busy(`Starting shared world on AICOR VRB: ${phase}…${message ? `\n${message.trim().slice(0, 160)}` : ''}`);
+    // The phase only: the build log's lines (each phase's message) are not shown.
+    let shown = null;
+    const progress = (phase) => {
+      if (phase === shown) return;
+      shown = phase;
+      status.textContent = `starting shared world: ${phase}…`;
+      this.busy(`Starting shared world on AICOR VRB: ${phase}…`);
       this.render();
     };
-    progress('starting', 'on AICOR VRB');
+    progress('starting');
     try {
       const url = await launchBinder(binder, progress);
       // The scene as it is now (it went on while the session started).
-      progress('ready', 'taking this scene along…');
+      progress('ready');
       const id = await this.app.carryScene?.();
       try {
         if (id) sessionStorage.setItem(CARRY_KEY, id);
@@ -238,8 +241,10 @@ export class ServerPanel {
     } catch (err) {
       this.launching = false;
       this.failed = true;
+      this.error = err.message ?? String(err);
       this.busy(null);
-      progress('failed', err.message ?? String(err));
+      status.textContent = `starting shared world failed: ${this.error}`;
+      this.render();
     }
   }
 }
