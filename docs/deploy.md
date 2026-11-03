@@ -85,7 +85,10 @@ which loads that stage (asked first only if its world has robots already).
 The hub has to answer the page's origin: binder.intel4coro.de sends
 `Access-Control-Allow-Origin: https://yxzhan.github.io` (one origin; several
 need nginx to echo `$http_origin` from a whitelist, with `Vary: Origin`).
-`BINDER_LAUNCH` in `serverpanel.js` switches it off. A Binder session ends
+`BINDER_LAUNCH` in `serverpanel.js` switches it off. `?online` in the page's
+URL starts it as the page opens, without the button (which comes back only if
+the start fails); not with `?local`, and not when a remembered session still
+answers. A page that embeds the lobby, such as cramera's Shared Sim tab, opens it that way. A Binder session ends
 after a while without anyone connected (on mybinder.org about 10 minutes);
 the page then starts locally again.
 

@@ -2036,13 +2036,37 @@ const busyEl = document.getElementById('busy');
 const busyMsg = busyEl.querySelector('.msg');
 let contextLost = false;  // set by App: its message stays
 // `stopped`: nothing more will happen (an error), no spinner.
+// A held message (holdBusy: Start shared world, serverpanel.js) comes back
+// instead of hiding, until it is let go.
+let busyHold = null;
 function setBusy(msg, stopped = false) {
   if (contextLost) return;
+  if (msg == null) msg = busyHold;
   busyEl.hidden = msg == null;
   busyEl.classList.toggle('stopped', stopped);
   if (msg == null) return;
   busyMsg.textContent = msg;
   document.activeElement?.blur?.();  // e.g. the asset filter box
+}
+function holdBusy(msg) {
+  busyHold = msg;
+  setBusy(msg);
+}
+// A spawn sent to the server (network mode): the overlay stays until the
+// world it sends back is built here (buildScenes), its error comes, the
+// connection drops, or SERVER_WAIT passes.
+const SERVER_WAIT = 120e3;
+let serverWait = null;
+function waitForServer(msg) {
+  clearTimeout(serverWait);
+  setBusy(msg);
+  serverWait = setTimeout(serverDone, SERVER_WAIT);
+}
+function serverDone() {
+  if (serverWait == null) return;
+  clearTimeout(serverWait);
+  serverWait = null;
+  setBusy(null);
 }
 window.addEventListener('keydown', (e) => {
   if (busyEl.hidden) return;
@@ -2115,7 +2139,7 @@ try {
   // mjcf_assets/).
   const [assets, recent] = await Promise.all([loadAssets(), loadRecent(), loadPolicyIndex()]);
   app.serverPanel = new ServerPanel(app, document.getElementById('share'),  // the Share panel's lower part
-    { models: assets.length, online: document.getElementById('online') });
+    { models: assets.length, online: document.getElementById('online'), busy: holdBusy });
   new SharePanel(document.getElementById('share'));
 
   // Asset paths (`rel`) are under public/:
@@ -2436,6 +2460,7 @@ try {
     if (app.net) {
       app.net.send('spawn', { rel, label, pos, yaw });
       status.textContent = `spawning ${label} on the server…`;
+      waitForServer(`spawning ${label} on the server…`);
       return;
     }
     busy = true;
@@ -3282,6 +3307,8 @@ try {
         while (scenes.length) await applyScene(scenes.splice(0).at(-1));
       } finally {
         building = busy = false;
+        clearTimeout(serverWait);
+        serverWait = null;
         setBusy(null);
       }
     };
@@ -3326,8 +3353,8 @@ try {
       // Reset by any client: goals set here would drive the robots off again.
       ros: (msg) => app.ros.setHolds(msg.holds),  // whose ROS is held (ros/robot.js)
       reset: (msg) => app.drive.clearGoals(msg.id == null ? robots : robots.filter((r) => r.netId === msg.id)),
-      error: (msg) => { status.textContent = msg.code === 'held' ? `${msg.msg}: not yours to drive` : `server: ${msg.op} failed: ${msg.msg}`; },
-      closed: (retryAt) => offline(retryAt),
+      error: (msg) => { if (msg.op === 'spawn') serverDone(); status.textContent = msg.code === 'held' ? `${msg.msg}: not yours to drive` : `server: ${msg.op} failed: ${msg.msg}`; },
+      closed: (retryAt) => { serverDone(); offline(retryAt); },
       connected: () => offline(null),
     });
     await app.net.opened;

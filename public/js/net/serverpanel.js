@@ -29,6 +29,13 @@ import { mark } from './control.js';
 // Start a server on Binder from the page.
 const BINDER_LAUNCH = true;
 
+// ?online: start it as soon as the page opens in local mode (no click; the
+// toolbar button only comes back if that fails), as a page embedding the
+// lobby asks (cramera's Shared Sim tab). Not with ?local (Go local), and not
+// once a server is connected.
+const pageParams = new URLSearchParams(location.search);
+const AUTO_LAUNCH = pageParams.has('online') && !pageParams.has('local');
+
 // sessionStorage: the id of the stage (My stages) a Go online carries over,
 // for the page once it is on the server.
 const CARRY_KEY = 'mujoco-filament/carry';
@@ -87,17 +94,25 @@ export function launchBinder({ hub, repo, path = 'robot-lobby/' }, progress) {
 export class ServerPanel {
   // `online`: the toolbar's Go online button, shown in local mode when the
   // page knows a Binder repository.
-  constructor(app, root, { models = 0, online = null } = {}) {
+  // `busy(msg)`: the page's full-screen overlay, held while a launch runs
+  // (null lets it go).
+  constructor(app, root, { models = 0, online = null, busy = () => {} } = {}) {
     this.app = app;
+    this.busy = busy;
     this.body = root.querySelector('.server');
     this.models = models;
     this.online = online;
     this.deploy = {};
     this.launching = false;
     this.log = null;      // the last Binder launch: [phase, message] lines
+    this.failed = false;  // the last launch failed (an automatic one shows the button again)
     this.render();
     if (online) online.onclick = () => this.launch(this.deploy.binder);
-    if (!server && BINDER_LAUNCH) loadDeploy().then((d) => { this.deploy = d; this.render(); });
+    if (!server && BINDER_LAUNCH) loadDeploy().then((d) => {
+      this.deploy = d;
+      this.render();
+      if (AUTO_LAUNCH) this.launch(this.binder);
+    });
   }
 
   get binder() {
@@ -127,13 +142,13 @@ export class ServerPanel {
 
     const binder = this.binder;
     if (this.online) {
-      this.online.hidden = !binder;
+      this.online.hidden = !binder || (AUTO_LAUNCH && !this.failed);
       this.online.disabled = this.launching;
-      this.online.querySelector('.label').textContent = this.launching ? 'Starting the shared lobby…' : 'Start a shared lobby on AICOR VRB';
+      this.online.querySelector('.label').textContent = this.launching ? 'Starting shared world…' : 'Start shared world';
     }
     if (binder) {
       b.append(el('div', { className: 'sub minor', textContent: 'AICOR VRB' }));
-      const start = el('button', { className: 'primary', textContent: this.launching ? 'Starting the shared lobby…' : 'Start a shared lobby on AICOR VRB',
+      const start = el('button', { className: 'primary', textContent: this.launching ? 'Starting shared world…' : 'Start shared world',
         disabled: this.launching });
       start.onclick = () => this.launch(binder);
       b.append(el('div', { className: 'hint', textContent:
@@ -199,13 +214,15 @@ export class ServerPanel {
   async launch(binder) {
     if (!binder || this.launching) return;
     this.launching = true;
+    this.failed = false;
     this.log = [];
     const status = document.getElementById('status');
     const progress = (phase, message) => {
       // Build logs come line by line: keep the phases and the last line.
       if (this.log.at(-1)?.[0] === phase) this.log[this.log.length - 1] = [phase, message];
       else this.log.push([phase, message]);
-      status.textContent = `starting the shared lobby: ${phase}${message ? ` · ${message.trim()}` : ''}`;
+      status.textContent = `starting shared world: ${phase}${message ? ` · ${message.trim()}` : ''}`;
+      if (phase !== 'failed') this.busy(`Starting shared world on AICOR VRB: ${phase}…${message ? `\n${message.trim().slice(0, 160)}` : ''}`);
       this.render();
     };
     progress('starting', 'on AICOR VRB');
@@ -220,6 +237,8 @@ export class ServerPanel {
       useServer(url);
     } catch (err) {
       this.launching = false;
+      this.failed = true;
+      this.busy(null);
       progress('failed', err.message ?? String(err));
     }
   }
