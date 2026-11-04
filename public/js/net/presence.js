@@ -2,9 +2,9 @@
 // world only; control.js has the data):
 // Everyone is shown by their mark (control.js: an icon of their kind of
 // device, PC, Mobile, VR or Script, in their color).
-// - a tag over every held robot: its holder's mark and name ("you" for
-//   this page's), fading once the holder has left it alone (it is about to
-//   be let go, or taken over);
+// - a tag over every held robot: its holder's mark and name (this page's
+//   own too), fading once the holder has left it alone (it is about to be
+//   let go, or taken over);
 // - the people row under the toolbar's status: everyone connected, this
 //   page's own name first (click it to rename), a tooltip with each one's
 //   device and robots;
@@ -158,7 +158,7 @@ export class Presence {
         this.tags.set(r.netId, tag);
       }
       seen.add(r.netId);
-      const text = c.mine(r) ? 'you' : h.name;
+      const text = h.name;
       if (tag.lastChild.textContent !== text) tag.lastChild.textContent = text;
       if (tag.dataset.who !== `${h.kind}${h.color}`) {
         tag.dataset.who = `${h.kind}${h.color}`;

@@ -196,7 +196,7 @@ export class ServerPanel {
     b.append(el('label', { className: 'field' }, el('span', { textContent: 'Your name' }), name));
     const tags = el('input', { type: 'checkbox', checked: !!this.app.presence?.showTags });
     tags.onchange = () => this.app.presence?.setTags(tags.checked);
-    b.append(el('label', { className: 'field', title: 'A tag over every robot someone drives: their device and name ("you" for yours)' },
+    b.append(el('label', { className: 'field', title: 'A tag over every robot someone drives: their device and name' },
       el('span', { textContent: 'Tags' }), el('span', {}, tags, ' names over the robots being driven')));
     const robots = this.app.teleop?.controllable() ?? [];
     const list = el('div', { className: 'people' });

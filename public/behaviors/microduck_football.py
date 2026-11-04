@@ -10,7 +10,8 @@
 # a kick started mid-stride does not lift the foot), or walks through it when it cannot get close
 # enough; of the other two the one nearer its own goal defends (between that
 # goal and the ball) and the other supports (behind the ball, to one side).
-# A duck that falls gets back up by itself (velstand). A referee scores goals
+# PLAY: the teams the tree plays, both or one (the other's ducks for people
+# to drive). A duck that falls gets back up by itself (velstand). A referee scores goals
 # and restarts (a Reset of the pitch and the tree's ducks only: the kick-off
 # again) when the ball goes out. Each kick-off (the first one too: the tree
 # starts with one) puts the ball at a random spot of the pitch, clear of the
@@ -24,6 +25,10 @@ import lobby
 
 TEAMS = [("microduck_lavender", +1, "host"), ("microduck", -1, "guest")]  # label (= model), attacks +x / -x, name
 PER_TEAM = 3
+# The teams the tree plays (by name): both, or one, the other's ducks left to people (Teleop panel) or
+# another tree. Either way every duck is spawned and put back on its spot at each kick-off.
+PLAY = {"host", "guest"}           # e.g. {"host"}: the tree plays the host team only
+assert PLAY <= {name for _, _, name in TEAMS}, f"PLAY: teams are {[name for _, _, name in TEAMS]}"
 PITCH = "microduck_football"       # the model spawned when there is no pitch (one anywhere is used),
 PITCH_AT = (0.0, 2.0)              # with its centre spot here (x, y; on the floor)
 # Where the ducks are spawned (pitch frame, for the team attacking +x; the other's are mirrored through
@@ -337,7 +342,8 @@ root = py_trees.composites.Sequence("Duck football", memory=True, children=[
     py_trees.composites.Parallel(
         "Play",
         policy=py_trees.common.ParallelPolicy.SuccessOnAll(),
-        children=[Referee()] + [Player(label, sign, name, i) for label, sign, name in TEAMS for i in range(PER_TEAM)],
+        children=[Referee()] + [Player(label, sign, name, i) for label, sign, name in TEAMS if name in PLAY
+                                for i in range(PER_TEAM)],
     ),
 ]
 )
