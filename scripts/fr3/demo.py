@@ -5,7 +5,7 @@ hand closed and opened with ParallelGripperCommand; prints what the
 controllers report and the joint states at the end of each.
 
     source /opt/ros/jazzy/setup.bash
-    python3 server/ros/fr3/demo.py
+    python3 scripts/fr3/demo.py
 """
 
 import sys

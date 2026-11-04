@@ -12,7 +12,7 @@ profile's `commands`, e.g. a gripper on a tendon), mimics left out.
 
     .venv/bin/python server/ros/mjcf2urdf.py \\
         mjcf_assets/robots/custom/franka_fr3_hand/franka_fr3_hand.xml \\
-        --command fr3_finger_joint1 -o server/ros/fr3/fr3.urdf
+        --command fr3_finger_joint1 -o scripts/fr3/fr3.urdf
 
 Needs a joint's anchor at its body's origin (MJCF joint pos 0), as
 URDF-made models have it; others are reported.

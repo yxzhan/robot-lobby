@@ -7,10 +7,10 @@ and a parallel gripper controller for the hand (ParallelGripperCommand on
 /fr3_gripper/gripper_cmd), and rosbridge for the browser.
 
     source /opt/ros/jazzy/setup.bash
-    ros2 launch server/ros/fr3/fr3_lobby.launch.py      # rosbridge on :9090
+    ros2 launch scripts/fr3/fr3_lobby.launch.py      # rosbridge on :9090
 
 Then in the lobby: spawn Franka FR3 with hand, untick its IK, tick ROS
-(its profile sets the topics; Bridge localhost:9090). server/ros/fr3/demo.py
+(its profile sets the topics; Bridge localhost:9090). scripts/fr3/demo.py
 moves it.
 """
 

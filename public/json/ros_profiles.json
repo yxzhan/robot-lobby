@@ -1,4 +1,11 @@
 {
+  "aicor/garmi/garmi.xml": {
+    "about": "The hands as their finger joints (each finger's opening in m, as the real GARMI's Franka hands report them) driving the tendon actuators; scripts/garmi_lobby_bridge.py turns the rest into the real robot's interface",
+    "commands": {
+      "left_fr3_finger_joint1": { "actuator": "left_gripper", "scale": 6375 },
+      "right_fr3_finger_joint1": { "actuator": "right_gripper", "scale": 6375 }
+    }
+  },
   "custom/franka_fr3_hand/franka_fr3_hand.xml": {
     "about": "As franka_ros2 drives an FR3 with its hand through ros2_control: the lobby is the hardware behind topic_based_ros2_control's default topics (server/ros/fr3: launch, URDF, controllers); robot_state_publisher computes TF from the URDF",
     "prefix": "/",

@@ -102,7 +102,7 @@ makes the lobby the hardware behind
 default topics: joint states on `/robot_joint_states`, commands from
 `/robot_joint_commands` (the hand's `fr3_finger_joint1`, each finger's
 opening in m, driving its actuator), no body TF (robot_state_publisher has
-the URDF), no prefix. `server/ros/fr3/`:
+the URDF), no prefix. `scripts/fr3/`:
 
 - `fr3.urdf`: the kinematic tree with a `<ros2_control>` block on
   `topic_based_ros2_control/TopicBasedSystem` (position commands; position
@@ -121,10 +121,10 @@ the URDF), no prefix. `server/ros/fr3/`:
 
 ```sh
 source /opt/ros/jazzy/setup.bash
-ros2 launch server/ros/fr3/fr3_lobby.launch.py
+ros2 launch scripts/fr3/fr3_lobby.launch.py
 # in the lobby: spawn Franka FR3 with hand; in the ROS panel switch it on
 # (and tick Take over, or untick its IK in the Teleop panel)
-python3 server/ros/fr3/demo.py
+python3 scripts/fr3/demo.py
 ```
 
 Needs (Jazzy) `ros-jazzy-rosbridge-suite`, `ros-jazzy-parallel-gripper-controller`,
