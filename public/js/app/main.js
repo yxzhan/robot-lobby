@@ -206,6 +206,7 @@ const SPAWN_MARKER_RADIUS = 0.25;  // m
 // IK marker colors: x/y/z arrows and rings, the hovered or dragged part.
 const AXIS_COLORS = [[0.9, 0.2, 0.2], [0.25, 0.8, 0.3], [0.25, 0.45, 1]];
 const MARKER_HOT = [1, 0.85, 0.2];
+const LEASH_SLACK = [0.85, 0.85, 0.85], LEASH_TAUT = [1, 0.15, 0.1];  // an IK marker's leash, slack to taut (leash.js)
 // Columns: where a marker part's local x, y, z go, so its +z lies along x, y or z.
 const PART_AXES = [[[0, 1, 0], [0, 0, 1], [1, 0, 0]], [[0, 0, 1], [1, 0, 0], [0, 1, 0]], [[1, 0, 0], [0, 1, 0], [0, 0, 1]]];
 const ORIGIN_AXIS_LENGTH = 0.3, ORIGIN_AXIS_RADIUS = 0.008;  // m
@@ -514,6 +515,21 @@ function makeGeometry(engine, shape, uv = null) {
 // off: the robots' cameras still show them, the window does not.
 export const SCENE = 0x1, OVERLAY = 0x2, HIDDEN = 0x4;
 const NOWHERE = 0x8;  // in no view (a hidden ghost: App.makeGhost)
+
+// A unit cylinder (cylinder(1, 0.5): along z, centered) stretched from p to
+// q at width w, or null when they meet.
+function rodMatrix(p, q, w) {
+  const d = q.map((v, i) => v - p[i]), len = Math.hypot(...d);
+  if (len < 1e-6) return null;
+  const z = d.map((v) => v / len);
+  const a = Math.abs(z[2]) < 0.9 ? [0, 0, 1] : [1, 0, 0];
+  let x = [a[1] * z[2] - a[2] * z[1], a[2] * z[0] - a[0] * z[2], a[0] * z[1] - a[1] * z[0]];
+  const xl = Math.hypot(...x);
+  x = x.map((v) => v / xl);
+  const y = [z[1] * x[2] - z[2] * x[1], z[2] * x[0] - z[0] * x[2], z[0] * x[1] - z[1] * x[0]];
+  const mid = p.map((v, i) => (v + q[i]) / 2);
+  return [...x.map((v) => v * w), 0, ...y.map((v) => v * w), 0, ...z.map((v) => v * len), 0, ...mid, 1];
+}
 
 // A geom part's world transform (Filament's column-major 4x4) on a body at
 // rotation B (row-major 3x3) and position t.
@@ -893,6 +909,17 @@ class App {
       const color = part === 6 ? center : AXIS_COLORS[part % 3];
       return { e, mi, color, shown: null };
     }));
+    // From each IK chain's tip to its marker, while the target is off the
+    // tip (controllers/ik/leash.js): red, the tauter the leash.
+    const leashRod = makeGeometry(engine, cylinder(1, 0.5));
+    this.gizmoLeash = CHAIN_COLORS.map(() => {
+      const mi = this.matLit.createInstance();
+      mi.setFloatParameter('roughness', 0.5);
+      mi.setFloatParameter('metallic', 0.0);
+      const e = makeEntity(engine, leashRod, mi, false, OVERLAY);
+      this.scene.addEntity(e);
+      return { e, mi, shown: null };
+    });
     const spawnMi = this.matLit.createInstance();
     spawnMi.setColor4Parameter('baseColor', Filament.RgbaType.sRGB, [0.2, 0.8, 1, 1]);
     spawnMi.setFloatParameter('roughness', 0.6);
@@ -1604,21 +1631,7 @@ class App {
     const ball = (c, k) => [k, 0, 0, 0, 0, k, 0, 0, 0, 0, k, 0, c[0], c[1], c[2], 1];
     put(this.markers.sel, p && ball(p, r));
     put(this.markers.target, p && q && ball(q, 0.7 * r));
-    let rope = null;
-    if (p && q) {
-      const d = q.map((v, i) => v - p[i]), len = Math.hypot(...d);
-      if (len > 1e-6) {
-        const z = d.map((v) => v / len);
-        const a = Math.abs(z[2]) < 0.9 ? [0, 0, 1] : [1, 0, 0];
-        let x = [a[1] * z[2] - a[2] * z[1], a[2] * z[0] - a[0] * z[2], a[0] * z[1] - a[1] * z[0]];
-        const xl = Math.hypot(...x);
-        x = x.map((v) => v / xl);
-        const y = [z[1] * x[2] - z[2] * x[1], z[2] * x[0] - z[0] * x[2], z[0] * x[1] - z[1] * x[0]];
-        const w = 0.25 * r, mid = p.map((v, i) => (v + q[i]) / 2);
-        rope = [...x.map((v) => v * w), 0, ...y.map((v) => v * w), 0, ...z.map((v) => v * len), 0, ...mid, 1];
-      }
-    }
-    put(this.markers.rope, rope);
+    put(this.markers.rope, p && q ? rodMatrix(p, q, 0.25 * r) : null);
 
     // Goal marker, flat on the floor at its fixed size.
     const goal = this.model ? this.teleop?.goalMarker() : null;
@@ -1642,12 +1655,21 @@ class App {
         const L = PART_AXES[part % 3], R = g.rot, k = g.scale;
         const W = [0, 1, 2].map((c) => [0, 1, 2].map((r) => (R[3 * r] * L[c][0] + R[3 * r + 1] * L[c][1] + R[3 * r + 2] * L[c][2]) * k));
         put(p.e, [...W[0], 0, ...W[1], 0, ...W[2], 0, ...g.pos, 1]);
-        const color = g.hot === part ? MARKER_HOT : p.color;
-        if (p.shown !== color) {
+        // The ball reddens as the leash tightens (out of reach).
+        const taut = part === 6 ? Math.round((g.strain ?? 0) * 10) / 10 : 0;
+        const color = g.hot === part ? MARKER_HOT : taut ? p.color.map((v, c) => v + (LEASH_TAUT[c] - v) * taut) : p.color;
+        const key = color.join();
+        if (p.shown !== key) {
           p.mi.setColor4Parameter('baseColor', Filament.RgbaType.sRGB, [...color, 1]);
-          p.shown = color;
+          p.shown = key;
         }
       });
+      const l = this.gizmoLeash[i], far = g?.tip && Math.hypot(...g.pos.map((v, c) => v - g.tip[c])) > 0.005;
+      put(l.e, far ? rodMatrix(g.tip, g.pos, 0.12 * MARKER.ball * g.scale) : null);
+      if (far) {
+        const k = Math.round((g.strain ?? 0) * 10) / 10, color = LEASH_SLACK.map((v, c) => v + (LEASH_TAUT[c] - v) * k), key = color.join();
+        if (l.shown !== key) { l.mi.setColor4Parameter('baseColor', Filament.RgbaType.sRGB, [...color, 1]); l.shown = key; }
+      }
     });
   }
 

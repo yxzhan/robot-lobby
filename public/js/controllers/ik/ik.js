@@ -587,6 +587,12 @@ export class IkController {
     return t;
   }
 
+  // Where the chain's tip is commanded to be (the leash's other end:
+  // leash.js), or null.
+  leashTip(chain, data) {
+    return chain.error ? null : this.tipFrame(this.commanded(data), chain);
+  }
+
   // Target pose {pos, rot} in the world, or null (for the markers).
   targetPose(chain, data) {
     if (chain.error) return null;

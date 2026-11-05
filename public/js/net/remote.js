@@ -106,6 +106,26 @@ export class RemoteIk {
     return { pos: mulMV(ref.rot, t.pos).map((v, i) => v + ref.pos[i]), rot: mulMM(ref.rot, t.rot) };
   }
 
+  // Where the chain's tip is (the leash's other end: leash.js; measured, as
+  // the server sends the states), or null.
+  leashTip(chain, data) {
+    const m = this.app.model, c = chain.cfg;
+    if (chain.error || !m) return null;
+    const s = c.site ? this.id('mjOBJ_SITE', c.site) : -1;
+    const b = s >= 0 ? m.site_bodyid[s] : this.id('mjOBJ_BODY', c.tip);
+    if (b < 0) return null;
+    const R = Array.from(data.xmat.subarray(9 * b, 9 * b + 9));
+    if (R.every((v) => v === 0)) return null;  // a rebuilt world before the server's first state
+    const o = s >= 0 ? Array.from(m.site_pos.subarray(3 * s, 3 * s + 3)) : c.offset ?? [0, 0, 0];
+    const pos = mulMV(R, o).map((v, i) => v + data.xpos[3 * b + i]);
+    if (s < 0) return { pos, rot: R };
+    const [w, x, y, z] = m.site_quat.subarray(4 * s, 4 * s + 4);
+    const S = [1 - 2 * (y * y + z * z), 2 * (x * y - w * z), 2 * (x * z + w * y),
+      2 * (x * y + w * z), 1 - 2 * (x * x + z * z), 2 * (y * z - w * x),
+      2 * (x * z - w * y), 2 * (y * z + w * x), 1 - 2 * (x * x + y * y)];
+    return { pos, rot: mulMM(R, S) };
+  }
+
   // (Nothing is sent while the reference body's pose is not known.)
   setTargetPose(chain, data, { pos, rot }) {
     const ref = this.refFrame(chain, data);
