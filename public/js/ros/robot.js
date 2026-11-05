@@ -57,6 +57,8 @@
 //             driven by that actuator (ctrl = position * scale + offset;
 //             e.g. a gripper on a tendon), beside those with actuators on
 //             their joints
+//   real      {robot}: a real robot can follow it (real.js: real_robot/'s
+//             bridge, its --robot name)
 //   cameras   {camera: {topic, frame}}: its topic namespace (…/image_raw,
 //             …/camera_info) and optical frame, as the real driver names
 //             them (a RealSense: camera/camera/color, camera_color_optical_frame)
@@ -70,6 +72,7 @@
 // server's states while a robot is on here (NetClient.wantDynamics).
 
 import { RosBridge } from './bridge.js';
+import { RealLink } from './real.js';
 import { every } from '../app/ticker.js';
 
 const WORLD_STORE = 'robot-lobby/ros-world';
@@ -359,6 +362,7 @@ export class RosRobot {
     this.unsub = {};            // setting key -> its unsubscribe
     this.camTopics = new Set(); // camera topics advertised
     this.encoding = new Set();  // keys of cameras with a frame being encoded
+    this.real = new RealLink(this);  // a real robot following this one (real.js; profiles with `real`)
   }
 
   // The bridge address it uses: its own, else the world's default.
@@ -419,6 +423,7 @@ export class RosRobot {
   detach() {
     const b = this.bridge;
     if (!b) return;
+    this.real.detach();
     for (const off of Object.values(this.unsub)) off();
     this.unsub = {};
     this.topics = {};
@@ -458,6 +463,7 @@ export class RosRobot {
     // Camera topics: advertised again as frames come (publishCamera).
     for (const topic of this.camTopics) b.unadvertise(topic, this);
     this.camTopics.clear();
+    this.real.sync();
   }
 
   // ---- the world as ROS sees it ----

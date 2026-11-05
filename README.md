@@ -85,6 +85,7 @@ The model library is `mjcf_assets/` next to `package.json`
 - [Policies](docs/policies.md) — GR00T (G1), Playground (Spot, Go2), Microduck
 - [Mobile bases](docs/mobile-bases.md) and [IK chains](docs/ik.md)
 - [ROS bridge](docs/ros.md) — the ROS panel: joint states, TF, commands, cameras over rosbridge
+- [Real robots](real_robot/README.md) — a real Panda (later SO-101) follows the lobby robot: teleop from the Quest 3, the real robot as a ghost
 - [Cameras](docs/cameras.md) — the robots' cameras
 - [Rendering](docs/rendering.md) — the Render panel, textures, materials
 - [VR and AR](docs/vr.md) — WebXR controllers and menu

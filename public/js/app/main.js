@@ -513,6 +513,19 @@ function makeGeometry(engine, shape, uv = null) {
 // the robots' own geoms move to HIDDEN while the Render panel's Visual is
 // off: the robots' cameras still show them, the window does not.
 export const SCENE = 0x1, OVERLAY = 0x2, HIDDEN = 0x4;
+const NOWHERE = 0x8;  // in no view (a hidden ghost: App.makeGhost)
+
+// A geom part's world transform (Filament's column-major 4x4) on a body at
+// rotation B (row-major 3x3) and position t.
+function partMatrix(B, t, part) {
+  const G = part.rot, q = part.pos;
+  const R = new Array(9);
+  for (let r = 0; r < 3; r++) {
+    for (let c = 0; c < 3; c++) R[3 * r + c] = B[3 * r] * G[c] + B[3 * r + 1] * G[3 + c] + B[3 * r + 2] * G[6 + c];
+  }
+  const p = [0, 1, 2].map((r) => t[r] + B[3 * r] * q[0] + B[3 * r + 1] * q[1] + B[3 * r + 2] * q[2]);
+  return [R[0], R[3], R[6], 0, R[1], R[4], R[7], 0, R[2], R[5], R[8], 0, p[0], p[1], p[2], 1];
+}
 
 function makeEntity(engine, geo, matInstance, castShadows = true, layer = SCENE, primitive = Filament.RenderableManager$PrimitiveType.TRIANGLES, receiveShadows = true) {
   const entity = Filament.EntityManager.get().create();
@@ -1673,16 +1686,8 @@ class App {
           B = xmat.subarray(9 * b, 9 * b + 9);
           t = xpos.subarray(3 * b, 3 * b + 3);
         }
-        const G = part.rot, q = part.pos;
-        const R = new Array(9);
-        for (let r = 0; r < 3; r++) {
-          for (let c = 0; c < 3; c++) R[3 * r + c] = B[3 * r] * G[c] + B[3 * r + 1] * G[3 + c] + B[3 * r + 2] * G[6 + c];
-        }
-        const p = [0, 1, 2].map((r) => t[r] + B[3 * r] * q[0] + B[3 * r + 1] * q[1] + B[3 * r + 2] * q[2]);
-        // Row-major 3x3 -> Filament's column-major 4x4.
-        const m = [R[0], R[3], R[6], 0, R[1], R[4], R[7], 0, R[2], R[5], R[8], 0, p[0], p[1], p[2], 1];
         const inst = tcm.getInstance(entities[i]);
-        tcm.setTransform(inst, m);
+        tcm.setTransform(inst, partMatrix(B, t, part));
         inst.delete();
       }
       // The debug overlays: lines in their body's frame.
@@ -1699,6 +1704,74 @@ class App {
         inst.delete();
       }
     }
+  }
+
+  // A see-through copy of `robot` on OVERLAY (the window and WebXR views,
+  // not the robots' cameras): its visual's geometry with materials of its
+  // own, posed by poseGhost at other joint positions than the robot's (the
+  // real robot's: ros/real.js). freeGhost gives it back.
+  makeGhost(robot, rgba = [0.3, 0.8, 1, 0.35]) {
+    const parts = robot.visual.parts, mis = [];
+    const entities = parts.map((p) => {
+      const mi = this.matTransparent.createInstance();
+      mi.setFloatParameter('roughness', 0.6);
+      mi.setFloatParameter('metallic', 0);
+      mis.push(mi);
+      const e = makeEntity(this.engine, p, mi, false, NOWHERE, undefined, false);
+      this.scene.addEntity(e);
+      return e;
+    });
+    const g = { robot, parts, entities, mis, model: null, data: null, shown: false };
+    this.ghostColor(g, rgba);
+    return g;
+  }
+
+  ghostColor(g, rgba) {
+    for (const mi of g.mis) mi.setColor4Parameter('baseColor', Filament.RgbaType.sRGB, rgba);
+  }
+
+  // The ghost where the robot is but for `qpos` ([address, value] pairs of
+  // the world's qpos), or hidden (qpos null).
+  poseGhost(g, qpos) {
+    const { mujoco, model, data } = this;
+    const show = !!(qpos && model && data);
+    if (show !== g.shown) {
+      const rcm = this.engine.getRenderableManager();
+      for (const e of g.entities) {
+        const inst = rcm.getInstance(e);
+        rcm.setLayerMask(inst, 0xff, show ? OVERLAY : NOWHERE);
+        inst.delete();
+      }
+      g.shown = show;
+    }
+    if (!show) return;
+    if (g.model !== model) {
+      g.data?.delete();
+      g.data = new mujoco.MjData(model);
+      g.model = model;
+    }
+    const d = g.data;
+    d.qpos.set(data.qpos);
+    for (const [adr, v] of qpos) d.qpos[adr] = v;
+    mujoco.mj_kinematics(model, d);
+    const { pos, yaw = 0, bodyOffset } = g.robot, tcm = this.engine.getTransformManager();
+    const c = Math.cos(yaw), s = Math.sin(yaw), Rz = [c, -s, 0, s, c, 0, 0, 0, 1];
+    g.parts.forEach((part, i) => {
+      const b = bodyOffset + part.body - 1;
+      const B = part.body > 0 ? d.xmat.subarray(9 * b, 9 * b + 9) : Rz, t = part.body > 0 ? d.xpos.subarray(3 * b, 3 * b + 3) : pos;
+      const inst = tcm.getInstance(g.entities[i]);
+      tcm.setTransform(inst, partMatrix(B, t, part));
+      inst.delete();
+    });
+  }
+
+  freeGhost(g) {
+    this.removeEntities(g.entities);
+    for (const mi of g.mis) this.engine.destroyMaterialInstance(mi);
+    g.data?.delete();
+    g.entities = [];
+    g.mis = [];
+    g.data = null;
   }
 
   // Sim time follows wall time at the Physics panel's speed from now on:

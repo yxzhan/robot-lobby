@@ -173,6 +173,7 @@ export class RosPanel {
     det.append(el('div', { className: 'bar' },
       el('span', { className: 'note', title: prof.about ?? '', textContent: Object.keys(prof).length ? `ROS profile of ${rr.key} (json/ros_profiles.json)${named.length ? `: ${named.join(', ')} named as on the real robot` : ''}` : 'no ROS profile for this model' }),
       this.button('Defaults', 'This robot\'s settings back to the defaults (the profile\'s, if it has one)', () => { rr.restoreDefaults(); this.render(); })));
+    if (rr.real.available) this.renderReal(det, rr);
     const topic = (k, label, title) => {
       const box = el('input', { type: 'checkbox', checked: s[k].on });
       const name = el('input', { type: 'text', value: s[k].topic, spellcheck: false });
@@ -209,6 +210,36 @@ export class RosPanel {
     } });
     det.append(counts);
     return det;
+  }
+
+  // A real robot following this one (real.js): its bridge's state, Enable
+  // (after a sync), Disable, Sync, the ghost.
+  renderReal(det, rr) {
+    const real = rr.real, name = rr.profile.real.robot;
+    det.append(el('div', { className: 'minor', textContent: 'Real robot' }));
+    const state = el('span', { className: 'ros-state' });
+    const note = el('div', { className: 'note warn' });
+    const enable = this.button('Enable', 'Puts this robot where the real one is, then the real one follows it', () => { real.enable(); });
+    const disable = this.button('Disable', 'The real robot holds where it is', () => { real.disable(); });
+    const sync = this.button('Sync', 'Puts this robot where the real one is (its joints, the IK\'s targets)', () => { real.note = real.syncToReal(); });
+    const ghost = el('input', { type: 'checkbox', checked: real.ghostOn });
+    ghost.onchange = () => real.setGhost(ghost.checked);
+    det.append(el('div', { className: 'bar' }, state, enable, disable, sync));
+    det.append(this.field('Ghost', 'The real robot as a see-through copy: blue disabled, green following, red in a fault',
+      el('label', { className: 'inline' }, ghost, el('span', { textContent: 'show the real robot' }))));
+    det.append(note);
+    det.append(el('div', { className: 'hint', textContent: `On the robot's computer: python -m real_robot --robot ${name} --prefix ${rr.ns() || '/'}; `
+      + 'this robot\'s bridge its address (host:9090). The real robot is the physical E-stop\'s: keep it at hand.' }));
+    this.views.push({ update: () => {
+      const st = real.state, cls = { none: 'off', disabled: 'connecting', enabled: 'connected', fault: 'error' }[st];
+      this.setState(state, cls, real.text());
+      enable.disabled = !real.live || st === 'enabled';
+      disable.disabled = !real.live || st === 'disabled';
+      sync.disabled = !real.fresh || st === 'enabled';
+      const text = real.note;
+      if (note.textContent !== text) note.textContent = text;
+      note.hidden = !text;
+    } });
   }
 
   // Cameras: JPEG or raw, and which of the robot's go out (those switched

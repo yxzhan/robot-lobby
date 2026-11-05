@@ -369,11 +369,32 @@ export class XrControls {
       items: [
         { label: 'Reset TCP', disabled: () => !this.ik(),
           action: () => { this.ik()?.targets.clear(); return true; } },  // every IK target back on its tip
+        ...this.realItems(),
         { label: 'Quality', menu: () => this.qualityMenu() },
         { label: 'FPS', info: true, value: () => (app.xr?.fps ? app.xr.fps.toFixed(0) : '…') },
         { label: 'Close', action: () => true },
       ],
     };
+  }
+
+  // The driven robot's real robot (ros/real.js), when its model can have one.
+  realItems() {
+    const r = this.app.teleop.active, rr = r && this.app.ros.robot(r);
+    const real = rr?.real;
+    if (!real?.available) return [];
+    return [{
+      label: 'Real robot', value: () => real.state === 'none' ? 'no bridge' : real.state,
+      menu: () => ({
+        title: 'Real robot',
+        items: () => [
+          { label: 'ROS', checked: () => rr.on, action: () => { rr.setOn(!rr.on); } },
+          { label: 'State', info: true, value: () => real.text().slice(0, 34) },
+          { label: 'Enable', disabled: () => !real.live || real.state === 'enabled', action: () => { real.enable(); } },
+          { label: 'Disable', disabled: () => !real.live || real.state === 'disabled', action: () => { real.disable(); } },
+          { label: 'Ghost', checked: () => real.ghostOn, action: () => { real.setGhost(!real.ghostOn); } },
+        ],
+      }),
+    }];
   }
 
   qualityMenu() {
