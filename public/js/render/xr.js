@@ -6,8 +6,9 @@
 //                   controller while held, moved as the hand moves and turned
 //                   as it turns, about its own center; let go and grab again
 //                   to go on (a clutch). Both hands can hold one chain each.
-//                   Out of reach the target stops at its leash's end, the
-//                   controller rumbling (controllers/ik/leash.js).
+//                   Out of reach the target stays on a soft leash, the
+//                   controller rumbling; let go, it goes back onto the tip
+//                   (controllers/ik/leash.js).
 //   A (right, held) on any body under the ray: pulls it with the selection
 //                   spring (Perturb, like Shift+drag on the desktop), held at
 //                   the end of the ray as on a stick. (Not on the grip: just
@@ -55,7 +56,7 @@
 
 import { BALL } from '../app/marker.js';
 import { XrMenu } from './xrmenu.js';
-import { leashed, strain } from '../controllers/ik/leash.js';
+import { leashed, snapToTip, strain } from '../controllers/ik/leash.js';
 
 const RUMBLE_MS = 80;           // a rumble pulse while a held marker is at its leash's end
 const NEAR = 0.08;             // m: hand-to-marker distance that grabs it without the ray
@@ -519,8 +520,8 @@ export class XrControls {
       if (g.hand && !h.palm) return;  // the stuck hand out of sight: the marker stays
       if (g.lost) Object.assign(g, { lost: false, c0: h.grip.pos, R0: h.grip.rot });  // ... and back: taken up again from where the hand is now
       // The hand's motion since the last frame, added to where the target is
-      // (leashed: out of reach it stops at the leash's end, and comes back
-      // at once when the hand does: leash.js).
+      // (leashed: out of reach it stays near the tip, and comes back at once
+      // when the hand does: leash.js).
       const at = g.ik.targetPose(g.chain, app.data);
       if (!at) return;
       const turn = mulMBt(h.grip.rot, g.R0);  // grip rotation since the last frame
@@ -570,7 +571,10 @@ export class XrControls {
   release(h) {
     const g = h.grab;
     h.grab = null;
-    if (g?.kind === 'ik') this.app.teleop.held.delete(g.index);
+    if (g?.kind === 'ik') {
+      this.app.teleop.held.delete(g.index);
+      if (g.ik === this.ik()) snapToTip(g.ik, g.chain, this.app.data);  // the marker back onto the tip
+    }
     if (g?.kind === 'body') this.app.perturb.end();
   }
 

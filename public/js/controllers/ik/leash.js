@@ -1,18 +1,26 @@
 // The leash between an IK chain's tip and its target, for targets set by
-// hand (a marker dragged with the mouse, held in VR): never more than
-// LEASH_POS / LEASH_ROT from where the chain's tip is commanded to be. A
-// target out of reach stops at the leash's end, moving along it as the hand
-// goes on, and comes back the moment the hand does (no stretch to take up
-// first); the arm is never pulled taut towards a singular, fully stretched
-// pose by a target far away. Targets set by programs (behaviour trees) are
-// not leashed.
+// hand (a marker dragged with the mouse, held in VR): a soft one. Up to KNEE
+// of its length the target goes where the hand puts it; beyond, the hand's
+// motion counts less and less, the target never getting further than
+// LEASH_POS / LEASH_ROT from where the tip is commanded to be. A target out
+// of reach so stays near the arm, moving along as the hand goes on, and
+// comes back the moment the hand does (no stretch to take up first); the arm
+// is never pulled taut towards a singular, fully stretched pose by a target
+// far away. Let go, the target goes back onto the tip (snapToTip). Targets
+// set by programs (behaviour trees) are not leashed.
 //
-// strain(): how taut the leash is, 0 (slack) .. 1 (at its end), for the
-// marker's color and the controller's rumble.
+// strain(): how taut the leash is, 0 (slack, within KNEE) .. 1 (at its end),
+// for the marker's color and the controller's rumble.
 
-export const LEASH_POS = 0.05;              // m
-export const LEASH_ROT = 15 * Math.PI / 180; // rad
-const SLACK = 0.4;                          // of the leash: tracking lag, not strain
+export const LEASH_POS = 0.15;              // m
+export const LEASH_ROT = 35 * Math.PI / 180; // rad
+const KNEE = 0.5;                           // of the leash: free up to here, then softer and softer
+
+// An offset d along a leash of length L, softened past the knee.
+function soft(d, L) {
+  const k = KNEE * L;
+  return d <= k ? d : k + (L - k) * Math.tanh((d - k) / (L - k));
+}
 
 // Rotation matrix (row-major 3x3) helpers.
 const mulMM = (A, B) => [0, 3, 6].flatMap((r) => [0, 1, 2].map((c) => A[r] * B[c] + A[r + 1] * B[3 + c] + A[r + 2] * B[6 + c]));
@@ -61,14 +69,14 @@ export function offset(tip, pose) {
   return [dp, dr];
 }
 
-// `pose` ({pos, rot}, world) kept within the leash of `tip`.
+// `pose` ({pos, rot}, world) on the soft leash from `tip`.
 export function leashed(tip, pose) {
   if (!tip) return pose;
-  const d = pose.pos.map((v, i) => v - tip.pos[i]), dp = Math.hypot(...d);
-  const pos = dp > LEASH_POS ? tip.pos.map((v, i) => v + (d[i] * LEASH_POS) / dp) : pose.pos;
+  const d = pose.pos.map((v, i) => v - tip.pos[i]), dp = Math.hypot(...d), sp = soft(dp, LEASH_POS);
+  const pos = sp < dp ? tip.pos.map((v, i) => v + (d[i] * sp) / dp) : pose.pos;
   const rot0 = orthonormal(pose.rot);
-  const w = rotVec(mulMT(rot0, tip.rot)), dr = Math.hypot(...w);  // R_pose R_tipᵀ
-  const rot = dr > LEASH_ROT ? mulMM(expRot(w.map((v) => (v * LEASH_ROT) / dr)), tip.rot) : rot0;
+  const w = rotVec(mulMT(rot0, tip.rot)), dr = Math.hypot(...w), sr = soft(dr, LEASH_ROT);  // R_pose R_tipᵀ
+  const rot = sr < dr ? mulMM(expRot(w.map((v) => (v * sr) / dr)), tip.rot) : rot0;
   return { pos, rot };
 }
 
@@ -77,5 +85,11 @@ export function strain(tip, pose) {
   if (!tip || !pose) return 0;
   const [dp, dr] = offset(tip, pose);
   const k = Math.max(dp / LEASH_POS, dr / LEASH_ROT);
-  return Math.min(1, Math.max(0, (k - SLACK) / (1 - SLACK)));
+  return Math.min(1, Math.max(0, (k - KNEE) / (0.95 - KNEE)));  // (the soft end is only ever approached)
+}
+
+// The chain's target back onto its tip (a marker let go).
+export function snapToTip(ik, chain, data) {
+  const tip = data && ik?.leashTip?.(chain, data);
+  if (tip) ik.setTargetPose(chain, data, tip);
 }

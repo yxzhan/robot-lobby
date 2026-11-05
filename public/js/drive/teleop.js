@@ -32,7 +32,7 @@ import { bodyPose } from './goal.js';
 import { locomotion } from './drive.js';
 import { ACTIONS, BINDINGS, GamepadMap, bindingName, gamepad } from './gamepad.js';
 import { mark } from '../net/control.js';
-import { leashed, strain } from '../controllers/ik/leash.js';
+import { leashed, snapToTip, strain } from '../controllers/ik/leash.js';
 
 // Per held key: [command index (vx, vy, yaw rate), direction, drive speed].
 const DRIVE = {
@@ -585,11 +585,12 @@ export class TeleopPanel {
     if (label && at) label.style.transform = `translate(${at[0] + 14}px, ${at[1] + 10}px)`;
     const pose = dragPose(g, ray);
     const ik = this.active.ik, d = this.app.data;
-    if (pose) ik.setTargetPose(g.chain, d, leashed(ik.leashTip?.(g.chain, d), pose));  // (out of reach: at the leash's end)
+    if (pose) ik.setTargetPose(g.chain, d, leashed(ik.leashTip?.(g.chain, d), pose));  // (out of reach: on the leash)
   }
 
   release() {
     const d = this.dragging;
+    if (d?.chain && this.active?.ik) snapToTip(this.active.ik, d.chain, this.app.data);  // the marker back onto the tip
     // The goal once more as let go: the server may have dropped it as reached meanwhile.
     if (d?.goal && d.robot.goal) this.setGoal(d.robot, d.robot.goal);
     if (d?.goal) this.app.drive.hold(d.robot, false);

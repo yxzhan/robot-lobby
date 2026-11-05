@@ -912,13 +912,16 @@ class App {
     // From each IK chain's tip to its marker, while the target is off the
     // tip (controllers/ik/leash.js): red, the tauter the leash.
     const leashRod = makeGeometry(engine, cylinder(1, 0.5));
+    // A small ball on the tip, where it starts.
+    const tipBall = makeGeometry(engine, roundShape(1, 1, 1));
     this.gizmoLeash = CHAIN_COLORS.map(() => {
       const mi = this.matLit.createInstance();
       mi.setFloatParameter('roughness', 0.5);
       mi.setFloatParameter('metallic', 0.0);
-      const e = makeEntity(engine, leashRod, mi, false, OVERLAY);
+      const e = makeEntity(engine, leashRod, mi, false, OVERLAY), tip = makeEntity(engine, tipBall, mi, false, OVERLAY);
       this.scene.addEntity(e);
-      return { e, mi, shown: null };
+      this.scene.addEntity(tip);
+      return { e, tip, mi, shown: null };
     });
     const spawnMi = this.matLit.createInstance();
     spawnMi.setColor4Parameter('baseColor', Filament.RgbaType.sRGB, [0.2, 0.8, 1, 1]);
@@ -1666,6 +1669,8 @@ class App {
       });
       const l = this.gizmoLeash[i], far = g?.tip && Math.hypot(...g.pos.map((v, c) => v - g.tip[c])) > 0.005;
       put(l.e, far ? rodMatrix(g.tip, g.pos, 0.12 * MARKER.ball * g.scale) : null);
+      const tr = far && 0.35 * MARKER.ball * g.scale;  // the tip's ball
+      put(l.tip, far ? [tr, 0, 0, 0, 0, tr, 0, 0, 0, 0, tr, 0, ...g.tip, 1] : null);
       if (far) {
         const k = Math.round((g.strain ?? 0) * 10) / 10, color = LEASH_SLACK.map((v, c) => v + (LEASH_TAUT[c] - v) * k), key = color.join();
         if (l.shown !== key) { l.mi.setColor4Parameter('baseColor', Filament.RgbaType.sRGB, [...color, 1]); l.shown = key; }
