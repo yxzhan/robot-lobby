@@ -7,12 +7,14 @@
 // index.json lists the files; .py ones are py_trees, .xml XML, the others
 // the text form). Both are listed above the editor, each with its format, the
 // first lines of its leading comment and Open / Run. window.bt does the same from the devtools console:
-//   bt.run('Move all forward=1', 'text')  bt.stop()  bt.status()
+//   bt.run('Move all forward=1', 'text')  bt.stop()  bt.status()  bt.example('follow')
+// ?behavior=<example> runs that example once the page is ready (main.js).
 
 import { IDLE, RUNNING, Runner, parse } from './bt.js';
 import { BtEditor } from './bteditor.js';
 import { PyRunner, checkPython, loadPython } from './pybt.js';
-import { askName } from '../world/stage.js';
+import { askName, linkButton } from '../world/stage.js';
+import { shareUrl } from '../app/endpoint.js';
 
 const el = (tag, props = {}, ...children) => {
   const e = Object.assign(document.createElement(tag), props);
@@ -138,9 +140,9 @@ export class BehaviorPanel {
     });
     this.wantPython();
     this.listTrees();
-    fetch(new URL('index.json', EXAMPLES)).then((r) => r.json())
+    this.examplesLoaded = fetch(new URL('index.json', EXAMPLES)).then((r) => r.json())
       .then((list) => Promise.all(list.map(async ({ name, file }) => [name, {
-        text: await fetch(new URL(file, EXAMPLES)).then((r) => r.text()), format: formatOfFile(file) }])))
+        text: await fetch(new URL(file, EXAMPLES)).then((r) => r.text()), format: formatOfFile(file), file }])))
       .then((entries) => { this.examples = Object.fromEntries(entries); this.listTrees(); })
       .catch((err) => console.warn('behaviour tree examples:', err));
 
@@ -148,11 +150,28 @@ export class BehaviorPanel {
       // confirm(what): asked before the tree removes or resets (the Agent's trees).
       run: (t, format = this.format, { confirm } = {}) => { if (t != null) this.setText(t, format); return this.run({ confirm }); },
       stop: () => this.stop(),
+      example: (key) => this.runExample(key),
       status: () => this.runner && {
         status: this.runner.status, error: this.runner.error, time: this.runner.time,
         nodes: this.runner.rows().map((n) => ({ node: n.text, status: n.status, info: n.info })),
       },
     };
+  }
+
+  // Opens the example `key` (its name, its file or the file without its
+  // extension, in any case: ?behavior=microduck_football) and runs it, as its
+  // Run button does. Resolves with its name, or null when there is none such.
+  async runExample(key) {
+    await this.examplesLoaded;
+    const want = String(key).trim().toLowerCase();
+    const found = Object.entries(this.examples).find(([name, { file }]) =>
+      [name, file, file.replace(/\.[^.]+$/, '')].some((k) => k.toLowerCase() === want));
+    if (!found) return null;
+    const [name, tree] = found;
+    this.setText(tree.text, tree.format);
+    this.listTrees('ex:' + name);
+    await this.run();
+    return name;
   }
 
   setText(t, format = this.format) {
@@ -216,6 +235,18 @@ export class BehaviorPanel {
     const runButton = el('button', { type: 'button', className: 'run', textContent: 'Run', title: 'Put it in the editor and run it' });
     runButton.onclick = () => { open(); this.run(); };
     buttons.append(openButton, runButton);
+    if (id.startsWith('ex:')) {
+      // A link that runs it (?behavior=, its file without the extension), on
+      // this page's server, or the embedding page's (endpoint.js shareUrl), as
+      // a stage's Link does; a tree of My trees is in this browser only.
+      // Its tooltip is the link, a click copies it (stage.js linkButton).
+      buttons.append(linkButton(el('button', { type: 'button', textContent: 'Link' }), () => {
+        const u = new URL(shareUrl());
+        u.hash = '';
+        u.searchParams.set('behavior', tree.file.replace(/\.[^.]+$/, ''));
+        return u.href;
+      }));
+    }
     if (id.startsWith('my:')) {
       const del = el('button', { type: 'button', className: 'remove', textContent: 'Delete', title: 'Forget this saved tree' });
       del.onclick = () => this.remove(name);

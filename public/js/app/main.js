@@ -3138,7 +3138,7 @@ try {
   new ResizeObserver(room).observe(rightViews);
   addEventListener('resize', room);
   // Which are open is kept in the browser ({panel id: open}); the first
-  // time, the left ones (index.html: the right ones start hidden).
+  // time, the asset library (index.html: the others start hidden).
   const toggles = [...document.querySelectorAll('.views button')].map((b) => [b, document.getElementById(b.dataset.panel)]);
   let opened = {};
   try { opened = JSON.parse(localStorage.getItem(PANELS_KEY)) ?? {}; } catch { /* none */ }
@@ -3161,6 +3161,14 @@ try {
       showPanel(panel, on);
       keepOpen();
     };
+  }
+  // A link to a stage (?stage) opens the Stage panel, one to a behaviour
+  // tree example (?behavior) the Behavior panel: for this visit, not kept.
+  for (const id of ['stage', 'behavior']) {
+    const panel = document.getElementById(id);
+    if (!new URLSearchParams(location.search).has(id) || !panel.hidden) continue;
+    if (narrow.matches) for (const [, p] of toggles) if (p !== panel && !p.hidden) showPanel(p, false);
+    showPanel(panel, true);
   }
   // A panel opened from another one's link (Teleop <-> ROS), showing robot r.
   app.openPanel = (id, r) => {
@@ -3447,6 +3455,19 @@ try {
   }
   app.frame();
   app.watchVisibility();
+  // ?behavior=<example>: that behaviour tree example runs now that the page is
+  // ready (btpanel.js runExample: its name or file). Once, like ?stage: the
+  // parameter goes, or every page a link is shared with would start it again.
+  const behavior = new URLSearchParams(location.search).get('behavior');
+  if (behavior) {
+    const u = new URL(location.href);
+    u.searchParams.delete('behavior');
+    history.replaceState(null, '', u);  // not again on reload
+    publishUrl();
+    app.behavior.runExample(behavior)
+      .then((name) => { status.textContent = name ? `running the behaviour "${name}"` : `no behaviour example ${behavior}`; })
+      .catch((err) => { status.textContent = `could not run the behaviour ${behavior}: ${err.message ?? err}`; console.error(err); });
+  }
 } catch (err) {
   status.textContent = `error: ${err.message ?? err}`;
   setBusy(`error: ${err.message ?? err}`, true);

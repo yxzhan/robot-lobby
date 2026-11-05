@@ -380,6 +380,41 @@ export function pickBundle() {
 
 const SHOWN = 20;  // stages listed, the newest
 
+// Copies `text` to the clipboard without a dialog: the Clipboard API, else
+// (a page over plain http, where there is none) a hidden text field's copy.
+// Resolves with whether it was copied.
+export async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch { /* below */ }
+  const field = Object.assign(document.createElement('textarea'), { value: text, readOnly: true });
+  field.style.cssText = 'position: fixed; top: 0; left: 0; opacity: 0; pointer-events: none';
+  document.body.append(field);
+  field.select();
+  let copied = false;
+  try { copied = document.execCommand('copy'); } catch { /* not copied */ }
+  field.remove();
+  return copied;
+}
+
+// Makes `b` a Link button: hovering shows the link `url()` (made as the
+// pointer comes, so on the page's address of now), a click copies it.
+export function linkButton(b, url) {
+  const label = b.textContent;
+  const show = () => { b.title = url(); };
+  show();
+  b.addEventListener('pointerenter', show);
+  b.addEventListener('focus', show);
+  b.onclick = async () => {
+    const link = url();
+    b.title = link;
+    b.textContent = (await copyText(link)) ? 'Copied' : 'Copy failed';
+    setTimeout(() => { b.textContent = label; }, 1500);
+  };
+  return b;
+}
+
 // A list of stages in the Stage panel (Mine, Community): a row each with
 // its thumbnail, name, author, when and how many items, and Load / Publish /
 // Download / Link / Delete. `actions`: {load(entry), publish(entry) (left
@@ -428,13 +463,8 @@ export class StageList {
       button('Load', 'Replace what is spawned with this stage', () => this.actions.load(e));
       if (this.actions.publish) button('Publish', 'Share this stage with everyone on this server (Community)', () => this.actions.publish(e));
       button('Download', 'Save this stage as a file (Import takes it, in either mode)', () => this.actions.download(e));
-      const link = this.actions.link(e);
-      if (link) {
-        const b = button('Link', 'Copy a link that opens this stage', async () => {
-          try { await navigator.clipboard.writeText(link); b.textContent = 'Copied'; } catch { prompt('Link to this stage:', link); }
-          setTimeout(() => { b.textContent = 'Link'; }, 1500);
-        });
-      }
+      // Link: its tooltip is the link, a click copies it.
+      if (this.actions.link(e)) linkButton(button('Link', '', null), () => this.actions.link(e));
       if (e.deletable) button('✕', 'Delete this stage', () => this.actions.remove(e)).className = 'remove';
       info.append(name, meta, buttons);
       row.append(img, info);

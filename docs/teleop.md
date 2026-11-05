@@ -110,7 +110,14 @@ Goals can also come from a script, for several robots at once:
   in its `index.json`) or a saved tree in the editor; **Save** keeps the
   editor's tree in the browser under a name (My trees), **Delete** forgets
   one. The full reference is at the top of `bt.js`; from the console
-  `bt.run(text)`, `bt.stop()`, `bt.status()`.
+  `bt.run(text)`, `bt.stop()`, `bt.status()`, `bt.example(name)`.
+  `?behavior=<example>` in the URL runs that example once the page is ready,
+  as its Run button does: its name in `index.json`, its file or the file
+  without its extension, in any case (`?local&behavior=microduck_football`).
+  Like `?stage`, the parameter leaves the address once used, so a reload or a
+  link shared on does not start the tree again.
+  An example's **Link** copies such a link (on this page's server, as a
+  stage's Link does); hovering it shows the link.
   The tree runs in the page that started it (in network mode too).
 
   The panel's first menu says what the editor holds: a **py_trees**
