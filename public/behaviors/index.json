@@ -2,7 +2,7 @@
  {"name": "microduck_football", "file": "microduck_football.py" },
  {"name": "g1_transport", "file": "g1_transport.py" },
  {"name": "Tracy pours water (py_trees, IK, both arms)", "file": "tracy_pick.py" },
- {"name": "Swap places", "file": "swap_places.bt" },
+ {"name": "All forward 5 m", "file": "all_forward_5m.bt" },
  {"name": "Follow (py_trees)", "file": "follow.py" },
  {"name": "Patrol (py_trees)", "file": "patrol.py" },
  {"name": "Microduck skills test (py_trees)", "file": "microduck_skills.py" }

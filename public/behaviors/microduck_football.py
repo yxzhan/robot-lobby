@@ -16,7 +16,8 @@
 # again) when the ball goes out. Each kick-off (the first one too: the tree
 # starts with one) puts the ball at a random spot of the pitch, clear of the
 # ducks, which start on their spots (the Reset itself puts the ball back on
-# the centre spot).
+# the centre spot). The tree first sets the simulation to SPEED times real
+# time (the Physics panel's speed: the steps run twice as fast).
 import math
 import random
 import py_trees
@@ -25,6 +26,7 @@ import lobby
 
 TEAMS = [("microduck_lavender", +1, "host"), ("microduck", -1, "guest")]  # label (= model), attacks +x / -x, name
 PER_TEAM = 3
+SPEED = 2                          # x real time: the Physics panel's speed the tree sets as it starts
 # The teams the tree plays (by name): both, or one, the other's ducks left to people (Teleop panel) or
 # another tree. Either way every duck is spawned and put back on its spot at each kick-off.
 PLAY = {"host", "guest"}           # e.g. {"host"}: the tree plays the host team only
@@ -336,7 +338,19 @@ class Referee(py_trees.behaviour.Behaviour):
         return Status.RUNNING
 
 
+class Speed(py_trees.behaviour.Behaviour):
+    """The Physics panel's speed set to SPEED (simulated s per wall s), once."""
+
+    def __init__(self):
+        super().__init__(f"speed x{SPEED:g}")
+
+    def update(self):
+        lobby.physics(speed=SPEED)
+        return Status.SUCCESS
+
+
 root = py_trees.composites.Sequence("Duck football", memory=True, children=[
+    Speed(),
     the_pitch,
     ducks,
     py_trees.composites.Parallel(
