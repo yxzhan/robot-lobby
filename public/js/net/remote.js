@@ -126,10 +126,10 @@ export class RemoteIk {
     return { pos, rot: mulMM(R, S) };
   }
 
-  // A marker let go: the server puts its target onto where the tip is
-  // commanded to be (only it knows: ahead of the measured tip while
-  // moving); meanwhile the marker waits on the measured tip, until the
-  // server's next status brings the target.
+  // A marker let go: the server stops the arm where it is (its joints
+  // commanded to where they are, the target on the tip there); meanwhile
+  // the marker waits on the measured tip, until the server's next status
+  // brings the target.
   snapTarget(chain, data) {
     const tip = this.tipPose(chain, data), ref = this.refFrame(chain, data);
     if (tip && ref) this.remote.set(chain.cfg.name, { pos: mulTV(ref.rot, tip.pos.map((v, i) => v - ref.pos[i])), rot: mulTM(ref.rot, tip.rot) });

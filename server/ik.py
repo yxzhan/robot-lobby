@@ -547,8 +547,11 @@ class IkController:
     t['pos'], t['rot'] = np.asarray(pos, float), np.asarray(rot, float)
 
   def snap_target(self, chain, data):
-    """A marker let go: its target onto where the tip is commanded to be (ahead
-    of the measured tip while moving), so the arm stops where it is going."""
+    """A marker let go: the arm stops where it is. Its joints are commanded to
+    where they are now (not on to where the IK had them going, ahead while
+    moving) and the target goes onto the tip there."""
+    for dof in chain['active']:
+      self.set_value(dof, data, sum(jj['c'] * float(data.qpos[jj['qadr']]) for jj in dof['joints']))
     s = self.commanded(data)
     t = self.target(chain, data, s)
     tp, tr = self.tip_frame(s, chain)

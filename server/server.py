@@ -39,7 +39,7 @@ Protocol (client -> server, JSON {op, ...}; `rid` asks for a reply):
   it; a timed one for `duration` s instead of its own
   goal {goal: {x, y, yaw} or null} (the robot drives there: goal.py)
   ik_config {config}   ik_target {chain, pos, rot} (in the chain's ref body
-  frame)   ik_snap_target {chain} (a marker let go: onto the commanded tip)
+  frame)   ik_snap_target {chain} (a marker let go: the arm stops there)
   ik_reset_target {chain or null}   ik_gripper {chain, amount?}
   (amount: 0 open … 1 closed, or a list of them by gripper actuator; none:
   toggle)   ik_save   ik_defaults

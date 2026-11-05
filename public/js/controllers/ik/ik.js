@@ -592,11 +592,13 @@ export class IkController {
     return chain.error ? null : this.tipFrame(data, chain);
   }
 
-  // A marker let go: its target onto where the tip is commanded to be (ahead
-  // of the measured tip while moving), so the arm stops where it is going,
-  // not back where it was.
+  // A marker let go: the arm stops where it is. Its joints are commanded to
+  // where they are now (not on to where the IK had them going, ahead while
+  // moving) and the target goes onto the tip there.
   snapTarget(chain, data) {
-    if (!chain.error) this.setTargetPose(chain, data, this.tipFrame(this.commanded(data), chain));
+    if (chain.error) return;
+    for (const dof of chain.active) this.setValue(dof, data, dof.joints.reduce((v, { qadr, c }) => v + c * data.qpos[qadr], 0));
+    this.setTargetPose(chain, data, this.tipFrame(this.commanded(data), chain));
   }
 
   // Target pose {pos, rot} in the world, or null (for the markers).
