@@ -16,6 +16,8 @@
 // With a server every data file (json/assets.json, thumbnails, mjcf_assets/,
 // pretrained_policies/) comes from it: dataUrl.
 
+import { outward } from './embed.js';
+
 const STORE = 'mujoco-filament/server';
 
 const params = new URLSearchParams(location.search);
@@ -114,5 +116,6 @@ export function useServer(url) {
   location.href = url ? pageUrl({ server: url }) : pageUrl({ local: '1' });
 }
 
-// A link to this page on the current server, for someone else to join.
-export const shareUrl = () => (server?.remote ? pageUrl({ server: server.url }) : location.href);
+// A link to this page on the current server, for someone else to join (the
+// embedding page's, when embedded: embed.js).
+export const shareUrl = () => outward(server?.remote ? pageUrl({ server: server.url }) : location.href);

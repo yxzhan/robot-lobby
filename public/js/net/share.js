@@ -13,6 +13,7 @@
 // just this page, where the other device gets a world of its own.
 
 import { server, shareUrl } from '../app/endpoint.js';
+import { outward } from '../app/embed.js';
 
 const TOKEN_PARAM = 'token';
 const TOKEN_KEY = 'robot-lobby/session-token';  // sessionStorage
@@ -35,7 +36,7 @@ function shareTarget(token) {
   const url = new URL(location.href);
   url.hash = '';
   if (token && server) url.searchParams.set(TOKEN_PARAM, token);
-  return url.href;
+  return outward(url.href);
 }
 
 // Why the link may not work on another device, or null.

@@ -52,6 +52,7 @@ import Stats from '../../vendor/stats/Stats.js';
 import { NET_MUJOCO, NetClient, loadRender, worldData, worldModel } from '../net/net.js';
 import { Recorder } from '../world/recorder.js';
 import { dataUrl, problem, server, shareUrl } from './endpoint.js';
+import { publishUrl } from './embed.js';
 import { BrowserStages, LibraryStages, STAGE_VERSION, ServerStages, StageList, applyState, askStage, blobToDataUrl, captureState, downloadBundle, newId, pickBundle, setView, viewOf, withParts } from '../world/stage.js';
 import { RemoteBase, RemoteIk, RemotePolicy } from '../net/remote.js';
 
@@ -3402,6 +3403,7 @@ try {
       const u = new URL(location.href);
       u.searchParams.delete('stage');
       history.replaceState(null, '', u);  // not again on reload
+      publishUrl();  // the embedding page drops it too
     }
   } else {
     await rebuild([]);
