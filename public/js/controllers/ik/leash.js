@@ -27,8 +27,9 @@ export function strain(tip, pose) {
   return Math.min(1, Math.max(0, k));
 }
 
-// A marker let go: the arm stops where it is, the target on its tip
-// (IkController.snapTarget, RemoteIk's on the server).
+// The chain's target back onto its tip (a marker let go): where the tip is
+// commanded to be, so the arm does not turn back (IkController.snapTarget,
+// RemoteIk's on the server).
 export function snapToTip(ik, chain, data) {
   if (data && !chain.error) ik?.snapTarget?.(chain, data);
 }
