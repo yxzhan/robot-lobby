@@ -42,6 +42,10 @@
   },
   "mujoco_menagerie/robotstudio_so101/so101.xml": {
     "about": "A real SO-101 can follow it (python -m real_robot --robot so101; its driver is still to be written: real_robot/drivers/so101.py)",
-    "real": { "robot": "so101" }
+    "real": { "robot": "so101" },
+    "settings": {
+      "cmdVel": { "on": false },
+      "camera": { "on": false }
+    }
   }
 }
