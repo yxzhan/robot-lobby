@@ -206,7 +206,7 @@ const SPAWN_MARKER_RADIUS = 0.25;  // m
 // IK marker colors: x/y/z arrows and rings, the hovered or dragged part.
 const AXIS_COLORS = [[0.9, 0.2, 0.2], [0.25, 0.8, 0.3], [0.25, 0.45, 1]];
 const MARKER_HOT = [1, 0.85, 0.2];
-const LEASH_SLACK = [0.85, 0.85, 0.85], LEASH_TAUT = [1, 0.15, 0.1];  // an IK marker's leash, slack to taut (leash.js)
+const LEASH_SLACK = [0.85, 0.85, 0.85], LEASH_TAUT = [1, 0.15, 0.1];  // an IK marker's rope from its tip, slack to taut (leash.js)
 // Columns: where a marker part's local x, y, z go, so its +z lies along x, y or z.
 const PART_AXES = [[[0, 1, 0], [0, 0, 1], [1, 0, 0]], [[0, 0, 1], [1, 0, 0], [0, 1, 0]], [[1, 0, 0], [0, 1, 0], [0, 0, 1]]];
 const ORIGIN_AXIS_LENGTH = 0.3, ORIGIN_AXIS_RADIUS = 0.008;  // m
@@ -910,7 +910,7 @@ class App {
       return { e, mi, color, shown: null };
     }));
     // From each IK chain's tip to its marker, while the target is off the
-    // tip (controllers/ik/leash.js): red, the tauter the leash.
+    // tip (controllers/ik/leash.js): red, the further the tip is behind.
     const leashRod = makeGeometry(engine, cylinder(1, 0.5));
     // A small ball on the tip, where it starts.
     const tipBall = makeGeometry(engine, roundShape(1, 1, 1));
@@ -1658,7 +1658,7 @@ class App {
         const L = PART_AXES[part % 3], R = g.rot, k = g.scale;
         const W = [0, 1, 2].map((c) => [0, 1, 2].map((r) => (R[3 * r] * L[c][0] + R[3 * r + 1] * L[c][1] + R[3 * r + 2] * L[c][2]) * k));
         put(p.e, [...W[0], 0, ...W[1], 0, ...W[2], 0, ...g.pos, 1]);
-        // The ball reddens as the leash tightens (out of reach).
+        // The ball reddens the further the tip is behind (out of reach).
         const taut = part === 6 ? Math.round((g.strain ?? 0) * 10) / 10 : 0;
         const color = g.hot === part ? MARKER_HOT : taut ? p.color.map((v, c) => v + (LEASH_TAUT[c] - v) * taut) : p.color;
         const key = color.join();

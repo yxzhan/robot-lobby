@@ -32,7 +32,7 @@ import { bodyPose } from './goal.js';
 import { locomotion } from './drive.js';
 import { ACTIONS, BINDINGS, GamepadMap, bindingName, gamepad } from './gamepad.js';
 import { mark } from '../net/control.js';
-import { leashed, snapToTip, strain } from '../controllers/ik/leash.js';
+import { snapToTip, strain } from '../controllers/ik/leash.js';
 
 // Per held key: [command index (vx, vy, yaw rate), direction, drive speed].
 const DRIVE = {
@@ -414,7 +414,7 @@ export class TeleopPanel {
   // ---- IK target markers (marker.js, drawn by App.syncMarkers) ----
 
   // The driven robot's IK targets, by chain: {pos, rot, scale, hot, tip,
-  // strain} (tip, strain: the leash's start and how taut it is, leash.js; hot:
+  // strain} (tip, strain: the rope's start and how taut it is, leash.js; hot:
   // the marker part hovered or dragged), or null for a broken chain.
   gizmos() {
     const ik = this.active?.use?.ik && this.active.ik;
@@ -425,7 +425,7 @@ export class TeleopPanel {
       if (!pose) return null;
       const hot = this.held.has(i) ? this.held.get(i)
         : g ? (g.index === i ? g.part : -1) : (this.hover?.index === i ? this.hover.part : -1);
-      const tip = ik.leashTip?.(c, this.app.data);  // (the leash: how taut, where it starts)
+      const tip = ik.leashTip?.(c, this.app.data);  // (the rope from the tip: where it starts, how taut: leash.js)
       return { ...pose, scale: markerScale(), hot, tip: tip?.pos ?? null, strain: strain(tip, pose) };
     });
   }
@@ -584,8 +584,7 @@ export class TeleopPanel {
     const label = this.wheelGrip?.ghost;  // the gripper's (wheelGripper): along
     if (label && at) label.style.transform = `translate(${at[0] + 14}px, ${at[1] + 10}px)`;
     const pose = dragPose(g, ray);
-    const ik = this.active.ik, d = this.app.data;
-    if (pose) ik.setTargetPose(g.chain, d, leashed(ik.leashTip?.(g.chain, d), pose));  // (out of reach: on the leash)
+    if (pose) this.active.ik.setTargetPose(g.chain, this.app.data, pose);
   }
 
   release() {

@@ -6,9 +6,9 @@
 //                   controller while held, moved as the hand moves and turned
 //                   as it turns, about its own center; let go and grab again
 //                   to go on (a clutch). Both hands can hold one chain each.
-//                   Out of reach the target stays on a soft leash, the
-//                   controller rumbling; let go, it goes back onto the tip
-//                   (controllers/ik/leash.js).
+//                   Out of reach the arm stops where it gets to, the
+//                   controller rumbling; let go, the marker goes back onto
+//                   the tip (controllers/ik/leash.js).
 //   A (right, held) on any body under the ray: pulls it with the selection
 //                   spring (Perturb, like Shift+drag on the desktop), held at
 //                   the end of the ray as on a stick. (Not on the grip: just
@@ -56,7 +56,7 @@
 
 import { BALL } from '../app/marker.js';
 import { XrMenu } from './xrmenu.js';
-import { leashed, snapToTip, strain } from '../controllers/ik/leash.js';
+import { snapToTip, strain } from '../controllers/ik/leash.js';
 
 const RUMBLE_MS = 80;           // a rumble pulse while a held marker is at its leash's end
 const NEAR = 0.08;             // m: hand-to-marker distance that grabs it without the ray
@@ -473,7 +473,7 @@ export class XrControls {
     if (target) {
       ik.focus = index;
       app.teleop.held.set(index, BALL);
-      h.grab = { kind: 'ik', ik, chain, index, c0: h.grip.pos, R0: h.grip.rot, hand: !!h.palm };  // c0, R0: the grip last frame
+      h.grab = { kind: 'ik', ik, chain, index, c0: h.grip.pos, R0: h.grip.rot, p0: target.pos, T0: target.rot, hand: !!h.palm };
     }
   }
 
@@ -499,8 +499,8 @@ export class XrControls {
     if (this.app.teleop.dragging?.goal) this.app.teleop.release();
   }
 
-  // The controller rumbles while the marker it holds pulls at its leash
-  // (out of reach: leash.js), the harder the tauter.
+  // The controller rumbles while the arm is behind the marker it holds
+  // (out of reach: leash.js), the harder the further.
   rumble(h, k) {
     const now = performance.now();
     if (!h.haptic || k <= 0 || now - (h.rumbleAt ?? 0) < RUMBLE_MS) return;
@@ -518,20 +518,16 @@ export class XrControls {
     if (g?.kind === 'ik') {
       if (g.ik !== this.ik() || !app.data) { this.release(h); return; }
       if (g.hand && !h.palm) return;  // the stuck hand out of sight: the marker stays
-      if (g.lost) Object.assign(g, { lost: false, c0: h.grip.pos, R0: h.grip.rot });  // ... and back: taken up again from where the hand is now
-      // The hand's motion since the last frame, added to where the target is
-      // (leashed: out of reach it stays near the tip, and comes back at once
-      // when the hand does: leash.js).
-      const at = g.ik.targetPose(g.chain, app.data);
-      if (!at) return;
-      const turn = mulMBt(h.grip.rot, g.R0);  // grip rotation since the last frame
-      const want = { pos: add(at.pos, sub(h.grip.pos, g.c0)), rot: mulMM(turn, at.rot) };
-      g.c0 = h.grip.pos;
-      g.R0 = h.grip.rot;
+      if (g.lost) {  // ... and back: taken up again from where the hand is now
+        const now = g.ik.targetPose(g.chain, app.data);
+        if (!now) return;
+        Object.assign(g, { lost: false, c0: h.grip.pos, R0: h.grip.rot, p0: now.pos, T0: now.rot });
+      }
+      const turn = mulMBt(h.grip.rot, g.R0);  // grip rotation since the grab
       app.teleop.held.set(g.index, BALL);
-      const tip = g.ik.leashTip?.(g.chain, app.data);
-      g.ik.setTargetPose(g.chain, app.data, leashed(tip, want));
-      this.rumble(h, strain(tip, want));
+      const want = { pos: add(g.p0, sub(h.grip.pos, g.c0)), rot: mulMM(turn, g.T0) };
+      g.ik.setTargetPose(g.chain, app.data, want);
+      this.rumble(h, strain(g.ik.leashTip?.(g.chain, app.data), want));  // the arm behind (out of reach)
       if (g.hand) {
         this.fingers(h, g);
         return;
