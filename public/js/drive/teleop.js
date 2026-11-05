@@ -425,7 +425,7 @@ export class TeleopPanel {
       if (!pose) return null;
       const hot = this.held.has(i) ? this.held.get(i)
         : g ? (g.index === i ? g.part : -1) : (this.hover?.index === i ? this.hover.part : -1);
-      const tip = ik.leashTip?.(c, this.app.data);  // (the rope from the tip: where it starts, how taut: leash.js)
+      const tip = ik.tipPose?.(c, this.app.data);  // (the rope from the tip: where it starts, how taut: leash.js)
       return { ...pose, scale: markerScale(), hot, tip: tip?.pos ?? null, strain: strain(tip, pose) };
     });
   }

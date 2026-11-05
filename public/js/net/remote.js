@@ -106,9 +106,9 @@ export class RemoteIk {
     return { pos: mulMV(ref.rot, t.pos).map((v, i) => v + ref.pos[i]), rot: mulMM(ref.rot, t.rot) };
   }
 
-  // Where the chain's tip is (the leash's other end: leash.js; measured, as
-  // the server sends the states), or null.
-  leashTip(chain, data) {
+  // Where the chain's tip is (measured, as the server sends the states: the
+  // rope's start, leash.js), or null.
+  tipPose(chain, data) {
     const m = this.app.model, c = chain.cfg;
     if (chain.error || !m) return null;
     const s = c.site ? this.id('mjOBJ_SITE', c.site) : -1;
@@ -124,6 +124,17 @@ export class RemoteIk {
       2 * (x * y + w * z), 1 - 2 * (x * x + z * z), 2 * (y * z - w * x),
       2 * (x * z - w * y), 2 * (y * z + w * x), 1 - 2 * (x * x + y * y)];
     return { pos, rot: mulMM(R, S) };
+  }
+
+  // A marker let go: the server puts its target onto where the tip is
+  // commanded to be (only it knows: ahead of the measured tip while
+  // moving); meanwhile the marker waits on the measured tip, until the
+  // server's next status brings the target.
+  snapTarget(chain, data) {
+    const tip = this.tipPose(chain, data), ref = this.refFrame(chain, data);
+    if (tip && ref) this.remote.set(chain.cfg.name, { pos: mulTV(ref.rot, tip.pos.map((v, i) => v - ref.pos[i])), rot: mulTM(ref.rot, tip.rot) });
+    this.setAt.delete(chain.cfg.name);
+    this.send('ik_snap_target', { chain: chain.cfg.name });
   }
 
   // (Nothing is sent while the reference body's pose is not known.)

@@ -527,7 +527,7 @@ export class XrControls {
       app.teleop.held.set(g.index, BALL);
       const want = { pos: add(g.p0, sub(h.grip.pos, g.c0)), rot: mulMM(turn, g.T0) };
       g.ik.setTargetPose(g.chain, app.data, want);
-      this.rumble(h, strain(g.ik.leashTip?.(g.chain, app.data), want));  // the arm behind (out of reach)
+      this.rumble(h, strain(g.ik.tipPose?.(g.chain, app.data), want));  // the arm behind (out of reach)
       if (g.hand) {
         this.fingers(h, g);
         return;

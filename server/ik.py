@@ -546,6 +546,16 @@ class IkController:
     t = self.target(chain, data)
     t['pos'], t['rot'] = np.asarray(pos, float), np.asarray(rot, float)
 
+  def snap_target(self, chain, data):
+    """A marker let go: its target onto where the tip is commanded to be (ahead
+    of the measured tip while moving), so the arm stops where it is going."""
+    s = self.commanded(data)
+    t = self.target(chain, data, s)
+    tp, tr = self.tip_frame(s, chain)
+    rp, rr = self.frame(s, chain['ref'])
+    R = rr.reshape(3, 3)
+    t['pos'], t['rot'] = R.T @ (tp - rp), (R.T @ tr.reshape(3, 3)).reshape(-1)
+
   def toggle_gripper(self, chain, data):
     if not chain['gripper']:
       return

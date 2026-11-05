@@ -39,7 +39,8 @@ Protocol (client -> server, JSON {op, ...}; `rid` asks for a reply):
   it; a timed one for `duration` s instead of its own
   goal {goal: {x, y, yaw} or null} (the robot drives there: goal.py)
   ik_config {config}   ik_target {chain, pos, rot} (in the chain's ref body
-  frame)   ik_reset_target {chain or null}   ik_gripper {chain, amount?}
+  frame)   ik_snap_target {chain} (a marker let go: onto the commanded tip)
+  ik_reset_target {chain or null}   ik_gripper {chain, amount?}
   (amount: 0 open … 1 closed, or a list of them by gripper actuator; none:
   toggle)   ik_save   ik_defaults
   base_config {config}   base_save   base_defaults
@@ -1095,7 +1096,7 @@ class World:
       self.set_perturb(ws, msg)
     elif op == 'ray':
       return self.ray(msg['eye'], msg['dir'])
-    elif op in ('use', 'cmd', 'command', 'skill', 'goal', 'ik_config', 'ik_target', 'ik_reset_target', 'ik_gripper', 'ik_save', 'ik_defaults',
+    elif op in ('use', 'cmd', 'command', 'skill', 'goal', 'ik_config', 'ik_target', 'ik_snap_target', 'ik_reset_target', 'ik_gripper', 'ik_save', 'ik_defaults',
                 'base_config', 'base_save', 'base_defaults'):
       await self.controller_op(ws, op, self.robot(msg['id']), msg)
     else:
@@ -1149,6 +1150,11 @@ class World:
       c = chain()
       if c and not c['error']:
         ik.set_target(c, d, msg['pos'], msg['rot'])
+      return
+    elif op == 'ik_snap_target':
+      c = chain()
+      if c and not c['error']:
+        ik.snap_target(c, d)
       return
     elif op == 'ik_reset_target':
       if msg.get('chain') is None:

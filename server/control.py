@@ -28,7 +28,7 @@ COLORS = ['#4fc3f7', '#ff8a65', '#aed581', '#ba68c8', '#ffd54f', '#4db6ac', '#f0
 NAME = re.compile(r'[<>\n\r\t]')
 
 # Ops on one robot (msg['id']): need its hold, and take a free one.
-ROBOT_OPS = {'use', 'cmd', 'command', 'skill', 'goal', 'ik_config', 'ik_target', 'ik_reset_target', 'ik_gripper',
+ROBOT_OPS = {'use', 'cmd', 'command', 'skill', 'goal', 'ik_config', 'ik_target', 'ik_snap_target', 'ik_reset_target', 'ik_gripper',
              'ik_save', 'ik_defaults', 'base_config', 'base_save', 'base_defaults', 'joint_cmd', 'reset_robot',
              'move', 'place'}
 
