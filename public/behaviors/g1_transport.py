@@ -6,8 +6,8 @@
 # the G1 and the bottles on the counter mixed (each pair of them one of
 # each), one at a time (lobby.Spawn); run again, those it spawned are only
 # reset (back where they were spawned), and nothing else in the world is
-# touched. Then it turns the G1's IK on and the noslip post-pass up (a held
-# bottle creeps less).
+# touched. Then it turns the G1's IK on and sets the physics: no noslip
+# post-pass, the elliptic friction cone.
 #
 # Both hands go up first: the G1's default pose holds its forearms out at
 # table height, and walking up to the table they would sweep a bottle over.
@@ -79,6 +79,7 @@ REACHED, SETTLE = 0.015, 1.5  # m: a move is done this near; or this long (s) af
 RETRIES = 2
 NEAR = 0.12                 # m: a bottle further than this from where it was spawned is not taken
 NOSLIP = 1
+CONE = 'elliptic'
 plan = {"grip": {}, "has": {}, "held": {}}  # robot, bottles [(name, model)] noted by Ready; per hand: gripper, bottle in it, where it sits
 
 
@@ -137,7 +138,7 @@ things = lobby.Spawn("apartment, G1, bottles",
 
 
 class Ready(py_trees.behaviour.Behaviour):
-    """The G1's IK on, noslip up; done once the IK chains and the bottles are in."""
+    """The G1's IK on, the physics set (noslip, cone); done once the IK chains and the bottles are in."""
 
     def __init__(self):
         super().__init__("IK on")
@@ -146,7 +147,7 @@ class Ready(py_trees.behaviour.Behaviour):
         plan["robot"] = things.names[1]
         plan["bottles"] = [(name, model) for name, (model, _, _) in zip(things.names[2:], SPOTS)]
         plan["spots"] = [(x, y) for _, x, y in SPOTS]
-        lobby.physics(noslip_iterations=NOSLIP)
+        lobby.physics(noslip_iterations=NOSLIP, cone=CONE)
         if not lobby.controllers(plan["robot"])["ik"]:
             lobby.set_controller(plan["robot"], "ik", True)
 
