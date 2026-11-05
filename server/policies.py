@@ -424,6 +424,9 @@ class PlaygroundController:
     joints = [find(OBJ.mjOBJ_JOINT, n) for n in s['joints']]
     acts = np.array([find(OBJ.mjOBJ_ACTUATOR, n) for n in s['actuators']])
     feet = np.array([find(OBJ.mjOBJ_GEOM, n) for n in s['feet']], int)
+    # feet_at: [body, offset in its frame] per foot, for models whose foot geoms have no names.
+    self.feet_at = ((np.array([find(OBJ.mjOBJ_BODY, b) for b, _ in s['feet_at']], int),
+                     np.array([o for _, o in s['feet_at']], float)) if s.get('feet_at') else None)
     root = find(OBJ.mjOBJ_BODY, s['root'])
     free = model.body_jntadr[root]
     if free < 0 or model.jnt_type[free] != mujoco.mjtJoint.mjJNT_FREE:
@@ -490,6 +493,12 @@ class PlaygroundController:
     u[lim] = np.clip(u[lim], m.actuator_ctrlrange[a[lim], 0], m.actuator_ctrlrange[a[lim], 1])
     data.ctrl[a] = u
 
+  def feet_world(self, data):
+    if self.feet_at is None:
+      return data.geom_xpos[self.feet]
+    b, o = self.feet_at
+    return data.xpos[b] + np.einsum('nij,nj->ni', data.xmat[b].reshape(-1, 3, 3), o)
+
   def observe(self, data):
     n = len(self.default)
     R = data.xmat[self.root].reshape(3, 3)
@@ -507,7 +516,7 @@ class PlaygroundController:
         'joint_pos': lambda: q - self.default,
         'joint_vel': lambda: data.qvel[self.dofs],
         'qpos_error': lambda: self.error,
-        'feet_pos': lambda: ((data.geom_xpos[self.feet] - data.xpos[self.root]) @ R).ravel(),
+        'feet_pos': lambda: ((self.feet_world(data) - data.xpos[self.root]) @ R).ravel(),
         'last_action': lambda: self.prev_action,
         'command': lambda: np.asarray(self.cmd, float),
     }
@@ -831,6 +840,10 @@ POLICIES = [
      'defaultFor': re.compile(r'(^|/)mujoco_menagerie/unitree_go2/go2\.xml$'),
      'load': load_playground,
      'create': lambda policy, prefix: PlaygroundController(policy, prefix, 'Go2 joystick policy')},
+    {'id': 'playground-anymal-c', 'name': 'Walking · ANYbotics ANYmal C', 'dir': 'playground_anymal_c',
+     'defaultFor': re.compile(r'(^|/)mujoco_menagerie/anybotics_anymal_c/anymal_c\.xml$'),
+     'load': load_playground,
+     'create': lambda policy, prefix: PlaygroundController(policy, prefix, 'ANYmal C joystick policy')},
     {'id': 'microduck-official', 'name': 'Walk + get up, tricks · Microduck (Pollen)', 'dir': 'microduck_official',
      'defaultFor': re.compile(r'(^|/)custom/(microduck(_sky|_graphite|_lavender)?)/\2\.xml$'),  # and its colors
      'load': load_microduck,

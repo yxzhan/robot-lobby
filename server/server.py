@@ -168,13 +168,13 @@ def cpus():
 # environment overrides it (1: none).
 PHYSICS_THREADS = int(os.environ.get('PHYSICS_THREADS') or min(8, cpus()))
 
-# As in the browser (physics.js): MuJoCo's pyramidal cones and impratio 1
-# (elliptic and 10 made friction too strong), noslip off as in MuJoCo and in
+# As in the browser (physics.js): elliptic cones and impratio 1 (impratio 10
+# made friction too strong), noslip off as in MuJoCo and in
 # the policies' training (on, the Microduck's kick did not kick after a
 # first one, and it costs step time; grasping may want it: soft friction creeps).
 PHYSICS_DEFAULTS = {
     'gravity': [0, 0, -9.81], 'wind': [0, 0, 0], 'magnetic': [0, -0.5, 0],
-    'density': 0, 'viscosity': 0, 'impratio': 1, 'cone': 'pyramidal',
+    'density': 0, 'viscosity': 0, 'impratio': 1, 'cone': 'elliptic',
     'noslip_iterations': 0, 'noslip_tolerance': 1e-10,
     'integrator': 'implicitfast', 'solver': 'Newton', 'iterations': 100, 'tolerance': 1e-8,
     'timestep': 0.005,  # s, live
@@ -905,8 +905,29 @@ class World:
         w, qx, qy, qz = q[adr + 3:adr + 7]
         q[adr + 3:adr + 7] = [hw * w - hz * qz, hw * qx - hz * qy, hw * qy + hz * qx, hw * qz + hz * w]
       self.lift_above_floor(model, data, r, q0, nq)
+    self.face_spawn_heading(model, data, r)
     if key and key['ctrl'] is not None:
       data.ctrl[at['ctrl']:at['ctrl'] + nu] = key['ctrl']
+
+  @staticmethod
+  def face_spawn_heading(model, data, r):
+    """A file that turns its free-floating root itself (ANYmal's base: 180
+    degrees): turned about the spawn point to head where it was spawned
+    heading (main.js faceSpawnHeading)."""
+    b = r.body_offset
+    j = model.body_jntadr[b]
+    if model.body_jntnum[b] <= 0 or model.jnt_type[j] != mujoco.mjtJoint.mjJNT_FREE:
+      return
+    q, adr = data.qpos, model.jnt_qposadr[j]
+    w, qx, qy, qz = q[adr + 3:adr + 7]
+    yaw = math.atan2(2 * (w * qz + qx * qy), 1 - 2 * (qy * qy + qz * qz))
+    d = math.atan2(math.sin(r.yaw - yaw), math.cos(r.yaw - yaw))
+    if abs(d) < 1e-3:
+      return
+    c, s, hw, hz = math.cos(d), math.sin(d), math.cos(d / 2), math.sin(d / 2)
+    x, y = q[adr] - r.pos[0], q[adr + 1] - r.pos[1]
+    q[adr], q[adr + 1] = r.pos[0] + c * x - s * y, r.pos[1] + s * x + c * y
+    q[adr + 3:adr + 7] = [hw * w - hz * qz, hw * qx - hz * qy, hw * qy + hz * qx, hw * qz + hz * w]
 
   @staticmethod
   def lift_above_floor(model, data, r, q0, nq):

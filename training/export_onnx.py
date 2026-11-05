@@ -98,6 +98,24 @@ TASKS = {
         'imu': None,  # at the body origin (the training model's imu site)
         'command_range': {'lin_vel_x': [-1.0, 1.0], 'lin_vel_y': [-0.8, 0.8], 'ang_vel_yaw': [-1.0, 1.0]},
     },
+    # Playground's Spot joystick task on the menagerie's anymal_c.xml (envs/anymal.py).
+    'AnymalCJoystickFlatTerrain': {
+        'dir': 'playground_anymal_c',
+        'obs': [
+            ['gyro', 3],
+            ['upvector', 3],
+            ['joint_pos', 12],
+            ['qpos_error', 36],
+            ['feet_pos', 12],        # LF, RF, LH, RH
+            ['last_action', 12],
+            ['command', 3],
+        ],
+        'feet': ['LF_FOOT', 'RF_FOOT', 'LH_FOOT', 'RH_FOOT'],  # named in the training model only:
+        'feet_at': True,  # policy.json gives them as points in the shank bodies instead
+        'root': 'base',
+        'imu': None,  # at the base origin (the training model's imu site)
+        'command_range': {'lin_vel_x': [-1.0, 1.0], 'lin_vel_y': [-0.8, 0.8], 'ang_vel_yaw': [-1.0, 1.0]},
+    },
 }
 
 
@@ -163,7 +181,10 @@ def describe(env, env_cfg, task):
       'imu': task['imu'],
       'joints': joints,
       'actuators': acts,
-      'feet': task['feet'],
+      'feet': [] if task.get('feet_at') else task['feet'],
+      # Feet as points in their bodies (the viewer's model may not name the foot geoms).
+      'feet_at': [[m.body(m.geom_bodyid[m.geom(n).id]).name, [float(v) for v in m.geom_pos[m.geom(n).id]]]
+                  for n in task['feet']] if task.get('feet_at') else None,
       'default_pose': [float(v) for v in env._default_pose],
       'action_scale': env_cfg.action_scale,
       # What the policy's actuators and joints were trained with: a
@@ -201,6 +222,8 @@ class Observer:
     free = m.body_jntadr[self.root]
     self.vadr = m.jnt_dofadr[free]
     self.feet = np.array([m.geom(n).id for n in spec['feet']], int)
+    self.feet_at = ((np.array([m.body(b).id for b, _ in spec['feet_at']], int), np.array([o for _, o in spec['feet_at']]))
+                    if spec.get('feet_at') else None)
     self.act = np.array([m.actuator(n).id for n in spec['actuators']])
     self.default = np.array(spec['default_pose'])
     self.lo, self.hi = np.array(spec['ctrl_range']).T
@@ -219,7 +242,12 @@ class Observer:
     q = d.qpos[self.qadr]
     self.error = np.roll(self.error, n)
     self.error[:n] = q - self.targets
-    feet = (d.geom_xpos[self.feet] - d.xpos[self.root]) @ R  # rows: R^T (p - p0)
+    if self.feet_at is None:
+      fw = d.geom_xpos[self.feet]
+    else:
+      b, o = self.feet_at
+      fw = d.xpos[b] + np.einsum('nij,nj->ni', d.xmat[b].reshape(-1, 3, 3), o)
+    feet = (fw - d.xpos[self.root]) @ R  # rows: R^T (p - p0)
     # Sensors are computed in the forward pass at the start of the last step,
     # as cvel, xpos, xmat and subtree_com are: cvel is the root's angular and
     # linear velocity (world frame) at its tree's center of mass.

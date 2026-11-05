@@ -8,9 +8,10 @@ follows the selection, are the Render panel's: rendering.md):
   impratio, friction cone** go into the world spec's `<option>` at every rebuild and onto
   the live `model.opt`, so they act at once. Wind and fluid drag need a
   medium (density or viscosity > 0).
-  Contacts default to MuJoCo's **pyramidal cone with impratio 1** (in the
-  browser and on the server): an elliptic cone with impratio 10 made friction
-  too strong and costs about 5% more step time. Friction is softer this way,
+  Contacts default to an **elliptic cone with impratio 1** (in the browser
+  and on the server; MuJoCo's own default is pyramidal): the more accurate
+  cone, which the menagerie's legged robots ask for. Impratio 10 on top made
+  friction too strong and costs about 5% more step time. Friction is softer this way,
   and a Panda's fingers let a 100 g box creep out within seconds; for
   grasping, elliptic with impratio 10 holds the box through a lift and a
   swing to within 2 mm.

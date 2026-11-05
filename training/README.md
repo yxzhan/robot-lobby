@@ -18,6 +18,10 @@ uv run check_model.py ../pretrained_policies/playground_spot \
     ../mjcf_assets/robots/mujoco_menagerie/boston_dynamics_spot/spot_arm.xml --arm   # on the viewer's model
 uv run train.py --env Go2JoystickFlatTerrain --name go2   # 200M steps (~9 min)
 uv run export_onnx.py runs/go2            # -> ../pretrained_policies/playground_go2/
+uv run train.py --env AnymalCJoystickFlatTerrain --steps 150_000_000 --name anymal-c   # envs/anymal.py (~8 min)
+uv run export_onnx.py runs/anymal-c       # -> ../pretrained_policies/playground_anymal_c/
+uv run check_model.py ../pretrained_policies/playground_anymal_c \
+    ../mjcf_assets/robots/mujoco_menagerie/anybotics_anymal_c/anymal_c.xml
 cd .. && node scripts/vendor.mjs          # re-index public/policies.json
 ```
 
@@ -30,6 +34,7 @@ marker.
 |---|---|---|
 | `SpotFlatTerrainJoystick` (Playground's, the earlier Spot policy) | 89% fall within 20 s (eval reward peaks at 34 near 23M steps, then drops) | walks straight; on `spot_arm.xml` 36 of 40 `check_model.py` runs fell, on `spot.xml` 7 of 10 |
 | `SpotArmJoystickFlatTerrain` (`envs/spot_arm.py`, 300M steps, sideways ±0.5 m/s) | eval reward 38 | `check_model.py --arm` on `spot_arm.xml`: 5 of 80 runs fell, all but one with random commands every 0.2 s; never walking straight or with the arm in any of its poses under commands every 1 s but twice; `spot.xml`: about as well |
+| `AnymalCJoystickFlatTerrain` (`envs/anymal.py`, 150M steps, Kp 250) | eval reward 39 | `check_model.py` on `anymal_c.xml`: 0.43 m/s for a 0.5 m/s command, 0 of 10 runs fell with commands every 1 s, 2 of 10 every 0.2 s; at Kp 120 it only learnt to stand (reward 28, no foot left the ground) |
 | `Go2JoystickFlatTerrain` (`envs/go2.py`) | 0 of 256 fall in 20 s | no falls with commands changing every 0.2 s; stands for commands below ~0.3 m/s / 0.3 rad/s |
 
 ## Files
@@ -46,6 +51,12 @@ marker.
   Go1's domain randomization (Playground's Spot task has none); pushes on;
   a new command every 1-4 s instead of every 4 s. Go1's task, tried first
   on this robot, only learnt to stand.
+  `anymal.py`: Playground's Spot joystick task (as `spot_arm.py`: Go1's
+  domain randomization, pushes, commands every 1-4 s) on a feet-only model
+  built from the viewer's `anymal_c.xml`, with a home pose of our own (the
+  file has none) and Kp 250 / Kd 4 within the 80 Nm limit. Its foot geoms
+  have no names in `anymal_c.xml`, so `policy.json` gives the feet as
+  `feet_at` (a point in each shank body) instead of `feet`.
   `go2.py`: Playground has no Go2 task, so this is its Go1 joystick task
   (rewards, observation, PPO config, domain randomization) on a Go2 model
   built with MjSpec from the viewer's `go2.xml` (same bodies, inertias,

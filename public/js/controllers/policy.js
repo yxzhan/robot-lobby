@@ -83,6 +83,15 @@ export const POLICIES = [
     create: (weights, prefix) => new PlaygroundController(weights, prefix, 'Go2 joystick policy'),
   },
   {
+    id: 'playground-anymal-c',
+    name: 'Walking · ANYbotics ANYmal C',
+    about: "Walking on flat ground (12 leg joints, 50 Hz): Playground's Spot task on anymal_c.xml (training/envs/anymal.py).",
+    dir: 'playground_anymal_c',  // training/export_onnx.py
+    defaultFor: /(^|\/)mujoco_menagerie\/anybotics_anymal_c\/anymal_c\.xml$/,
+    load: async (file) => loadPlaygroundPolicy(await onnxRuntime(), file),
+    create: (weights, prefix) => new PlaygroundController(weights, prefix, 'ANYmal C joystick policy'),
+  },
+  {
     id: 'microduck-official',
     name: 'Walk + get up, tricks · Microduck (Pollen)',
     about: "Pollen Robotics' published policy set (huggingface.co/pollen-robotics/microduck-policies, Apache-2.0): velstand walks and gets back up by itself after a fall; skills kick with either foot, roll forward, touch the ground, sit, stand.",

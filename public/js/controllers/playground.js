@@ -27,6 +27,8 @@
 //     joint_pos    q - default pose
 //     qpos_error   history_len frames of q - last targets, newest first
 //     feet_pos     the foot geoms' centers relative to the root, root frame
+//                  (or, with feet_at: [[body, [x, y, z]], ...], those points
+//                  in the bodies' frames: for models whose feet have no names)
 //     last_action  the raw action before the last one (Playground updates
 //                  it after building the observation)
 //     command      vx, vy (m/s), yaw rate (rad/s)
@@ -92,6 +94,7 @@ export class PlaygroundController {
     const joints = s.joints.map((n) => id(T.mjOBJ_JOINT, n));
     const acts = s.actuators.map((n) => id(T.mjOBJ_ACTUATOR, n));
     const feet = s.feet.map((n) => id(T.mjOBJ_GEOM, n));
+    this.feetAt = s.feet_at ? s.feet_at.map(([b, o]) => [id(T.mjOBJ_BODY, b), o]) : null;
     const root = id(T.mjOBJ_BODY, s.root);
     const free = model.body_jntadr[root];
     if (free < 0 || model.jnt_type[free] !== 0) throw new Error(`${this.name}: ${this.prefix}${s.root} has no free joint`);
@@ -192,8 +195,10 @@ export class PlaygroundController {
       joint_vel: () => Array.from(this.dofs, (d) => qvel[d]),
       joint_pos: () => q.map((v, i) => v - s.default_pose[i]),
       qpos_error: () => this.error,
-      feet_pos: () => Array.from(this.feet).flatMap((g) => {
-        const d = [0, 1, 2].map((k) => gx[3 * g + k] - p0[k]);
+      feet_pos: () => (this.feetAt ? this.feetAt.map(([b, o]) => [0, 1, 2].map((k) =>
+        xpos[3 * b + k] + xmat[9 * b + 3 * k] * o[0] + xmat[9 * b + 3 * k + 1] * o[1] + xmat[9 * b + 3 * k + 2] * o[2]))
+        : Array.from(this.feet, (g) => [0, 1, 2].map((k) => gx[3 * g + k]))).flatMap((f) => {
+        const d = [0, 1, 2].map((k) => f[k] - p0[k]);
         return [0, 1, 2].map((c) => R[c] * d[0] + R[3 + c] * d[1] + R[6 + c] * d[2]);  // R^T d
       }),
       last_action: () => this.prevAction,

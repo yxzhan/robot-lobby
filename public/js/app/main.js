@@ -2446,8 +2446,26 @@ try {
         }
         liftAboveFloor(data, fresh, q0, nq);
       }
+      faceSpawnHeading(data, fresh);
       if (key?.ctrl?.length === nu) data.ctrl.set(key.ctrl, u0);
       if (fresh.use?.policy) fresh.policy?.pose(data);
+    }
+    // A file can turn its free-floating root itself (ANYmal's base: quat
+    // 0 0 0 1, 180 degrees): turn it about the spawn point so it heads where
+    // the spawn marker pointed, as the goal marker and its policy then see it.
+    function faceSpawnHeading(data, fresh) {
+      const b = fresh.bodyOffset, j = model.body_jntadr[b];
+      if (!(model.body_jntnum[b] > 0) || model.jnt_type[j] !== 0) return;
+      const q = data.qpos, adr = model.jnt_qposadr[j];
+      const [w, qx, qy, qz] = q.subarray(adr + 3, adr + 7);
+      const yaw = Math.atan2(2 * (w * qz + qx * qy), 1 - 2 * (qy * qy + qz * qz));
+      const d = Math.atan2(Math.sin(fresh.yaw - yaw), Math.cos(fresh.yaw - yaw));
+      if (Math.abs(d) < 1e-3) return;
+      const c = Math.cos(d), s = Math.sin(d), hw = Math.cos(d / 2), hz = Math.sin(d / 2);
+      const [x, y] = [q[adr] - fresh.pos[0], q[adr + 1] - fresh.pos[1]];
+      q[adr] = fresh.pos[0] + c * x - s * y;
+      q[adr + 1] = fresh.pos[1] + s * x + c * y;
+      q.set([hw * w - hz * qz, hw * qx - hz * qy, hw * qy + hz * qx, hw * qz + hz * w], adr + 3);
     }
     // Reset returns a robot to its spawn pose.
     for (const r of fresh) {

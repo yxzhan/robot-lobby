@@ -61,7 +61,10 @@ def run(m, spec, sess, commands, seconds, hold=None):
   """Commands: a function of time -> [vx, vy, wz]. `hold`: joint -> angle for
   the actuators the policy does not drive. Returns (fell at, mean speed error)."""
   d = mujoco.MjData(m)
-  mujoco.mj_resetDataKeyframe(m, d, 0)
+  if m.nkey:
+    mujoco.mj_resetDataKeyframe(m, d, 0)
+  else:  # no home key (anymal_c.xml): the file's pose, the legs in the default pose below
+    mujoco.mj_resetData(m, d)
   own = {m.actuator(n).id for n in spec['actuators']}
   for a in range(m.nu):
     if a in own or m.actuator_trntype[a] != 0:

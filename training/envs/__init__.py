@@ -9,15 +9,19 @@ import functools
 from mujoco_playground._src import locomotion
 from mujoco_playground._src.locomotion.go1 import randomize as go1_randomize
 
-from . import go2, spot_arm
+from . import anymal, go2, spot_arm
 
 locomotion.register_environment('Go2JoystickFlatTerrain', functools.partial(go2.Joystick, task='flat_terrain'),
                                 go2.default_config)
 locomotion.register_environment('SpotArmJoystickFlatTerrain', functools.partial(spot_arm.Joystick, task='flat_terrain'),
                                 spot_arm.default_config)
+locomotion.register_environment('AnymalCJoystickFlatTerrain', functools.partial(anymal.Joystick, task='flat_terrain'),
+                                anymal.default_config)
 
-PPO_LIKE = {'Go2JoystickFlatTerrain': 'Go1JoystickFlatTerrain', 'SpotArmJoystickFlatTerrain': 'SpotFlatTerrainJoystick'}
-RANDOMIZERS = {'Go2JoystickFlatTerrain': go1_randomize.domain_randomize}
+PPO_LIKE = {'Go2JoystickFlatTerrain': 'Go1JoystickFlatTerrain', 'SpotArmJoystickFlatTerrain': 'SpotFlatTerrainJoystick',
+            'AnymalCJoystickFlatTerrain': 'SpotFlatTerrainJoystick'}
+RANDOMIZERS = {'Go2JoystickFlatTerrain': go1_randomize.domain_randomize,
+               'AnymalCJoystickFlatTerrain': anymal.domain_randomize}
 
 
 def randomizer(env_name, env_cfg):

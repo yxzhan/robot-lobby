@@ -3,9 +3,10 @@
 // - Global options (MuJoCo <option>): gravity, wind, magnetic field, medium
 //   density and viscosity (both 0: no fluid forces, so wind does nothing),
 //   impratio (frictional-to-normal constraint impedance ratio), friction
-//   cone (pyramidal or elliptic). MuJoCo's pyramidal and 1 by default:
-//   elliptic with impratio 10 made friction too strong (things stick) and
-//   costs more step time; friction is softer this way, though, and held
+//   cone (pyramidal or elliptic). Elliptic with impratio 1 by default (MuJoCo's
+//   own is pyramidal): the more accurate cone, as the menagerie's legged
+//   robots use; impratio 10 on top made friction too strong (things stick)
+//   and costs more step time; friction is softer at 1, though, and held
 //   things can creep (a Panda lets a 100 g box slide out of its fingers in
 //   seconds; elliptic with impratio 10 holds it, swinging, within 2 mm),
 //   so grasping may want those back in the Physics panel. Noslip (a
@@ -54,7 +55,7 @@ export const PHYSICS_DEFAULTS = Object.freeze({
   density: 0,
   viscosity: 0,
   impratio: 1,
-  cone: 'pyramidal',
+  cone: 'elliptic',
   noslip_iterations: 0,
   noslip_tolerance: 1e-10,
   integrator: 'implicitfast',  // the menagerie models' (MuJoCo's own is Euler)
