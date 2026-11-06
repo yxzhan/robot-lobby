@@ -53,6 +53,8 @@ the robot is disabled.
 
 **Keep the physical E-stop at hand.** The software limits do not replace it.
 
+Step by step on the real Panda (both the lobby teleop and the giskard demo, Docker): [TESTING_zh.md](TESTING_zh.md).
+
 ## Options
 
 | option | default | |
@@ -68,9 +70,10 @@ the robot is disabled.
 
 Panda System 4.2.x speaks libfranka **0.9.x**. libfranka ≥ 0.10 and
 franka_ros2 are for the FR3 only. franky publishes wheels per libfranka
-version: install the libfranka 0.9.2 ones from
-<https://github.com/TimSchneider42/franky/releases> (`libfranka_0-9-2_wheels.zip`),
-for example `pip install franky_control-*-cp3XX-*.whl`.
+version (PyPI's are for newer libfranka, the FR3): install a libfranka 0.9.2 one from
+<https://github.com/TimSchneider42/franky/releases>, e.g. v2.0.0's
+`franky_control-2.0.0+libfranka.0.9.2-cp312-cp312-manylinux_2_34_x86_64.whl` (your
+python's `cpXY`; `manylinux_2_28` for glibc < 2.34). The driver works with franky 1.1.x and 2.x.
 Use a PREEMPT_RT kernel, as for any FCI program. In Desk, unlock the brakes
 and activate FCI.
 

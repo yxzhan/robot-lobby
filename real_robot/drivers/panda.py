@@ -77,7 +77,9 @@ class PandaDriver(RobotDriver):
 
   def move(self, q):
     try:
-      self.robot.move(self.franky.JointMotion(list(q)), asynchronous=True)
+      f = self.franky  # franky 2 takes a JointState only, 1.x a list too
+      target = f.JointState(list(q)) if hasattr(f, 'JointState') else list(q)
+      self.robot.move(f.JointMotion(target), asynchronous=True)
     except Exception as e:  # a reflex (collision, limits) ends the running motion with an error
       self.fault = str(e)
 
