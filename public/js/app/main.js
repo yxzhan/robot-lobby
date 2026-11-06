@@ -16,6 +16,7 @@
 import loadMujoco from '../../vendor/mujoco/mujoco.js';
 import { loadModelFiles, readFirst, urlSource } from './vfs.js';
 import { bodyInertia, compileWorld, firstKey, referencedNames } from '../world/world.js';
+import { GROUP as HAND_GROUP, HAND_BODIES, HAND_JOINTS, PARK as HAND_PARK, PREFIX as HAND_PREFIX, SIDES as HAND_SIDES, bodyName as handBodyName } from '../world/hands.js';
 import { CONTROL_DT } from '../controllers/groot.js';
 import { every } from './ticker.js';
 import { POLICIES, defaultPolicy, isInstalled, loadPolicy, loadPolicyIndex, policyById, policyId } from '../controllers/policy.js';
@@ -79,7 +80,7 @@ const OVERLAYS = 'mujoco-filament/overlays';  // localStorage: {visual, collisio
 // the brightness (the eyes' exposure, of the desktop camera's: the headset's
 // displays show the same scene brighter than a monitor).
 const XR_STORE = 'robot-lobby/xr';
-const XR_DEFAULTS = { msaa: 4, scale: 1, shadows: false, brightness: 1 };
+const XR_DEFAULTS = { msaa: 4, scale: 1, shadows: false, brightness: 1, handCollision: true };
 function loadXrSettings() {
   try { return { ...XR_DEFAULTS, ...JSON.parse(localStorage.getItem(XR_STORE) ?? '{}') }; } catch { return { ...XR_DEFAULTS }; }
 }
@@ -1531,13 +1532,46 @@ class App {
     }
     const geom = new mujoco.IntBuffer(1), normal = new mujoco.DoubleBuffer(3);
     try {
-      const dist = mujoco.mj_ray(model, data, eye, dir, null, true, -1, geom, normal);
+      const groups = new Uint8Array(6).fill(1);
+      groups[HAND_GROUP] = 0;  // not your own hands (world/hands.js)
+      const dist = mujoco.mj_ray(model, data, eye, dir, groups, true, -1, geom, normal);
       const g = geom.GetView()[0];
       if (dist < 0 || g < 0) return null;
       return { body: model.geom_bodyid[g], point: eye.map((v, i) => v + dist * dir[i]), normal: [...normal.GetView()] };
     } finally {
       geom.delete();
       normal.delete();
+    }
+  }
+
+  // Your tracked hands' mocap bodies (world/hands.js) in this model:
+  // side -> joint -> mocap index; none in a world without them (network mode).
+  handMocaps() {
+    const { mujoco, model } = this;
+    if (this.handModel === model) return this.handIds;
+    this.handModel = model;
+    this.handIds = null;
+    if (!model || this.net) return null;
+    const ids = {};
+    for (const side of HAND_SIDES) {
+      ids[side] = new Map();
+      for (const j of HAND_JOINTS) {
+        const b = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY.value, HAND_PREFIX + handBodyName(side, j));
+        if (b < 0 || model.body_mocapid[b] < 0) return null;
+        ids[side].set(j, model.body_mocapid[b]);
+      }
+    }
+    return (this.handIds = ids);
+  }
+
+  // Puts a hand's balls on its joints (joint -> {pos}, scene frame), or parks
+  // it (null; joints not tracked are parked too). xr.js, every session frame.
+  setHand(side, joints) {
+    const ids = this.handMocaps()?.[side];
+    if (!ids) return;
+    const on = joints && this.xrSettings.handCollision !== false;
+    for (const [j, m] of ids) {
+      this.data.mocap_pos.set((on && joints.get(j)?.pos) || HAND_PARK, 3 * m);
     }
   }
 
@@ -2471,13 +2505,15 @@ try {
     }
     progress(`compiling ${list.length} robots…`);
     await nextFrame();
-    const model = compileWorld(mujoco, specs, app.physics);
+    const model = compileWorld(mujoco, specs, app.physics, true);  // your hands last (world/hands.js)
     let offset = 1;
     for (const r of list) {
       r.bodyOffset = offset;
       offset += r.visual.inertia.nbody - 1;
     }
+    offset += HAND_BODIES;
     const { total } = stateLayout(list);
+    total.nmocap += HAND_BODIES;
     const mismatch = Object.keys(total).find((k) => total[k] !== model[k]);
     if (offset !== model.nbody || mismatch) {
       const msg = mismatch ? `world has ${mismatch} ${model[mismatch]}, expected ${total[mismatch]}`

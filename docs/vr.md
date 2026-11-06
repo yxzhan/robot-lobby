@@ -72,3 +72,10 @@ controller: its gestures are not read), each pointing the same kind of ray, its 
   **menu** (Y).
 - Otherwise there are no sticks and no pulling bodies: walking the robot,
   snap turns and pulling stay on the controllers.
+- **Your hands collide** with the scene (with the physics in the page; not
+  yet in a shared world): a ball on each of the 25 joints
+  (`public/js/world/hands.js`, mocap bodies after every robot) follows the
+  hand, so you can push, tip over and poke objects and robots. Mocap
+  bodies are not pushed back, so the hands go through what they cannot
+  move, and they cannot hold anything (no grip). Rays pass through them.
+  The menu's **Hand collision** turns it off (kept in this browser).

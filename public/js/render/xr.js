@@ -180,6 +180,7 @@ export class XrControls {
 
   // A hand put down or lost: lets go and hides it.
   lost(h) {
+    this.app.setHand(h.name, null);  // its balls in the physics parked (world/hands.js)
     h.dwell = null;
     h.letGo = null;
     this.cancelTeleport(h);
@@ -221,7 +222,7 @@ export class XrControls {
       h.grip = gripPose ? pose(mul4(S, gripPose.transform.matrix)) : r;
       const pad = src.hand ? this.gestures(h, src.hand, frame, space, viewer) : src.gamepad;
       h.haptic = src.hand ? null : src.gamepad?.hapticActuators?.[0] ?? null;  // (rumble)
-      if (!src.hand) { this.showSkeleton(h, null); h.palm = h.curls = null; }
+      if (!src.hand) { this.showSkeleton(h, null); h.palm = h.curls = null; this.app.setHand(h.name, null); }
       else if (h.palm) h.grip = h.palm;  // a tracked hand holds by the middle of its palm
       const pressed = pad.buttons.map((b) => b.pressed), was = h.buttons;
       const down = (i) => pressed[i] && !was[i], up = (i) => !pressed[i] && was[i];
@@ -272,6 +273,7 @@ export class XrControls {
     const joint = (name) => joints.get(name);
     const wrist = joint('wrist'), thumb = joint('thumb-tip'), index = joint('index-finger-tip');
     const button = (pressed, value = pressed ? 1 : 0) => ({ pressed, value });
+    this.app.setHand(h.name, joints.size ? joints : null);  // its balls in the physics (world/hands.js)
     if (!wrist || !thumb || !index) {
       h.pinched = h.fisted = false;
       h.palm = h.curls = null;
@@ -373,6 +375,8 @@ export class XrControls {
     return {
       title: 'Menu',
       items: [
+        { label: 'Hand collision', checked: () => app.xrSettings.handCollision !== false,
+          action: () => { app.setXrSettings({ handCollision: app.xrSettings.handCollision === false }); } },
         { label: 'Reset TCP', disabled: () => !this.ik(),
           action: () => { this.ik()?.targets.clear(); return true; } },  // every IK target back on its tip
         ...this.realItems(),
