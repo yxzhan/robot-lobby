@@ -52,6 +52,7 @@ drives each robot: keys, gamepad, goals; the Teleop panel), `ros/`,
 In the browser alone (the physics in the page):
 
 ```sh
+scripts/get_assets.sh   # the model library (mjcf_assets/, lite)
 npm install      # postinstall copies the wasm/js runtimes into public/vendor/
 npm start        # python3 scripts/serve.py 4007: public/ with Cache-Control: no-store
 ```
@@ -69,18 +70,10 @@ npm run server   # python3 server/server.py 4007
 Open http://localhost:4007. `?local` in the URL keeps the page local even
 there.
 
-The model library is `mjcf_assets/` next to `package.json`
-(`<category>/<source>/<model>/<model>.xml`), a repository of its own (not in
-this one; about 4.5 GB checked out, mujoco_menagerie a submodule). Get it
-before `npm install`, which indexes it:
-
-```sh
-git clone --recurse-submodules https://gitlab.informatik.uni-bremen.de/yanxiang/mjcf_assets.git mjcf_assets
-git -C mjcf_assets pull --recurse-submodules     # later; then node scripts/vendor.mjs
-```
-
-Run `node scripts/vendor.mjs` again after adding models
-(and `python3 scripts/thumbnails.py` for their thumbnails). Walking policies go in
+The model library is `mjcf_assets/` next to `package.json`, a repository of
+its own: `scripts/get_assets.sh` gets it (`lite`, the default: the models of
+the GitHub Pages site; `main`: all of them) and updates it. Run
+`node scripts/vendor.mjs` after adding models. Walking policies go in
 `pretrained_policies/` ([Policies](docs/policies.md)).
 
 ## Docs

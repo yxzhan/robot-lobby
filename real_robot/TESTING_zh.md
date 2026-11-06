@@ -83,11 +83,7 @@ python3 -m venv .venv && .venv/bin/pip install -e ./real_robot "<上面的 frank
 
 ### 网页
 
-- 模型库 `mjcf_assets/` 是单独的仓库（约 4.5 GB），先 clone 到 `package.json` 旁边：
-  ```bash
-  cd ~/robot-lobby
-  git clone --recurse-submodules https://gitlab.informatik.uni-bremen.de/yanxiang/mjcf_assets.git mjcf_assets
-  ```
+- 先下载模型库：`scripts/get_assets.sh`。默认是 lite 版（约 280 MB），里面有 Panda 和 SO-101。
 - 然后运行：
 
 ```bash
