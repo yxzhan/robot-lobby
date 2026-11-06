@@ -83,7 +83,11 @@ python3 -m venv .venv && .venv/bin/pip install -e ./real_robot "<上面的 frank
 
 ### 网页
 
-- `mjcf_assets/` 不在 git 里，要从开发机拷过去，放在 `package.json` 旁边。
+- 模型库 `mjcf_assets/` 是单独的仓库（约 4.5 GB），先 clone 到 `package.json` 旁边：
+  ```bash
+  cd ~/robot-lobby
+  git clone --recurse-submodules https://gitlab.informatik.uni-bremen.de/yanxiang/mjcf_assets.git mjcf_assets
+  ```
 - 然后运行：
 
 ```bash

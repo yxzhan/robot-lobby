@@ -70,8 +70,17 @@ Open http://localhost:4007. `?local` in the URL keeps the page local even
 there.
 
 The model library is `mjcf_assets/` next to `package.json`
-(`<category>/<source>/<model>/<model>.xml`); `npm install` indexes it, and
-`node scripts/vendor.mjs` again after adding models. Walking policies go in
+(`<category>/<source>/<model>/<model>.xml`), a repository of its own (not in
+this one; about 4.5 GB checked out, mujoco_menagerie a submodule). Get it
+before `npm install`, which indexes it:
+
+```sh
+git clone --recurse-submodules https://gitlab.informatik.uni-bremen.de/yanxiang/mjcf_assets.git mjcf_assets
+git -C mjcf_assets pull --recurse-submodules     # later; then node scripts/vendor.mjs
+```
+
+Run `node scripts/vendor.mjs` again after adding models
+(and `python3 scripts/thumbnails.py` for their thumbnails). Walking policies go in
 `pretrained_policies/` ([Policies](docs/policies.md)).
 
 ## Docs
