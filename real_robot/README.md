@@ -77,6 +77,25 @@ and activate FCI.
 The bridge needs `websockets` (the repo's `.venv` has it). Only the Panda
 driver needs franky.
 
+## ROS 2 (ros2_control, giskardpy)
+
+```bash
+python3 -m real_robot.ros2 --robot panda --driver real --ip 172.16.0.2   # with ROS 2 sourced
+```
+
+The same drivers and safety layer behind ros2_control's `topic_based_ros2_control`: the arm
+velocity commanded (a `forward_velocity_controller`, e.g. giskardpy's
+`universal_robot_velocity`), the velocities integrated into position commands each tick,
+the commanded positions reported back (`<ns>/joint_states`, ns `/panda/hw`), the measured ones
+on `<ns>/measured_joint_states`, the gripper an action (`<ns>/gripper_cmd`,
+`control_msgs/ParallelGripperCommand`), enabled by `<ns>/enable` (`std_srvs/SetBool`) or
+`--enable`. `--driver lobby` drives the lobby's robot over rosbridge instead (its
+`/panda/joint_states`, `/panda/joint_command`): a digital twin to try a program on first.
+See `ros2.py`; ijcai_2026_workshop's `demo/panda_giskard/` runs giskardpy on it.
+
+Run it with the ROS python (`/usr/bin/python3`, rclpy); for `--driver real`, franky installed
+there.
+
 ## Adding a robot (SO-101 next)
 
 1. `drivers/<robot>.py`: a `RobotSpec` (the arm's joints as the lobby
