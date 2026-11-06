@@ -72,13 +72,13 @@ python3 -c "import franky; r = franky.Robot('172.16.0.2'); print(r.state.q)"
 
 ### Franka 电脑要装的东西
 
-- Python 3，加 `websockets` 和上面的 franky。不需要 ROS。
+- Python 3，装上 `real_robot` 包（会自动装上 `websockets`）和上面的 franky。不需要 ROS。
 - 如果 Lobby 网页也放在这台电脑上：Node 18+（`npm install` 时用）。
   - 也可以放在局域网里另一台电脑上。物理仿真在 Quest 的浏览器里跑，`?local` 模式下 Franka 电脑不跑仿真。
 
 ```bash
 cd ~/robot-lobby
-python3 -m venv .venv && .venv/bin/pip install websockets "<上面的 franky wheel>"
+python3 -m venv .venv && .venv/bin/pip install -e ./real_robot "<上面的 franky wheel>"
 ```
 
 ### 网页
@@ -150,26 +150,22 @@ docker compose -f binder/docker-compose.yml build          # 生成镜像 cram-v
 docker run -it --rm --name panda \
   --network host --ipc host \
   --cap-add SYS_NICE --ulimit rtprio=99 --ulimit memlock=-1 \
-  -v ~/robot-lobby:/home/jovyan/robot-lobby \
-  -e LOBBY_DIR=/home/jovyan/robot-lobby \
   cram-vrb-lab:main bash
 ```
 
-进容器后，把 franky 装进 ROS 的 Python（cp312）：
+镜像 build 时已经把 Lobby 的 `real_robot` 包和 franky（libfranka 0.9.2 版本）装进了 ROS 的 Python（`/usr/bin/python3`），见 workshop 的 `binder/Dockerfile`。所以不需要挂载 Lobby 仓库，也不用设 `LOBBY_DIR`。
 
-```bash
-sudo /usr/bin/python3 -m pip install --break-system-packages \
-  "https://github.com/TimSchneider42/franky/releases/download/v2.0.0/franky_control-2.0.0+libfranka.0.9.2-cp312-cp312-manylinux_2_34_x86_64.whl"
-```
+- 想用别的分支或者本地改过的 `real_robot`：build 时传参数 `--build-arg REAL_ROBOT=...`；或者在容器里重新安装：
+  ```bash
+  /usr/bin/python3 -m pip install --user --break-system-packages "<pip 能识别的地址或路径>"
+  ```
 
 几点说明：
 
 - 跑 demo 要用镜像里自带的那份 workshop（`~/ijcai_2026_workshop`，build 时拷进去的，`ros2_ws` 已经编译好），不要把宿主机上的 workshop 挂载进去替换它。改了 demo 就重新 build 一次镜像。
-- 如果 `/usr/bin/python3 -m pip` 提示没有 pip，先运行 `sudo apt-get update && sudo apt-get install -y python3-pip`。
 - `--network host`：容器直接用宿主机的网卡访问 172.16.0.2。libfranka 走 UDP，不要用端口映射。
 - `docker-compose.yml` 里的 GPU 设置和 Jupyter 是给仿真用的，真机测试用不到，直接用上面的 `docker run`。
-- 想省掉每次装 franky：可以写个两行的 Dockerfile `FROM cram-vrb-lab:main` 加上面的 pip 命令，或者用 `docker commit`。
-- 遥操测试 A 也可以在这个容器里跑：先 `pip install websockets`，再执行 `python3 -m real_robot`。
+- 遥操测试 A 也可以在这个容器里跑：直接执行 `python3 -m real_robot`，`websockets` 已经随包装好了。
 
 ### 步骤（在容器里，`cd ~/ijcai_2026_workshop`）
 

@@ -80,6 +80,21 @@ and activate FCI.
 The bridge needs `websockets` (the repo's `.venv` has it). Only the Panda
 driver needs franky.
 
+## As a package
+
+`real_robot/` is a pip package of its own (`pyproject.toml`; `lobby-real-robot`, the
+module `real_robot`), for a computer or an image without the rest of the lobby:
+
+```bash
+pip install "git+https://github.com/yxzhan/robot-lobby@real-robot-bridge#subdirectory=real_robot"
+pip install -e ./real_robot        # from this checkout, editable
+```
+
+It brings `websockets`; not rclpy (`real_robot.ros2`: the ROS python, `/usr/bin/python3
+-m pip install --user --break-system-packages ...`) nor franky (above). ijcai_2026_workshop's
+Panda demo uses it that way. From this repository's root, `python -m real_robot` works
+without installing.
+
 ## ROS 2 (ros2_control, giskardpy)
 
 ```bash
