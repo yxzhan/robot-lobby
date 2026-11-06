@@ -41,6 +41,18 @@
       "finger_joint1": { "actuator": "actuator8", "scale": 6375 }
     }
   },
+  "aicor/franka_emika_panda/franka_emika_panda.xml": {
+    "about": "menagerie's Panda with a stiffer hand (mjcf_assets/robots/aicor/franka_emika_panda/README.md); a real Panda can follow it (python -m real_robot --robot panda: franky on libfranka 0.9.x, for Panda System 4.2.x; real_robot/README.md); the finger joints, each finger's opening in m as the Franka hand reports it, drive the tendon actuator",
+    "prefix": "panda",
+    "real": { "robot": "panda" },
+    "settings": {
+      "cmdVel": { "on": false },
+      "camera": { "on": false }
+    },
+    "commands": {
+      "finger_joint1": { "actuator": "actuator8", "scale": 6375 }
+    }
+  },
   "mujoco_menagerie/robotstudio_so101/so101.xml": {
     "about": "A real SO-101 can follow it (python -m real_robot --robot so101; its driver is still to be written: real_robot/drivers/so101.py)",
     "prefix": "so101",

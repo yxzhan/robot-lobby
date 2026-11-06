@@ -23,7 +23,7 @@ from .base import GripperSpec, RobotDriver, RobotSpec, RobotState
 
 PANDA = RobotSpec(
     name='panda',
-    lobby_key='mujoco_menagerie/franka_emika_panda/panda.xml',
+    lobby_key='aicor/franka_emika_panda/franka_emika_panda.xml',  # (menagerie's panda.xml has the same profile)
     joints=[f'joint{i}' for i in range(1, 8)],
     # Panda datasheet (FER): joint limits and maximum joint speeds.
     lower=[-2.8973, -1.7628, -2.8973, -3.0718, -2.8973, -0.0175, -2.8973],

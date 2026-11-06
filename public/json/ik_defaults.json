@@ -8,6 +8,9 @@
   "mujoco_menagerie/franka_emika_panda/panda.xml": {
     "chains": [{ "name": "hand", "root": "link1", "tip": "hand", "offset": [0, 0, 0.1034], "locked": [], "gripper": "actuator8" }]
   },
+  "aicor/franka_emika_panda/franka_emika_panda.xml": {
+    "chains": [{ "name": "hand", "root": "link1", "tip": "hand", "offset": [0, 0, 0.1034], "locked": [], "gripper": "actuator8" }]
+  },
   "mujoco_menagerie/boston_dynamics_spot/spot_arm.xml": {
     "chains": [
       {
