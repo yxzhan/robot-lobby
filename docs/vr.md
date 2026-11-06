@@ -22,8 +22,10 @@ ends on the menu, the IK marker or the floor it meets:
   with a Back row). **Reset TCP** puts the driven robot's IK targets back
   on its tips; **Quality** sets the headset's **Resolution** (0.6× to 1.5×
   its default framebuffer, at once), **Anti-alias** (MSAA off, 2×, 4×),
-  **Shadows** (the sun's, off by default; these three are kept in this
-  browser) and the scene's **Textures** (as the Render panel); **FPS**
+  **Shadows** (the sun's, off by default), **Brightness** (the eyes'
+  exposure, 100 % down to 25 % of the desktop's: the headset shows the scene
+  brighter than a monitor; these four are kept in this browser) and the
+  scene's **Textures** (as the Render panel); **FPS**
   shows the session's frame rate.
 - **Trigger** while the same hand holds a marker: closes that arm's gripper
   as far as it is pressed (released: open), once pressed at all during the

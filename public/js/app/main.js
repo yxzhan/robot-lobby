@@ -74,10 +74,12 @@ const MAT_LINES = 'materials/unlit_lines.filamat';
 const MAT_REVEAL = { solid: 'materials/lit_reveal.filamat', solidTextured: 'materials/lit_textured_reveal.filamat', wire: 'materials/unlit_reveal_wire.filamat' };
 const OVERLAYS = 'mujoco-filament/overlays';  // localStorage: {visual, collision, frames, joints} shown
 // WebXR settings (the VR menu, xr.js), kept in this browser: MSAA samples of
-// the eyes, the layer's framebuffer scale (1: the headset's default) and the
-// sun's shadows (off by default: they cost a second pass of the scene).
+// the eyes, the layer's framebuffer scale (1: the headset's default), the
+// sun's shadows (off by default: they cost a second pass of the scene) and
+// the brightness (the eyes' exposure, of the desktop camera's: the headset's
+// displays show the same scene brighter than a monitor).
 const XR_STORE = 'robot-lobby/xr';
-const XR_DEFAULTS = { msaa: 4, scale: 1, shadows: false };
+const XR_DEFAULTS = { msaa: 4, scale: 1, shadows: false, brightness: 1 };
 function loadXrSettings() {
   try { return { ...XR_DEFAULTS, ...JSON.parse(localStorage.getItem(XR_STORE) ?? '{}') }; } catch { return { ...XR_DEFAULTS }; }
 }
@@ -1993,8 +1995,15 @@ class App {
     const xr = this.xr;
     if (!xr) return;
     this.shadows();
-    for (const { view } of xr.eyes) this.viewQuality(view, true);
+    for (const { view, camera } of xr.eyes) { this.viewQuality(view, true); this.xrExposure(camera); }
     if (scale) xr.layer = this.xrLayer(xr.session, xr.gl, xr.ar);
+  }
+
+  // An eye's exposure: the desktop camera's, times xrSettings.brightness (the
+  // sensitivity scales the image linearly before tone mapping).
+  xrExposure(camera) {
+    const c = this.camera;
+    camera.setExposure(c.getAperture(), c.getShutterSpeed(), c.getSensitivity() * (this.xrSettings.brightness ?? 1));
   }
   //
   // `ar`: an immersive-ar session (Quest 3's passthrough) instead: no sky and
@@ -2023,6 +2032,7 @@ class App {
       view.setScene(this.scene);
       view.setVisibleLayers(SCENE | OVERLAY, SCENE | OVERLAY);
       this.viewQuality(view, true);
+      this.xrExposure(camera);
       if (ar) view.setBlendMode(Filament.View$BlendMode.TRANSLUCENT);  // keeps the alpha
       return { entity, camera, view };
     });
