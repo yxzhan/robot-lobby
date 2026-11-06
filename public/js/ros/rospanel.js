@@ -228,7 +228,7 @@ export class RosPanel {
     det.append(this.field('Ghost', 'The real robot as a see-through copy: blue disabled, green following, red in a fault',
       el('label', { className: 'inline' }, ghost, el('span', { textContent: 'show the real robot' }))));
     det.append(note);
-    det.append(el('div', { className: 'hint', textContent: `On the robot's computer: python -m real_robot --robot ${name} --prefix ${rr.ns() || '/'}; `
+    det.append(el('div', { className: 'hint', textContent: `On the robot's computer: python -m real_robot --robot ${name}${rr.ns() === name ? '' : ` --prefix ${rr.ns() || '/'}`}; `
       + 'this robot\'s bridge its address (host:9090). The real robot is the physical E-stop\'s: keep it at hand.' }));
     this.views.push({ update: () => {
       const st = real.state, cls = { none: 'off', disabled: 'connecting', enabled: 'connected', fault: 'error' }[st];

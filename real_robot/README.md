@@ -9,10 +9,10 @@ red in a fault.
 ```
 Quest 3 / desktop browser                     the robot's computer
 lobby (physics + IK in the page)   Wi-Fi     python -m real_robot
-  r1/joint_states  ───────────────────────►  safety (limits, speed, timeouts)
-  r1/real/enable   ───────────────────────►      │
-  r1/real/joint_states ◄──────────────────       ▼
-  r1/real/status       ◄──────────────────  driver ──► Panda (franky / libfranka 0.9.x)
+  panda/joint_states  ────────────────────►  safety (limits, speed, timeouts)
+  panda/real/enable   ────────────────────►      │
+  panda/real/joint_states ◄───────────────       ▼
+  panda/real/status       ◄───────────────  driver ──► Panda (franky / libfranka 0.9.x)
                                                     └─► SO-101 (Feetech bus, to do)
 ```
 
@@ -32,8 +32,10 @@ python -m real_robot --robot panda --driver fake          # no hardware: a simul
 In the lobby (the Quest's browser opening `http://<lobby host>:<port>/?local`
 works, because the physics runs in the page):
 
-1. Spawn the Franka Emika Panda. It is `r1` if it is the first robot spawned;
-   otherwise pass `--prefix rN`.
+1. Spawn the Franka Emika Panda. Its ROS profile gives it the prefix `panda`
+   (topics `panda/…`), which the bridge uses by default for `--robot panda`,
+   whatever order things are spawned in. For a second Panda, change its
+   prefix in the ROS panel and pass the same value with `--prefix`.
 2. ROS panel: set **Bridge** to `<robot computer>:9090` and tick the robot.
 3. Under **Real robot**, press **Enable**. This first syncs the lobby robot
    to where the real one is, then the real robot follows. **Disable**

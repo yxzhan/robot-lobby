@@ -1,5 +1,6 @@
 """The lobby's robot as the target of a real one. Topics, under the lobby
-robot's prefix (`ns`, its id r1 unless set in the ROS panel):
+robot's prefix (`ns`: the robot's name, as its ROS profile sets it, e.g.
+panda; changed in the ROS panel for a second one):
 
   <ns>/joint_states       lobby -> here   the lobby robot's joints: the target
   <ns>/real/joint_states  here -> lobby   the real robot's (sensor_msgs/JointState,
@@ -29,9 +30,9 @@ STATUS_S = 0.2  # status at least this often
 
 
 class RealBridge:
-  def __init__(self, driver, server, ns='r1', rate=50.0, state_rate=30.0, speed=0.5, timeout=0.3):
+  def __init__(self, driver, server, ns=None, rate=50.0, state_rate=30.0, speed=0.5, timeout=0.3):
     self.driver, self.spec, self.server = driver, driver.spec, server
-    self.ns = ns.strip('/')
+    self.ns = (self.spec.name if ns is None else ns).strip('/')
     self.rate, self.state_rate = rate, state_rate
     self.safety = Supervisor(self.spec, timeout=timeout, speed=speed)
     self.lock = threading.Lock()

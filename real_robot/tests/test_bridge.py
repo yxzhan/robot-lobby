@@ -35,7 +35,7 @@ def test_supervisor_limits():
 
 def run_bridge():
   server = RosbridgeServer('127.0.0.1', PORT)
-  bridge = RealBridge(drivers.driver('panda', 'fake', start=HOME), server, ns='r1', speed=1.0)
+  bridge = RealBridge(drivers.driver('panda', 'fake', start=HOME), server, speed=1.0)  # (prefix: panda)
   stop = asyncio.Event()
 
   async def main():
@@ -51,7 +51,7 @@ def run_bridge():
 
 async def lobby():
   async with connect(f'ws://127.0.0.1:{PORT}') as ws:
-    for t in ('r1/real/joint_states', 'r1/real/status'):
+    for t in ('panda/real/joint_states', 'panda/real/status'):
       await ws.send(json.dumps({'op': 'subscribe', 'topic': t}))
     names = PANDA.joints + ['finger_joint1', 'finger_joint2']
     real, status = {}, {}
@@ -69,12 +69,12 @@ async def lobby():
       await asyncio.wait_for(go(), timeout)
 
     async def target(q, finger=0.04):
-      await ws.send(json.dumps({'op': 'publish', 'topic': 'r1/joint_states', 'msg': {'name': names, 'position': q + [finger, finger]}}))
+      await ws.send(json.dumps({'op': 'publish', 'topic': 'panda/joint_states', 'msg': {'name': names, 'position': q + [finger, finger]}}))
 
     goal = list(HOME)
     goal[0] = 0.5
     await target(HOME)
-    await ws.send(json.dumps({'op': 'publish', 'topic': 'r1/real/enable', 'msg': {'data': True}}))
+    await ws.send(json.dumps({'op': 'publish', 'topic': 'panda/real/enable', 'msg': {'data': True}}))
     await recv_until(lambda: status.get('state') == 'enabled')
     for _ in range(100):  # 2 s of targets at 50 Hz
       await target(goal, 0.0)
@@ -86,7 +86,7 @@ async def lobby():
     assert abs(real['joint1'] - 0.5) < 1e-3, real
     await recv_until(lambda: real.get('finger_joint1', 1) < 1e-3)  # the hand closed
     await recv_until(lambda: status.get('stale'), 2.0)  # targets stop: it holds
-    await ws.send(json.dumps({'op': 'publish', 'topic': 'r1/real/enable', 'msg': {'data': False}}))
+    await ws.send(json.dumps({'op': 'publish', 'topic': 'panda/real/enable', 'msg': {'data': False}}))
     await recv_until(lambda: status.get('state') == 'disabled')
     return real, status
 

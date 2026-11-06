@@ -22,7 +22,7 @@ def main():
   p.add_argument('--driver', default='real', choices=['real', 'fake'], help='fake: a simulated stand-in (no hardware)')
   p.add_argument('--host', default='0.0.0.0', help='address the WebSocket listens on')
   p.add_argument('--port', type=int, default=9090)
-  p.add_argument('--prefix', default='r1', help="the lobby robot's ROS prefix (its id, r1 for the first spawned)")
+  p.add_argument('--prefix', help="the lobby robot's ROS prefix (default: the robot's name, as its ROS profile sets it)")
   p.add_argument('--rate', type=float, default=50.0, help='control loop, Hz')
   p.add_argument('--speed', type=float, default=0.5, help='fraction of the joints\' max speeds the bridge commands at most')
   p.add_argument('--timeout', type=float, default=0.3, help='s without targets before the robot holds')
@@ -40,7 +40,7 @@ def main():
              'so101': {'port': a.serial, 'calibration': a.calibration}}
   opts = options['fake'] if a.driver == 'fake' else options.get(a.robot, {})
   server = RosbridgeServer(a.host, a.port)
-  bridge = RealBridge(drivers.driver(a.robot, a.driver, **opts), server, ns=a.prefix,
+  bridge = RealBridge(drivers.driver(a.robot, a.driver, **opts), server, ns=a.robot if a.prefix is None else a.prefix,
                       rate=a.rate, speed=a.speed, timeout=a.timeout)
 
   async def serve():
