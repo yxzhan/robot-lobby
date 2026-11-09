@@ -2126,6 +2126,8 @@ class App {
     });
     this.xrControls ??= new XrControls(this, (rod) => this.xrPart(rod), (...size) => this.xrPanel(...size));
     this.xrControls.start();
+    // The Meta button (the system's menu) blurs the session: the hands let go (xr.js).
+    session.addEventListener('visibilitychange', () => this.xrControls?.visibility(session.visibilityState));
     this.xr = { session, gl, layer, space, eyes, near, far, ar, frames: 0, t0: performance.now() };
     this.shadows();
     if (ar) this.passthrough(true);

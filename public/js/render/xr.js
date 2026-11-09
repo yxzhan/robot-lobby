@@ -38,18 +38,20 @@
 //                   shows where); the hand opened all the way: you are
 //                   there; curled into a fist: not.
 //   palm on a marker the palm's middle held on an IK marker (within ATTACH)
-//                   for ATTACH_MS: the marker sticks to the palm, following
+//                   for ATTACH_MS (a countdown by the hand meanwhile:
+//                   countdown()): the marker sticks to the palm, following
 //                   it as a held grip does, and the robot's fingers follow
 //                   yours, each finger of its gripper (by actuator name:
 //                   thumb, index, middle, ring, pinky / little) as far as
 //                   yours is curled (a gripper with no named fingers: as far
 //                   as you pinch). Losing track of the hand keeps it stuck
-//                   (taken up again from where the hand comes back).
-//   palm up, open   the hand stuck to a marker held still (within STILL)
-//                   palm up with every finger straight for LET_GO_MS: lets
-//                   go of it. While any hand is stuck, this is the only
-//                   gesture (a free hand can still stick to another marker).
-//   left pinch, palm towards you, held: the menu (Y).
+//                   (taken up again from where the hand comes back). The
+//                   hands let go when the menu opens or the session loses
+//                   focus (the Meta button: the system's menu). While a hand
+//                   is stuck, the menu is the only other gesture (a free
+//                   hand can still stick to another marker).
+//   left pinch, palm towards you, held: the menu (Y); it lets go of the
+//                   markers the hands are stuck to.
 // No pulling bodies (A) and no sticks otherwise: walking and turning stay on
 // the controllers.
 // You (the WebXR 'local-floor' space) stand in the scene through `rig`.
@@ -63,8 +65,7 @@ const RUMBLE_MS = 80;           // a rumble pulse while a held marker is at its 
 const NEAR = 0.08;             // m: hand-to-marker distance that grabs it without the ray
 const ATTACH = 0.05;           // m: a tracked palm this near a marker's center ...
 const ATTACH_MS = 3000;        // ... this long sticks the marker to it
-const LET_GO_MS = 3000;        // a stuck palm up and open this long lets go
-const STILL = 0.03;            // m: ... moving less than this meanwhile
+const COUNTDOWN = { px: 128, size: 0.06, toward: 0.12, above: 0.05 };  // the attach countdown: canvas px, m wide; m toward the head and up from the palm (in front of the robot's hand it is on)
 const STRAIGHT = 0.25;         // a finger's curl (0 straight … 1 a fist) under this: straight
 const CURLED_IN = 0.55;        // ... over this: curled in
 const FINGER_SEND_MS = 50;     // network mode: a stuck hand's fingers go to the server this often, at most
@@ -152,6 +153,7 @@ export class XrControls {
     this.app = app;
     this.part = part;
     this.menu = new XrMenu(panel);
+    this.makePanel = panel;  // (the attach countdowns: countdown())
     this.hands = new Map();  // handedness -> hand state
     this.rig = { x: 0, y: 0, yaw: 0 };
   }
@@ -193,9 +195,9 @@ export class XrControls {
   lost(h) {
     h.joints = null;  // (its avatar hand parked)
     h.dwell = null;
-    h.letGo = null;
+    this.countdown(h, null);
     this.cancelTeleport(h);
-    if (h.grab?.kind === 'ik' && h.grab.hand) h.grab.lost = true;  // still stuck (gestures: letGo)
+    if (h.grab?.kind === 'ik' && h.grab.hand) h.grab.lost = true;  // still stuck (till the menu opens or focus goes)
     else this.release(h);
     if (h.goal) this.dropGoal(h);
     this.put(h.ball, null);
@@ -242,17 +244,16 @@ export class XrControls {
       h.menuHit = this.menu.hit(h.pick);
       const a = src.hand ? null : PULL[h.name], y = src.hand ? MENU.hand[h.name] : MENU[h.name];
       if (src.hand) {
-        // Tracked hands: while one is stuck to a marker, letting go (palm up,
-        // open, still) is the only gesture; a free hand may stick to another.
-        // Avatar mode: the hand is a hand (it pushes, in the physics), no
-        // sticking to markers.
-        if (avatar) h.dwell = null;
-        else if (h.grab?.kind === 'ik') this.letGo(h);
+        // Tracked hands: while one is stuck to a marker, only the menu (which
+        // lets go); a free hand may stick to another. Avatar mode: the hand
+        // is a hand (it pushes, in the physics), no sticking to markers.
+        if (avatar || h.grab) h.dwell = null;
         else this.dwell(h);
         if (!stuck) this.handTeleport(h, viewer);
         else this.cancelTeleport(h);
         if (h.name === 'left') this.app.teleop.input.stick.fill(0);  // no stick on a hand
       }
+      if (y != null) this.menuButton(h, down(y), pressed[y], up(y), viewer);  // (also while stuck: it lets go)
       if (!(src.hand && stuck)) {
         // Avatar mode: the menu, teleporting and turning only (no grabbing
         // markers or bodies, no trigger on them).
@@ -260,7 +261,6 @@ export class XrControls {
         if (!src.hand && up(SQUEEZE) && h.grab?.kind === 'ik') this.release(h);
         if (!avatar && a != null && down(a) && !h.menuHit && !h.grab) this.pull(h);
         if (a != null && up(a) && (h.grab?.kind === 'body' || h.grab?.kind === 'pending')) this.release(h);
-        if (y != null) this.menuButton(h, down(y), pressed[y], up(y), viewer);
         if (down(TRIGGER)) {
           if (h.menuHit) this.menu.select(h.menuHit.row);
           else if (!avatar) this.trigger(h);
@@ -268,6 +268,7 @@ export class XrControls {
         if (up(TRIGGER) && h.goal) this.dropGoal(h);
       }
       this.follow(h);
+      this.countdown(h, viewer);
       if (avatar && h.name === 'left') this.app.teleop.input.stick.fill(0);  // (it walks the robot: teleop)
       else if (!src.hand) this.sticks(h, pad.axes, viewer, frame);
       this.draw(h);
@@ -292,7 +293,6 @@ export class XrControls {
     if (mode !== 'avatar') return;
     for (const h of this.hands.values()) {  // what a hand held in Teleop mode is let go
       h.dwell = null;
-      h.letGo = null;
       if (h.grab) this.release(h);
       if (h.goal) this.dropGoal(h);
     }
@@ -330,7 +330,6 @@ export class XrControls {
       h.pinched = h.fisted = false;
       h.palm = h.curls = null;
       if (h.grab?.kind === 'ik') h.grab.lost = true;  // still stuck: taken up again where the hand comes back
-      h.letGo = null;
       this.cancelTeleport(h);
       this.showSkeleton(h, null);
       return { buttons: [], axes: [] };
@@ -412,7 +411,10 @@ export class XrControls {
     if (held && h.menuAt != null && !h.menuDone && now - h.menuAt > MENU_HOLD) {
       h.menuDone = true;
       if (this.menu.open) this.menu.close();
-      else this.menu.show(this.rootMenu(), pose(mul4(this.sceneFromXr(), viewer.transform.matrix)));
+      else {
+        this.letGoAll();  // the menu lets go of the markers the hands are stuck to
+        this.menu.show(this.rootMenu(), pose(mul4(this.sceneFromXr(), viewer.transform.matrix)));
+      }
     }
     if (up) {
       if (!h.menuDone && this.menu.open) this.menu.close();
@@ -724,16 +726,56 @@ export class XrControls {
     else if (h.fistAll) this.cancelTeleport(h);
   }
 
-  // A hand stuck to a marker, held still palm up and open for LET_GO_MS:
-  // lets go of it.
-  letGo(h) {
-    if (!h.palm || !(h.palmUp && h.opened)) { h.letGo = null; return; }
-    const now = performance.now();
-    if (!h.letGo || Math.hypot(...sub(h.palm.pos, h.letGo.pos)) > STILL) h.letGo = { since: now, pos: h.palm.pos };
-    else if (now - h.letGo.since >= LET_GO_MS) {
-      h.letGo = null;
-      this.release(h);
+  // The tracked hands stuck to markers let go of them (the menu opening,
+  // the session losing focus).
+  letGoAll() {
+    for (const h of this.hands.values()) {
+      h.dwell = null;
+      if (h.grab?.kind === 'ik' && h.grab.hand) this.release(h);
     }
+  }
+
+  // The session's visibility (main.js): the Meta button's system menu (or
+  // the headset taken off) blurs or hides it: the hands let go.
+  visibility(state) {
+    if (state !== 'visible') this.letGoAll();
+  }
+
+  // A palm resting on a marker (dwell): the seconds left till it sticks, and
+  // a ring running out, on a small panel by the palm facing the head;
+  // hidden otherwise (viewer null: hidden).
+  countdown(h, viewer) {
+    const d = viewer && h.dwell && h.palm ? h.dwell : null;
+    if (!d) {
+      if (h.countdown?.shown) { h.countdown.panel.put(null); h.countdown.shown = false; h.countdown.drawn = null; }
+      return;
+    }
+    const left = Math.max(0, ATTACH_MS - (performance.now() - d.since)), step = Math.ceil(left / 100);
+    let c = h.countdown;
+    if (!c) {
+      const canvas = Object.assign(document.createElement('canvas'), { width: COUNTDOWN.px, height: COUNTDOWN.px });
+      c = h.countdown = { canvas, panel: this.makePanel(COUNTDOWN.px, COUNTDOWN.px, COUNTDOWN.size, COUNTDOWN.size), shown: false, drawn: null };
+    }
+    if (c.drawn !== step) {  // redrawn ten times a second
+      c.drawn = step;
+      const g = c.canvas.getContext('2d'), n = COUNTDOWN.px, r = n * 0.42;
+      g.clearRect(0, 0, n, n);
+      g.fillStyle = 'rgba(16, 20, 28, 0.78)';
+      g.beginPath(); g.arc(n / 2, n / 2, r + 6, 0, 2 * Math.PI); g.fill();
+      g.strokeStyle = '#ffd34d'; g.lineWidth = 9; g.lineCap = 'round';
+      g.beginPath(); g.arc(n / 2, n / 2, r, -Math.PI / 2, -Math.PI / 2 + 2 * Math.PI * (left / ATTACH_MS)); g.stroke();
+      g.fillStyle = '#ffffff'; g.font = `bold ${Math.round(n * 0.46)}px system-ui, sans-serif`;
+      g.textAlign = 'center'; g.textBaseline = 'middle';
+      g.fillText(String(Math.ceil(left / 1000)), n / 2, n / 2 + n * 0.03);
+      c.panel.upload(c.canvas);
+    }
+    // Between the palm and the head, a little up, facing the head, upright.
+    const head = pose(mul4(this.sceneFromXr(), viewer.transform.matrix)).pos, p = h.palm.pos;
+    const f0 = [head[0] - p[0], head[1] - p[1], 0], fl = Math.hypot(f0[0], f0[1]) || 1;
+    const normal = [f0[0] / fl, f0[1] / fl, 0], up = [0, 0, 1], right = [-normal[1], normal[0], 0];
+    const pos = [p[0] + normal[0] * COUNTDOWN.toward, p[1] + normal[1] * COUNTDOWN.toward, p[2] + COUNTDOWN.above];
+    c.panel.put([...right, 0, ...up, 0, ...normal, 0, ...pos, 1]);
+    c.shown = true;
   }
 
   // The IK or goal marker under any ray is highlighted (TeleopPanel.hover).

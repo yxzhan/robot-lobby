@@ -51,7 +51,8 @@ controller: its gestures are not read), each pointing the same kind of ray, its 
   the goal marker, selecting a robot.
 - **Palm on a marker**: hold the middle of your palm (between the wrist
   and the middle finger's knuckle) within 5 cm of an IK marker's center
-  for 3 s (it lights up meanwhile) and it sticks to your palm, following
+  for 3 s (it lights up, and a countdown by your hand shows the seconds left)
+  and it sticks to your palm, following
   it as a held grip does. The robot's fingers then follow yours: each
   actuator of that chain's gripper goes with a finger by its name (thumb,
   index, middle, ring, pinky / little) and closes as far as your finger is
@@ -60,16 +61,16 @@ controller: its gestures are not read), each pointing the same kind of ray, its 
   closes as far as you pinch. If the headset loses track of the hand, the
   marker stays stuck where it is and is taken up again from wherever the
   hand comes back.
-- **Palm up, all five fingers straight, held still** (within 3 cm) for
-  3 s lets go of the marker that hand is stuck to. While any hand is stuck
-  to a marker, this is the only gesture (the other hand can still stick to
-  another marker by holding its palm on it).
+- **Letting go**: opening the menu (the left pinch below) or pressing the Meta button (the
+  system's menu: the session loses focus) lets go of every marker the hands are stuck to.
+  While a hand is stuck, the menu is the only other gesture (the other hand can still stick
+  to another marker by holding its palm on it).
 - **Right hand pointing** (index straight, middle, ring and little fingers
   curled in) aims a **teleport**: the ray's spot on the floor shows where
   (the spawn marker). Open the hand all the way and you are there; curl it
   into a full fist instead to call it off.
 - **Left pinch with the palm towards you**, held 0.4 s, opens or closes the
-  **menu** (Y).
+  **menu** (Y); opening it lets go of the stuck markers.
 - Otherwise there are no sticks and no pulling bodies: walking the robot,
   snap turns and pulling stay on the controllers.
 - **Modes** (the menu's **Mode**, kept in this browser):
