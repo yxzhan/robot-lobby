@@ -1,5 +1,5 @@
 import { geomOverrides, optionXml } from './physics.js';
-import { PREFIX as HAND_PREFIX, handsXml } from './hands.js';
+import { avatarXml } from './avatar.js';
 
 // The shared world: an empty floor that robots are spawned into.
 //
@@ -36,9 +36,9 @@ export function baseXml(physics) {
 // `strip` ({refs, inertia}, or null to keep the visual geoms) gives the names
 // referenced elsewhere in the robot (referencedNames) and the body inertias
 // of its full compile (bodyInertia). `physics` are the world settings
-// (physics.js). `hands`: your tracked hands' bodies too (hands.js), after
-// every robot. Returns the compiled MjModel; throws on parse/compile errors.
-export function compileWorld(mujoco, robots, physics, hands = false) {
+// (physics.js). `avatars`: that many avatar slots (avatar.js), after every
+// robot. Returns the compiled MjModel; throws on parse/compile errors.
+export function compileWorld(mujoco, robots, physics, avatars = 0) {
   const world = mujoco.parseXMLString(baseXml(physics));
   try {
     const worldbody = mujoco.mjs_findBody(world, 'world');
@@ -73,11 +73,11 @@ export function compileWorld(mujoco, robots, physics, hands = false) {
         child.delete();  // attach copies the child
       }
     }
-    if (hands) {
-      const child = mujoco.parseXMLString(handsXml());
+    if (avatars) {
+      const child = mujoco.parseXMLString(avatarXml(avatars));
       try {
         const frame = mujoco.mjs_addFrame(worldbody, root);
-        if (!mujoco.mjs_attach(frame.element, child.element, HAND_PREFIX, '')) throw new Error('could not attach the hands');
+        if (!mujoco.mjs_attach(frame.element, child.element, '', '')) throw new Error('could not attach the avatars');
       } finally {
         child.delete();
       }

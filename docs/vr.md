@@ -72,10 +72,16 @@ controller: its gestures are not read), each pointing the same kind of ray, its 
   **menu** (Y).
 - Otherwise there are no sticks and no pulling bodies: walking the robot,
   snap turns and pulling stay on the controllers.
-- **Your hands collide** with the scene (with the physics in the page; not
-  yet in a shared world): a ball on each of the 25 joints
-  (`public/js/world/hands.js`, mocap bodies after every robot) follows the
-  hand, so you can push, tip over and poke objects and robots. Mocap
-  bodies are not pushed back, so the hands go through what they cannot
-  move, and they cannot hold anything (no grip). Rays pass through them.
-  The menu's **Hand collision** turns it off (kept in this browser).
+- **Modes** (the menu's **Mode**, kept in this browser):
+  - **Teleop** (the default): the gestures and buttons above drive the robots; your hands
+    collide with nothing.
+  - **Avatar**: you are in the physics as a solid head and two hands
+    (`public/js/world/avatar.js`: a ball per hand joint, a controller its wrist; mocap bodies
+    after every robot, not under gravity), so you push, tip over and poke objects and robots.
+    Mocap bodies are not pushed back: the hands go through what they cannot move (a fast hand
+    can pass through a small object) and hold nothing. The hands only push here: no sticking
+    to markers, no grabbing or pulling, the trigger only on the menu, the left stick no longer
+    walks the robot; the menu, teleporting and turning stay. In a shared world everyone sees
+    your avatar in your color (`public/js/render/avatars.js`; the server has 4 avatar slots,
+    `server/avatar.py`, one per client in Avatar mode, free again when it leaves the mode or the
+    world). Rays pass through avatars.

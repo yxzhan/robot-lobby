@@ -56,6 +56,7 @@
 
 import { BALL } from '../app/marker.js';
 import { XrMenu } from './xrmenu.js';
+import { HEAD_BACK } from '../world/avatar.js';
 import { snapToTip, strain } from '../controllers/ik/leash.js';
 
 const RUMBLE_MS = 80;           // a rumble pulse while a held marker is at its leash's end
@@ -122,6 +123,15 @@ function mul4(a, b) {
 }
 // A column-major 4x4 as {pos, rot (row-major 3x3)}.
 const pose = (m) => ({ pos: [m[12], m[13], m[14]], rot: [m[0], m[4], m[8], m[1], m[5], m[9], m[2], m[6], m[10]] });
+// A rotation matrix (row-major 3x3) as a quaternion [w, x, y, z].
+function rotQuat(r) {
+  const t = r[0] + r[4] + r[8];
+  if (t > 0) { const s = 2 * Math.sqrt(t + 1); return [s / 4, (r[7] - r[5]) / s, (r[2] - r[6]) / s, (r[3] - r[1]) / s]; }
+  if (r[0] > r[4] && r[0] > r[8]) { const s = 2 * Math.sqrt(1 + r[0] - r[4] - r[8]); return [(r[7] - r[5]) / s, s / 4, (r[1] + r[3]) / s, (r[2] + r[6]) / s]; }
+  if (r[4] > r[8]) { const s = 2 * Math.sqrt(1 + r[4] - r[0] - r[8]); return [(r[2] - r[6]) / s, (r[1] + r[3]) / s, s / 4, (r[5] + r[7]) / s]; }
+  const s = 2 * Math.sqrt(1 + r[8] - r[0] - r[4]);
+  return [(r[3] - r[1]) / s, (r[2] + r[6]) / s, (r[5] + r[7]) / s, s / 4];
+}
 // The transform putting a unit rod (radius 1, z from -0.5 to 0.5) from p to q, radius w.
 function rodMatrix(p, q, w) {
   const d = sub(q, p), len = Math.hypot(...d);
@@ -158,6 +168,7 @@ export class XrControls {
   }
 
   end() {
+    this.app.setAvatar(null);
     for (const h of this.hands.values()) this.lost(h);
     this.hands.clear();
     this.menu.close();
@@ -180,7 +191,7 @@ export class XrControls {
 
   // A hand put down or lost: lets go and hides it.
   lost(h) {
-    this.app.setHand(h.name, null);  // its balls in the physics parked (world/hands.js)
+    h.joints = null;  // (its avatar hand parked)
     h.dwell = null;
     h.letGo = null;
     this.cancelTeleport(h);
@@ -200,7 +211,7 @@ export class XrControls {
 
   // Once per session frame, before it is drawn. `viewer`: the viewer pose.
   update(frame, space, viewer) {
-    const S = this.sceneFromXr(), seen = new Set();
+    const S = this.sceneFromXr(), seen = new Set(), avatar = this.avatarMode();
     const stuck = [...this.hands.values()].some((h) => h.grab?.kind === 'ik' && h.grab.hand);  // a tracked hand on a marker
     // A controller and a tracked hand on the same side (Quest's concurrent
     // hands and controllers): the controller is that hand, its gestures are
@@ -222,7 +233,7 @@ export class XrControls {
       h.grip = gripPose ? pose(mul4(S, gripPose.transform.matrix)) : r;
       const pad = src.hand ? this.gestures(h, src.hand, frame, space, viewer) : src.gamepad;
       h.haptic = src.hand ? null : src.gamepad?.hapticActuators?.[0] ?? null;  // (rumble)
-      if (!src.hand) { this.showSkeleton(h, null); h.palm = h.curls = null; this.app.setHand(h.name, null); }
+      if (!src.hand) { this.showSkeleton(h, null); h.palm = h.curls = null; h.joints = null; }
       else if (h.palm) h.grip = h.palm;  // a tracked hand holds by the middle of its palm
       const pressed = pad.buttons.map((b) => b.pressed), was = h.buttons;
       const down = (i) => pressed[i] && !was[i], up = (i) => !pressed[i] && was[i];
@@ -233,33 +244,74 @@ export class XrControls {
       if (src.hand) {
         // Tracked hands: while one is stuck to a marker, letting go (palm up,
         // open, still) is the only gesture; a free hand may stick to another.
-        if (h.grab?.kind === 'ik') this.letGo(h);
+        // Avatar mode: the hand is a hand (it pushes, in the physics), no
+        // sticking to markers.
+        if (avatar) h.dwell = null;
+        else if (h.grab?.kind === 'ik') this.letGo(h);
         else this.dwell(h);
         if (!stuck) this.handTeleport(h, viewer);
         else this.cancelTeleport(h);
         if (h.name === 'left') this.app.teleop.input.stick.fill(0);  // no stick on a hand
       }
       if (!(src.hand && stuck)) {
-        if (!src.hand && down(SQUEEZE) && !h.menuHit && !h.grab) this.grab(h);
+        // Avatar mode: the menu, teleporting and turning only (no grabbing
+        // markers or bodies, no trigger on them).
+        if (!avatar && !src.hand && down(SQUEEZE) && !h.menuHit && !h.grab) this.grab(h);
         if (!src.hand && up(SQUEEZE) && h.grab?.kind === 'ik') this.release(h);
-        if (a != null && down(a) && !h.menuHit && !h.grab) this.pull(h);
+        if (!avatar && a != null && down(a) && !h.menuHit && !h.grab) this.pull(h);
         if (a != null && up(a) && (h.grab?.kind === 'body' || h.grab?.kind === 'pending')) this.release(h);
         if (y != null) this.menuButton(h, down(y), pressed[y], up(y), viewer);
         if (down(TRIGGER)) {
           if (h.menuHit) this.menu.select(h.menuHit.row);
-          else this.trigger(h);
+          else if (!avatar) this.trigger(h);
         }
         if (up(TRIGGER) && h.goal) this.dropGoal(h);
       }
       this.follow(h);
-      if (!src.hand) this.sticks(h, pad.axes, viewer, frame);
+      if (avatar && h.name === 'left') this.app.teleop.input.stick.fill(0);  // (it walks the robot: teleop)
+      else if (!src.hand) this.sticks(h, pad.axes, viewer, frame);
       this.draw(h);
     }
     for (const h of this.hands.values()) if (!seen.has(h)) this.lost(h);  // a controller put down or lost
+    this.app.setAvatar(avatar ? this.avatarPose(S, viewer, seen) : null);
     this.hover();
     const onMenu = [...this.hands.values()].find((h) => seen.has(h) && h.menuHit?.row >= 0);
     this.menu.hover(onMenu ? onMenu.menuHit.row : -1);
     this.menu.tick();  // live values (FPS)
+  }
+
+  // ---- modes (the menu's Mode) ----
+
+  avatarMode() { return this.app.xrSettings.mode === 'avatar'; }
+
+  // Teleop: the gestures and buttons drive the robots, no collision. Avatar:
+  // a solid head and hands in the physics (world/avatar.js), seen by everyone
+  // in a shared world; the hands only push, the menu and teleporting stay.
+  setMode(mode) {
+    this.app.setXrSettings({ mode });
+    if (mode !== 'avatar') return;
+    for (const h of this.hands.values()) {  // what a hand held in Teleop mode is let go
+      h.dwell = null;
+      h.letGo = null;
+      if (h.grab) this.release(h);
+      if (h.goal) this.dropGoal(h);
+    }
+    this.app.teleop.input.stick.fill(0);
+  }
+
+  // The avatar's pose (main.js setAvatar): the head behind the eyes (HEAD_BACK
+  // along the view's +z), a tracked hand's joints, a controller's grip as its
+  // hand's wrist.
+  avatarPose(S, viewer, seen) {
+    const v = pose(mul4(S, viewer.transform.matrix)), z = [v.rot[2], v.rot[5], v.rot[8]];
+    const head = { pos: v.pos.map((x, i) => x + HEAD_BACK * z[i]), quat: rotQuat(v.rot) };
+    const hand = (name) => {
+      const h = this.hands.get(name);
+      if (!h || !seen.has(h)) return null;
+      if (h.joints) return h.joints;
+      return h.grip ? new Map([['wrist', { pos: h.grip.pos }]]) : null;
+    };
+    return { head, left: hand('left'), right: hand('right') };
   }
 
   // A tracked hand's gestures as an xr-standard gamepad {buttons, axes}
@@ -273,7 +325,7 @@ export class XrControls {
     const joint = (name) => joints.get(name);
     const wrist = joint('wrist'), thumb = joint('thumb-tip'), index = joint('index-finger-tip');
     const button = (pressed, value = pressed ? 1 : 0) => ({ pressed, value });
-    this.app.setHand(h.name, joints.size ? joints : null);  // its balls in the physics (world/hands.js)
+    h.joints = joints.size ? joints : null;  // (its avatar hand, Avatar mode)
     if (!wrist || !thumb || !index) {
       h.pinched = h.fisted = false;
       h.palm = h.curls = null;
@@ -375,8 +427,11 @@ export class XrControls {
     return {
       title: 'Menu',
       items: [
-        { label: 'Hand collision', checked: () => app.xrSettings.handCollision !== false,
-          action: () => { app.setXrSettings({ handCollision: app.xrSettings.handCollision === false }); } },
+        { label: 'Mode', value: () => (this.avatarMode() ? 'Avatar' : 'Teleop'), menu: () => ({
+          title: 'Mode', items: [
+            { label: 'Teleop: drive the robots', checked: () => !this.avatarMode(), action: () => { this.setMode('teleop'); } },
+            { label: 'Avatar: you, solid', checked: () => this.avatarMode(), action: () => { this.setMode('avatar'); } },
+          ] }) },
         { label: 'Reset TCP', disabled: () => !this.ik(),
           action: () => { this.ik()?.targets.clear(); return true; } },  // every IK target back on its tip
         ...this.realItems(),
