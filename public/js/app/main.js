@@ -50,7 +50,7 @@ import { XrControls } from '../render/xr.js';
 import { Cameras, CamerasPanel, cameraKey, modelCameras } from '../cameras/cameras.js';
 import { CHAIN_COLORS } from '../drive/teleop.js';
 import Stats from '../../vendor/stats/Stats.js';
-import { NET_MUJOCO, NetClient, loadRender, worldData, worldModel } from '../net/net.js';
+import { NET_MUJOCO, NetClient, forwardKinematics, loadRender, worldData, worldModel } from '../net/net.js';
 import { Recorder } from '../world/recorder.js';
 import { dataUrl, problem, server, shareUrl } from './endpoint.js';
 import { publishUrl } from './embed.js';
@@ -1808,15 +1808,24 @@ class App {
       g.shown = show;
     }
     if (!show) return;
+    // In a shared world the page has no MjModel (net.js worldModel), and
+    // poses the robots with its own forwardKinematics: the ghost too.
+    const net = !!this.net;
     if (g.model !== model) {
-      g.data?.delete();
-      g.data = new mujoco.MjData(model);
+      g.data?.delete?.();
+      g.data = net ? worldData(model) : new mujoco.MjData(model);
       g.model = model;
     }
     const d = g.data;
     d.qpos.set(data.qpos);
     for (const [adr, v] of qpos) d.qpos[adr] = v;
-    mujoco.mj_kinematics(model, d);
+    if (net) {
+      d.mocap_pos.set(data.mocap_pos);
+      d.mocap_quat.set(data.mocap_quat);
+      forwardKinematics([g.robot], d);
+    } else {
+      mujoco.mj_kinematics(model, d);
+    }
     const { pos, yaw = 0, bodyOffset } = g.robot, tcm = this.engine.getTransformManager();
     const c = Math.cos(yaw), s = Math.sin(yaw), Rz = [c, -s, 0, s, c, 0, 0, 0, 1];
     g.parts.forEach((part, i) => {
@@ -1831,7 +1840,7 @@ class App {
   freeGhost(g) {
     this.removeEntities(g.entities);
     for (const mi of g.mis) this.engine.destroyMaterialInstance(mi);
-    g.data?.delete();
+    g.data?.delete?.();
     g.entities = [];
     g.mis = [];
     g.data = null;
