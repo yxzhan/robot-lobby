@@ -438,8 +438,13 @@ export class XrControls {
             { label: 'Teleop: drive the robots', checked: () => !this.avatarMode(), action: () => { this.setMode('teleop'); } },
             { label: 'Avatar: you, solid', checked: () => this.avatarMode(), action: () => { this.setMode('avatar'); } },
           ] }) },
-        { label: 'Reset TCP', disabled: () => !this.ik(),
-          action: () => { this.ik()?.targets.clear(); return true; } },  // every IK target back on its tip
+        { label: 'Reset scene', disabled: () => !app.model,
+          action: () => {  // as the toolbar's Reset: every robot back to its spawn pose (a shared world: for everyone)
+            for (const h of this.hands.values()) { h.dwell = null; if (h.grab) this.release(h); if (h.goal) this.dropGoal(h); }
+            app.recorder?.live();
+            app.reset();
+            return true;
+          } },
         ...this.realItems(),
         { label: 'Quality', menu: () => this.qualityMenu() },
         { label: 'Hand angles', menu: () => ({ title: 'Hand angles', items: [

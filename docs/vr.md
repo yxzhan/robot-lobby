@@ -19,8 +19,8 @@ ends on the menu, the IK marker or the floor it meets:
 - **Y** (left controller), held 0.4 s, opens the **menu** (and closes it;
   a short press closes it too): a panel in front of you, the trigger
   choosing the row under the ray (`public/js/render/xrmenu.js`, menus of submenus
-  with a Back row). **Reset TCP** puts the driven robot's IK targets back
-  on its tips; **Quality** sets the headset's **Resolution** (0.6× to 1.5×
+  with a Back row). **Reset scene** puts every robot back to its spawn pose
+  (as the toolbar's Reset; in a shared world for everyone); **Quality** sets the headset's **Resolution** (0.6× to 1.5×
   its default framebuffer, at once), **Anti-alias** (MSAA off, 2×, 4×),
   **Shadows** (the sun's, off by default), **Brightness** (the eyes'
   exposure, 100 % down to 25 % of the desktop's: the headset shows the scene
