@@ -59,7 +59,7 @@
 
 import { BALL } from '../app/marker.js';
 import { XrMenu } from './xrmenu.js';
-import { HEAD_BACK } from '../world/avatar.js';
+import { HEAD_BACK, handPose } from '../world/avatar.js';
 import { FINGERS as HAND_FINGERS, amountFor, average, handAngles, loadCalibration, saveCalibration } from './handmap.js';
 import { snapToTip, strain } from '../controllers/ik/leash.js';
 
@@ -312,16 +312,16 @@ export class XrControls {
   }
 
   // The avatar's pose (main.js setAvatar): the head behind the eyes (HEAD_BACK
-  // along the view's +z), a tracked hand's joints, a controller's grip as its
-  // hand's wrist.
+  // along the view's +z), a tracked hand's palm and finger bones from its
+  // joints (world/avatar.js handPose), a controller's grip as its hand's palm.
   avatarPose(S, viewer, seen) {
     const v = pose(mul4(S, viewer.transform.matrix)), z = [v.rot[2], v.rot[5], v.rot[8]];
     const head = { pos: v.pos.map((x, i) => x + HEAD_BACK * z[i]), quat: rotQuat(v.rot) };
     const hand = (name) => {
       const h = this.hands.get(name);
       if (!h || !seen.has(h)) return null;
-      if (h.joints) return h.joints;
-      return h.grip ? new Map([['wrist', { pos: h.grip.pos }]]) : null;
+      if (h.joints) return handPose(h.joints);
+      return h.grip ? new Map([['palm', { pos: h.grip.pos, quat: rotQuat(h.grip.rot) }]]) : null;
     };
     return { head, left: hand('left'), right: hand('right') };
   }

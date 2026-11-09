@@ -16,7 +16,7 @@
 import loadMujoco from '../../vendor/mujoco/mujoco.js';
 import { loadModelFiles, readFirst, urlSource } from './vfs.js';
 import { bodyInertia, compileWorld, firstKey, referencedNames } from '../world/world.js';
-import { GROUP as AVATAR_GROUP, HAND_JOINTS, LOCAL_SLOTS, PARTS as AVATAR_PARTS, SLOT_BODIES, bodyName as avatarBodyName, park as avatarPark } from '../world/avatar.js';
+import { GROUP as AVATAR_GROUP, HAND_PARTS, LOCAL_SLOTS, PARTS as AVATAR_PARTS, SLOT_BODIES, bodyName as avatarBodyName, park as avatarPark } from '../world/avatar.js';
 import { CONTROL_DT } from '../controllers/groot.js';
 import { every } from './ticker.js';
 import { POLICIES, defaultPolicy, isInstalled, loadPolicy, loadPolicyIndex, policyById, policyId } from '../controllers/policy.js';
@@ -1580,8 +1580,9 @@ class App {
   }
 
   // This page's avatar (xr.js, every session frame in Avatar mode): pose
-  // {head: {pos, quat}, left, right: joint -> {pos} (a hand not tracked:
-  // null; joints missing: parked)}, or null: parked, the slot let go. In the
+  // {head: {pos, quat}, left, right: part -> {pos, quat} (world/avatar.js
+  // HAND_PARTS; a hand not tracked: null; parts missing: parked)}, or null:
+  // parked, the slot let go. In the
   // page's own world its slot 0 directly; in a shared world sent to the
   // server (op avatar, every AVATAR_SEND_MS), which moves its slot's bodies.
   setAvatar(pose) {
@@ -1596,7 +1597,7 @@ class App {
       if (now - (this.avatarSentAt ?? 0) < AVATAR_SEND_MS) return;
       this.avatarSentAt = now;
       const r = (v) => Math.round(v * 1e4) / 1e4;
-      const hand = (m) => (m ? HAND_JOINTS.map((j) => { const p = m.get(j)?.pos; return p ? p.map(r) : null; }) : null);
+      const hand = (m) => (m ? HAND_PARTS.map((p) => { const e = m.get(p); return e ? [...e.pos, ...e.quat].map(r) : null; }) : null);
       this.net.send('avatar', { head: pose.head?.pos.map(r) ?? null, head_quat: pose.head?.quat?.map(r) ?? null,
         left: hand(pose.left), right: hand(pose.right) });
       return;
@@ -1611,8 +1612,9 @@ class App {
         p = pose?.head?.pos;
         if (p && pose.head.quat) d.mocap_quat.set(pose.head.quat, 4 * m);
       } else {
-        const k = part.indexOf('_'), side = part.slice(0, k), joint = part.slice(k + 1);
-        p = pose?.[side]?.get(joint)?.pos;
+        const k = part.indexOf('_'), e = pose?.[part.slice(0, k)]?.get(part.slice(k + 1));
+        p = e?.pos;
+        if (e?.quat) d.mocap_quat.set(e.quat, 4 * m);
       }
       d.mocap_pos.set(p || home, 3 * m);
     });
@@ -1625,13 +1627,20 @@ class App {
 
   // A hidden marker entity for the WebXR controllers (xr.js): a unit ball, or
   // a unit rod (radius 1, z from -0.5 to 0.5).
+  // `rod` may also be a shape ({pos, nrm, idx}: render/avatars.js's palm),
+  // its geometry made once per shape object.
   xrPart(rod) {
     this.xrShapes ??= { ball: makeGeometry(this.engine, roundShape(1, 1, 1)), rod: makeGeometry(this.engine, cylinder(1, 0.5)) };
+    if (rod && typeof rod === 'object') {
+      this.xrMeshes ??= new Map();
+      if (!this.xrMeshes.has(rod)) this.xrMeshes.set(rod, makeGeometry(this.engine, rod));
+    }
     const mi = this.matLit.createInstance();
     mi.setColor4Parameter('baseColor', Filament.RgbaType.sRGB, [1, 1, 1, 1]);
     mi.setFloatParameter('roughness', 0.5);
     mi.setFloatParameter('metallic', 0.0);
-    const e = makeEntity(this.engine, rod ? this.xrShapes.rod : this.xrShapes.ball, mi, false, OVERLAY);
+    const geo = rod && typeof rod === 'object' ? this.xrMeshes.get(rod) : rod ? this.xrShapes.rod : this.xrShapes.ball;
+    const e = makeEntity(this.engine, geo, mi, false, OVERLAY);
     const tcm = this.engine.getTransformManager(), inst = tcm.getInstance(e);
     tcm.setTransform(inst, [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]);
     inst.delete();

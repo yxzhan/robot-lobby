@@ -1,8 +1,9 @@
 """Avatars in the shared world: the server's side of public/js/world/avatar.js
-(the same bodies, names and order; keep them in step). SLOTS avatars after
-every robot (compile_world), each a head and two hands of 25 joint balls,
-mocap bodies parked out of the way while nobody uses the slot. A client in
-the VR menu's Avatar mode sends its pose (op avatar) and gets a slot; it is
+(the same bodies, names, order and shapes; keep them in step). SLOTS avatars
+after every robot (compile_world), each a head (touching nothing) and two
+hands: a palm (a triangular prism) and a cylinder per finger bone, mocap
+bodies parked out of the way while nobody uses the slot. A client in the VR
+menu's Avatar mode sends its parts' poses (op avatar) and gets a slot; it is
 parked again when the client leaves Avatar mode or the world.
 """
 
@@ -10,12 +11,20 @@ SLOTS = 4
 SIDES = ('left', 'right')
 GROUP = 5
 HEAD_RADIUS = 0.1
+PALM = [(0, 0), (0.085, 0.03), (0.075, -0.035)]
+PALM_HALF = 0.012
 
-_FINGERS = [('thumb', ('metacarpal', 'phalanx-proximal', 'phalanx-distal', 'tip'))] + [
-    (f'{f}-finger', ('metacarpal', 'phalanx-proximal', 'phalanx-intermediate', 'phalanx-distal', 'tip'))
-    for f in ('index', 'middle', 'ring', 'pinky')]
-HAND_JOINTS = ['wrist'] + [f'{f}-{j}' for f, js in _FINGERS for j in js]
-PARTS = ['head'] + [f'{s}_{j}' for s in SIDES for j in HAND_JOINTS]
+
+def _finger(f, r, lengths):
+  return [(f'{f}-proximal', r, lengths[0]), (f'{f}-intermediate', r * 0.9, lengths[1]), (f'{f}-distal', r * 0.8, lengths[2])]
+
+
+# (part, radius, length), as avatar.js HAND_BONES.
+HAND_BONES = ([('thumb-metacarpal', 0.011, 0.045), ('thumb-proximal', 0.01, 0.032), ('thumb-distal', 0.009, 0.025)]
+              + _finger('index', 0.0095, [0.045, 0.026, 0.022]) + _finger('middle', 0.0095, [0.048, 0.03, 0.024])
+              + _finger('ring', 0.009, [0.045, 0.028, 0.023]) + _finger('pinky', 0.008, [0.035, 0.02, 0.02]))
+HAND_PARTS = ['palm'] + [b[0] for b in HAND_BONES]
+PARTS = ['head'] + [f'{s}_{p}' for s in SIDES for p in HAND_PARTS]
 SLOT_BODIES = len(PARTS)
 
 
@@ -23,31 +32,30 @@ def body_name(slot, part):
   return f'avatar{slot}_{part}'
 
 
-def radius(part):
-  if part == 'head':
-    return HEAD_RADIUS
-  if part.endswith('wrist'):
-    return 0.022
-  if part.endswith('metacarpal'):
-    return 0.014
-  if part.endswith('tip'):
-    return 0.008
-  return 0.01
-
-
 def park(slot):
   return [2.0 * slot, 0.0, 1000.0]
 
 
 def avatar_xml(slots=SLOTS):
+  def geom(g, touch=1):
+    return f'<geom {g} contype="0" conaffinity="{touch}" group="{GROUP}" mass="0.01"/>'
+  bones = {b[0]: b for b in HAND_BONES}
   bodies = []
   for s in range(slots):
     at = ' '.join(f'{v:g}' for v in park(s))
     for p in PARTS:
-      touch = 0 if p == 'head' else 1  # the head collides with nothing (avatar.js)
-      bodies.append(f'<body name="{body_name(s, p)}" mocap="true" pos="{at}"><geom type="sphere" size="{radius(p)}" '
-                    f'contype="0" conaffinity="{touch}" group="{GROUP}" mass="0.01"/></body>')
-  return f'<mujoco model="avatars"><worldbody>{"".join(bodies)}</worldbody></mujoco>'
+      part = p.split('_', 1)[1] if '_' in p else p
+      if p == 'head':
+        g = geom(f'type="sphere" size="{HEAD_RADIUS:g}"', 0)  # the head touches nothing
+      elif part == 'palm':
+        g = geom('type="mesh" mesh="avatar_palm"')
+      else:
+        _, r, length = bones[part]
+        g = geom(f'type="cylinder" size="{r:g} {length / 2:g}"')
+      bodies.append(f'<body name="{body_name(s, p)}" mocap="true" pos="{at}">{g}</body>')
+  verts = ' '.join(f'{v:g}' for z in (-PALM_HALF, PALM_HALF) for x, y in PALM for v in (x, y, z))
+  return (f'<mujoco model="avatars"><asset><mesh name="avatar_palm" vertex="{verts}"/></asset>'
+          f'<worldbody>{"".join(bodies)}</worldbody></mujoco>')
 
 
 class Avatars:
@@ -80,8 +88,8 @@ class Avatars:
     return free[0]
 
   def set(self, data, slot, msg):
-    """Op avatar's pose: head [x, y, z], head_quat [w, x, y, z], left / right
-    [[x, y, z] or None per hand joint] (missing: parked)."""
+    """Op avatar's pose: head [x, y, z], head_quat [w, x, y, z]; left / right
+    [[x, y, z, qw, qx, qy, qz] or None per HAND_PARTS] (missing: parked)."""
     ids = self.mocap[slot]
     home = park(slot)
     head = msg.get('head')
@@ -89,10 +97,15 @@ class Avatars:
     if msg.get('head_quat'):
       data.mocap_quat[ids[0]] = msg['head_quat']
     for k, side in enumerate(SIDES):
-      joints = msg.get(side) or []
-      for j in range(len(HAND_JOINTS)):
-        p = joints[j] if j < len(joints) else None
-        data.mocap_pos[ids[1 + k * len(HAND_JOINTS) + j]] = p if p else home
+      parts = msg.get(side) or []
+      for j in range(len(HAND_PARTS)):
+        p = parts[j] if j < len(parts) else None
+        i = ids[1 + k * len(HAND_PARTS) + j]
+        if p and len(p) == 7:
+          data.mocap_pos[i] = p[:3]
+          data.mocap_quat[i] = p[3:]
+        else:
+          data.mocap_pos[i] = home
 
   def release(self, data, cid):
     """The client's slot parked and free again; True if it had one."""
