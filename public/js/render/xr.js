@@ -59,13 +59,15 @@
 import { BALL } from '../app/marker.js';
 import { XrMenu } from './xrmenu.js';
 import { HEAD_BACK, NECK } from '../world/avatar.js';
-import { FINGERS as HAND_FINGERS, amountFor, handAngles } from './handmap.js';
+import { FINGERS as HAND_FINGERS, amountFor, average, handAngles, loadCalibration, saveCalibration } from './handmap.js';
 import { snapToTip, strain } from '../controllers/ik/leash.js';
 
 const RUMBLE_MS = 80;           // a rumble pulse while a held marker is at its leash's end
 const NEAR = 0.08;             // m: hand-to-marker distance that grabs it without the ray
 const ATTACH = 0.05;           // m: a tracked palm this near a marker's center ...
 const ATTACH_MS = 3000;        // ... this long sticks the marker to it
+const CAL_STEP_MS = 4000;      // a calibration step (hands open, fists) ...
+const CAL_SAMPLE_MS = 1500;    // ... its last this long averaged
 const COUNTDOWN = { px: 128, size: 0.06, toward: 0.12, above: 0.05 };  // the attach countdown: canvas px, m wide; m toward the head and up from the palm (in front of the robot's hand it is on)
 const STRAIGHT = 0.25;         // a finger's curl (0 straight … 1 a fist) under this: straight
 const CURLED_IN = 0.55;        // ... over this: curled in
@@ -155,6 +157,8 @@ export class XrControls {
     this.part = part;
     this.menu = new XrMenu(panel);
     this.makePanel = panel;  // (the attach countdowns: countdown())
+    this.calibration = loadCalibration();  // side -> {open, fist}: your hands' values (handmap.js)
+    this.cal = null;  // a calibration running (calibrate())
     this.hands = new Map();  // handedness -> hand state
     this.rig = { x: 0, y: 0, yaw: 0 };
   }
@@ -215,6 +219,7 @@ export class XrControls {
   // Once per session frame, before it is drawn. `viewer`: the viewer pose.
   update(frame, space, viewer) {
     const S = this.sceneFromXr(), seen = new Set(), avatar = this.avatarMode();
+    const calibrating = this.cal && this.cal.phase !== 'done';  // (a pinch in a fist must not click the menu)
     const stuck = [...this.hands.values()].some((h) => h.grab?.kind === 'ik' && h.grab.hand);  // a tracked hand on a marker
     // A controller and a tracked hand on the same side (Quest's concurrent
     // hands and controllers): the controller is that hand, its gestures are
@@ -254,7 +259,7 @@ export class XrControls {
         else this.cancelTeleport(h);
         if (h.name === 'left') this.app.teleop.input.stick.fill(0);  // no stick on a hand
       }
-      if (y != null) this.menuButton(h, down(y), pressed[y], up(y), viewer);  // (also while stuck: it lets go)
+      if (y != null && !calibrating) this.menuButton(h, down(y), pressed[y], up(y), viewer);  // (also while stuck: it lets go)
       if (!(src.hand && stuck)) {
         // Avatar mode: the menu, teleporting and turning only (no grabbing
         // markers or bodies, no trigger on them).
@@ -262,7 +267,7 @@ export class XrControls {
         if (!src.hand && up(SQUEEZE) && h.grab?.kind === 'ik') this.release(h);
         if (!avatar && a != null && down(a) && !h.menuHit && !h.grab) this.pull(h);
         if (a != null && up(a) && (h.grab?.kind === 'body' || h.grab?.kind === 'pending')) this.release(h);
-        if (down(TRIGGER)) {
+        if (down(TRIGGER) && !calibrating) {
           if (h.menuHit) this.menu.select(h.menuHit.row);
           else if (!avatar) this.trigger(h);
         }
@@ -276,6 +281,7 @@ export class XrControls {
     }
     for (const h of this.hands.values()) if (!seen.has(h)) this.lost(h);  // a controller put down or lost
     this.app.setAvatar(avatar ? this.avatarPose(S, viewer, seen) : null);
+    if (calibrating) this.calibrate(seen);
     this.hover();
     const onMenu = [...this.hands.values()].find((h) => seen.has(h) && h.menuHit?.row >= 0);
     this.menu.hover(onMenu ? onMenu.menuHit.row : -1);
@@ -451,6 +457,7 @@ export class XrControls {
           } },
         ...this.realItems(),
         { label: 'Quality', menu: () => this.qualityMenu() },
+        { label: 'Calibrate hands', menu: () => this.calibrateMenu() },
         { label: 'Hand angles', menu: () => ({ title: 'Hand angles', items: [
           { label: 'Left hand', menu: () => this.anglesMenu('left') },
           { label: 'Right hand', menu: () => this.anglesMenu('right') },
@@ -479,6 +486,66 @@ export class XrControls {
         ],
       }),
     }];
+  }
+
+  // ---- calibrating the hands (handmap.js) ----
+
+  // Both hands open wide for CAL_STEP_MS, then fists as long; the last
+  // CAL_SAMPLE_MS of each averaged, per tracked hand: where each of its angles
+  // is open and as a fist, what a robot hand's open and closed ctrl then go
+  // with (kept in this browser).
+  calibrateMenu() {
+    const c = () => this.cal, left = () => Math.max(0, Math.ceil((c().until - performance.now()) / 1000));
+    const step = { open: 'Open hands wide', fist: 'Make fists' };
+    return {
+      title: 'Calibrate hands',
+      items: [
+        { label: 'Steps: hands wide open, then fists', info: true },
+        { label: '', info: true, value: () => {
+          if (!c()) return 'press Start';
+          if (c().phase === 'done') return c().done.length ? `done: ${c().done.join(', ')}` : 'no hand tracked: again';
+          return `${step[c().phase]}  ${left()} s`;
+        } },
+        { label: 'Start', action: () => { this.startCalibration(); } },
+        { label: 'Calibrated', info: true, value: () => ['left', 'right'].filter((s) => this.calibration[s]).join(', ') || 'none: a typical hand' },
+        { label: 'Back to a typical hand', action: () => { this.calibration = {}; saveCalibration({}); this.cal = null; } },
+      ],
+    };
+  }
+
+  startCalibration() {
+    this.letGoAll();
+    this.cal = { phase: 'open', until: performance.now() + CAL_STEP_MS, samples: { left: [], right: [] }, open: {}, fist: {}, done: [] };
+  }
+
+  // Every session frame while calibrating: the tracked hands' values sampled,
+  // the next step when this one is over, the result kept after the fists.
+  calibrate(seen) {
+    const c = this.cal, now = performance.now();
+    if (now > c.until - CAL_SAMPLE_MS) {
+      for (const side of ['left', 'right']) {
+        const h = this.hands.get(side);
+        if (h && seen.has(h) && h.joints && h.values) c.samples[side].push({ ...h.values });
+      }
+    }
+    if (now < c.until) return;
+    for (const side of ['left', 'right']) {
+      if (c.samples[side].length >= 10) c[c.phase][side] = average(c.samples[side]);
+      c.samples[side] = [];
+    }
+    if (c.phase === 'open') {
+      c.phase = 'fist';
+      c.until = now + CAL_STEP_MS;
+      return;
+    }
+    c.phase = 'done';
+    for (const side of ['left', 'right']) {
+      if (c.open[side] && c.fist[side]) {
+        this.calibration[side] = { open: c.open[side], fist: c.fist[side] };
+        c.done.push(side);
+      }
+    }
+    saveCalibration(this.calibration);
   }
 
   // A tracked hand's angles live (handmap.js), degrees: for setting a robot
@@ -653,9 +720,11 @@ export class XrControls {
     const { app } = this, grip = g.chain.gripper ?? [];
     if (!grip.length || !h.curls) return;
     g.fingerOf ??= grip.map(({ a }) => fingerOf(g.ik.nameOf('mjOBJ_ACTUATOR', a)));
-    const curls = Object.values(h.curls), all = curls.reduce((s, v) => s + v, 0) / (curls.length || 1);
+    // Each finger's curl as far between your calibrated open hand and fist (handmap.js).
+    const cal = this.calibration[h.name], curl = (f) => amountFor({ source: `${f}.curl` }, h.values, cal) ?? h.curls[f];
+    const curls = Object.keys(h.curls).map(curl), all = curls.reduce((s, v) => s + v, 0) / (curls.length || 1);
     const named = g.fingerOf.some(Boolean);
-    const amounts = grip.map((e, i) => amountFor(e, h.values) ?? (!named ? h.pinch ?? 0 : h.curls[g.fingerOf[i]] ?? all));
+    const amounts = grip.map((e, i) => amountFor(e, h.values, cal) ?? (!named ? h.pinch ?? 0 : (g.fingerOf[i] && h.curls[g.fingerOf[i]] != null ? curl(g.fingerOf[i]) : all)));
     const now = performance.now();
     if (g.amounts && !amounts.some((v, i) => Math.abs(v - g.amounts[i]) > 0.02)) return;
     if (app.net && now - (g.sentAt ?? -Infinity) < FINGER_SEND_MS) return;

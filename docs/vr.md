@@ -55,14 +55,17 @@ controller: its gestures are not read), each pointing the same kind of ray, its 
   and it sticks to your palm, following
   it as a held grip does. The robot's fingers then follow yours: an
   actuator whose gripper entry names a `source` (an angle of your hand: a
-  knuckle's bend, a finger's sideways spread, the thumb's base, …, mapped
-  through its `range`; [IK](ik.md), `public/js/render/handmap.js`) as that
-  angle says, the others by their name (thumb, index, middle, ring, pinky /
+  knuckle's bend, a finger's sideways spread, the thumb's base, …; [IK](ik.md),
+  `public/js/render/handmap.js`) as far as that angle is between your open
+  hand and your fist, the others by their name (thumb, index, middle, ring, pinky /
   little), closing as far as your finger is curled (the angles between its
   bones added up; one on no named finger as the hand is on average). A
   gripper with no named fingers (Panda's) closes as far as you pinch. The
-  menu's **Hand angles** shows each hand's angles live (degrees), for
-  setting a robot hand's ranges. If the headset loses track of the hand, the
+  menu's **Calibrate hands** measures your hands: Start, then both hands
+  wide open (4 s), then fists (4 s); each angle's value open and as a fist
+  is kept in this browser (Back to a typical hand forgets it). Pinches and
+  the menu gesture do nothing meanwhile. The menu's **Hand angles** shows
+  each hand's angles live (degrees). If the headset loses track of the hand, the
   marker stays stuck where it is and is taken up again from wherever the
   hand comes back.
 - **Letting go**: opening the menu (the left pinch below) or pressing the Meta button (the

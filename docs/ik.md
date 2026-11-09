@@ -51,12 +51,14 @@ a site (menagerie's `panda.xml`, G1) keeps the body origin;
 A chain's **gripper** is a list of actuators, each with the ctrl that opens
 it and the one that closes it (`{actuator, open, closed}`; an older
 config's single actuator name opens at the top of its ctrlrange, as the
-Franka hand). For VR hand tracking an entry may also name the angle of your hand
-that drives it and that angle's values for its open and closed ctrl:
-`{actuator, open, closed, source, range}` (`public/js/render/handmap.js`: `index.mcp`,
+Franka hand). For VR hand tracking, `open` and `closed` are the ctrl with your hand
+open and with it a fist, and an entry may name the angle of your hand that drives it in
+between: `{actuator, open, closed, source}` (`public/js/render/handmap.js`: `index.mcp`,
 `.pip`, `.dip`, `.spread`, `thumb.cmc`, `.abduct`, `.mcp`, `.ip` in degrees, `<finger>.curl`
 and `pinch` 0..1); AgiBot G2's Wuji hands map each finger's four joints so (knuckle, sideways,
-middle, tip). The VR menu's **Hand angles** shows the angles live, for setting the ranges. Found automatically: every named actuator on joints below the
+middle, tip). Where each angle is with your hand open and as a fist comes from the VR menu's
+**Calibrate hands** (per hand, kept in the browser), else from a typical hand; an entry's
+`range` ([open, fist], degrees) overrides both. **Hand angles** shows the angles live. Found automatically: every named actuator on joints below the
 tip that the chain does not have and no other controller drives (a lone
 one on a single hinge only when named like a gripper joint or followed by
 another joint: else it is likely a wrist). Which end of its range closes is
