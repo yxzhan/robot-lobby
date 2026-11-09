@@ -45,7 +45,8 @@
 //                   thumb, index, middle, ring, pinky / little) as far as
 //                   yours is curled (a gripper with no named fingers: as far
 //                   as you pinch). Losing track of the hand keeps it stuck
-//                   (taken up again from where the hand comes back). The
+//                   (taken up again if the hand comes back within REGRAB of
+//                   where it went and within REGRAB_MS, else let go). The
 //                   hands let go when the menu opens or the session loses
 //                   focus (the Meta button: the system's menu). While a hand
 //                   is stuck, the menu is the only other gesture (a free
@@ -66,6 +67,8 @@ const RUMBLE_MS = 80;           // a rumble pulse while a held marker is at its 
 const NEAR = 0.08;             // m: hand-to-marker distance that grabs it without the ray
 const ATTACH = 0.05;           // m: a tracked palm this near a marker's center ...
 const ATTACH_MS = 3000;        // ... this long sticks the marker to it
+const REGRAB = 0.08;            // m: a stuck hand back in sight this near where it went out of it goes on holding ...
+const REGRAB_MS = 2000;        // ... and within this long; else the marker is let go (back onto the tip)
 const CAL_STEP_MS = 4000;      // a calibration step (hands open, fists) ...
 const CAL_SAMPLE_MS = 1500;    // ... its last this long averaged
 const COUNTDOWN = { px: 128, size: 0.06, toward: 0.12, above: 0.05 };  // the attach countdown: canvas px, m wide; m toward the head and up from the palm (in front of the robot's hand it is on)
@@ -202,8 +205,10 @@ export class XrControls {
     h.dwell = null;
     this.countdown(h, null);
     this.cancelTeleport(h);
-    if (h.grab?.kind === 'ik' && h.grab.hand) h.grab.lost = true;  // still stuck (till the menu opens or focus goes)
-    else this.release(h);
+    if (h.grab?.kind === 'ik' && h.grab.hand) {  // still stuck, for a while (follow)
+      this.lostSight(h.grab);
+      if (performance.now() - h.grab.lost.at > REGRAB_MS) this.release(h);
+    } else this.release(h);
     if (h.goal) this.dropGoal(h);
     this.put(h.ball, null);
     this.put(h.ray, null);
@@ -336,7 +341,7 @@ export class XrControls {
     if (!wrist || !thumb || !index) {
       h.pinched = h.fisted = false;
       h.palm = h.curls = null;
-      if (h.grab?.kind === 'ik') h.grab.lost = true;  // still stuck: taken up again where the hand comes back
+      if (h.grab?.kind === 'ik') this.lostSight(h.grab);  // still stuck, for a while (follow)
       this.cancelTeleport(h);
       this.showSkeleton(h, null);
       return { buttons: [], axes: [] };
@@ -678,12 +683,18 @@ export class XrControls {
     }
     if (g?.kind === 'ik') {
       if (g.ik !== this.ik() || !app.data) { this.release(h); return; }
-      if (g.hand && !h.palm) return;  // the stuck hand out of sight: the marker stays
-      if (g.lost) {  // ... and back: taken up again from where the hand is now
+      if (g.hand && !h.palm) {  // the stuck hand out of sight: the marker stays, but not for long
+        if (g.lost && performance.now() - g.lost.at > REGRAB_MS) this.release(h);
+        return;
+      }
+      if (g.lost) {  // ... and back: near where it went, taken up again from there; elsewhere (or late), let go
+        const away = g.lost.pos ? Math.hypot(...sub(h.grip.pos, g.lost.pos)) : 0;
+        if (away > REGRAB || performance.now() - g.lost.at > REGRAB_MS) { this.release(h); return; }
         const now = g.ik.targetPose(g.chain, app.data);
         if (!now) return;
-        Object.assign(g, { lost: false, c0: h.grip.pos, R0: h.grip.rot, p0: now.pos, T0: now.rot });
+        Object.assign(g, { lost: null, c0: h.grip.pos, R0: h.grip.rot, p0: now.pos, T0: now.rot });
       }
+      g.seen = h.grip.pos;  // (where it was last: lostSight)
       const turn = mulMBt(h.grip.rot, g.R0);  // grip rotation since the grab
       app.teleop.held.set(g.index, BALL);
       const want = { pos: add(g.p0, sub(h.grip.pos, g.c0)), rot: mulMM(turn, g.T0) };
@@ -825,6 +836,12 @@ export class XrControls {
     if (h.pointing && !h.dwell) this.aimTeleport(h);
     else if (h.aim !== undefined && h.opened) this.teleport(h, pose(mul4(this.sceneFromXr(), viewer.transform.matrix)).pos);
     else if (h.fistAll) this.cancelTeleport(h);
+  }
+
+  // A stuck hand out of sight: when and where (the last palm seen), so that
+  // coming back elsewhere or late lets go (follow: REGRAB, REGRAB_MS).
+  lostSight(g) {
+    g.lost ??= { at: performance.now(), pos: g.seen ?? null };
   }
 
   // The tracked hands stuck to markers let go of them (the menu opening,

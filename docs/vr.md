@@ -66,8 +66,9 @@ controller: its gestures are not read), each pointing the same kind of ray, its 
   is kept in this browser (Back to a typical hand forgets it). Pinches and
   the menu gesture do nothing meanwhile. The menu's **Hand angles** shows
   each hand's angles live (degrees). If the headset loses track of the hand, the
-  marker stays stuck where it is and is taken up again from wherever the
-  hand comes back.
+  marker stays stuck where it is: the hand coming back within 8 cm of where it
+  went and within 2 s takes it up again from there; further away or later,
+  the marker is let go (back onto the tip).
 - **Letting go**: opening the menu (the left pinch below) or pressing the Meta button (the
   system's menu: the session loses focus) lets go of every marker the hands are stuck to.
   While a hand is stuck, the menu is the only other gesture (the other hand can still stick
