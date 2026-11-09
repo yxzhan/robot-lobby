@@ -97,6 +97,11 @@ and activate FCI.
 The bridge needs `websockets` (the repo's `.venv` has it). Only the Panda
 driver needs franky.
 
+When something does not work on the real Panda (the hand above all),
+`python -m real_robot.debug_panda --ip <FCI address> [info | gripper | driver | mapping | arm | all]`
+checks it step by step, from franky's own calls (versions, state, homing, open, close: every
+return value and exception printed) up to the driver's hand thread; `info` only reads.
+
 ## As a package
 
 `real_robot/` is a pip package of its own (`pyproject.toml`; `lobby-real-robot`, the
