@@ -16,7 +16,7 @@
 import loadMujoco from '../../vendor/mujoco/mujoco.js';
 import { loadModelFiles, readFirst, urlSource } from './vfs.js';
 import { bodyInertia, compileWorld, firstKey, referencedNames } from '../world/world.js';
-import { GROUP as HAND_GROUP, HAND_BODIES, HAND_JOINTS, PARK as HAND_PARK, PREFIX as HAND_PREFIX, SIDES as HAND_SIDES, bodyName as handBodyName } from '../world/hands.js';
+import { GROUP as AVATAR_GROUP, HAND_JOINTS, LOCAL_SLOTS, PARTS as AVATAR_PARTS, SLOT_BODIES, bodyName as avatarBodyName, park as avatarPark } from '../world/avatar.js';
 import { CONTROL_DT } from '../controllers/groot.js';
 import { every } from './ticker.js';
 import { POLICIES, defaultPolicy, isInstalled, loadPolicy, loadPolicyIndex, policyById, policyId } from '../controllers/policy.js';
@@ -47,6 +47,7 @@ import { Presence } from '../net/presence.js';
 import { SharePanel } from '../net/share.js';
 import { MARKER } from './marker.js';
 import { XrControls } from '../render/xr.js';
+import { AvatarView } from '../render/avatars.js';
 import { Cameras, CamerasPanel, cameraKey, modelCameras } from '../cameras/cameras.js';
 import { CHAIN_COLORS } from '../drive/teleop.js';
 import Stats from '../../vendor/stats/Stats.js';
@@ -80,7 +81,8 @@ const OVERLAYS = 'mujoco-filament/overlays';  // localStorage: {visual, collisio
 // the brightness (the eyes' exposure, of the desktop camera's: the headset's
 // displays show the same scene brighter than a monitor).
 const XR_STORE = 'robot-lobby/xr';
-const XR_DEFAULTS = { msaa: 4, scale: 1, shadows: false, brightness: 1, handCollision: true };
+const XR_DEFAULTS = { msaa: 4, scale: 1, shadows: false, brightness: 1, mode: 'teleop' };
+const AVATAR_SEND_MS = 33;  // a shared world: the avatar's pose to the server at most this often
 function loadXrSettings() {
   try { return { ...XR_DEFAULTS, ...JSON.parse(localStorage.getItem(XR_STORE) ?? '{}') }; } catch { return { ...XR_DEFAULTS }; }
 }
@@ -1533,7 +1535,7 @@ class App {
     const geom = new mujoco.IntBuffer(1), normal = new mujoco.DoubleBuffer(3);
     try {
       const groups = new Uint8Array(6).fill(1);
-      groups[HAND_GROUP] = 0;  // not your own hands (world/hands.js)
+      groups[AVATAR_GROUP] = 0;  // not the avatars (world/avatar.js)
       const dist = mujoco.mj_ray(model, data, eye, dir, groups, true, -1, geom, normal);
       const g = geom.GetView()[0];
       if (dist < 0 || g < 0) return null;
@@ -1544,35 +1546,76 @@ class App {
     }
   }
 
-  // Your tracked hands' mocap bodies (world/hands.js) in this model:
-  // side -> joint -> mocap index; none in a world without them (network mode).
-  handMocaps() {
+  // The avatar slots of this world (world/avatar.js): per slot the mocap
+  // index of each of its parts (AVATAR_PARTS' order); [] in a world without.
+  avatarSlots() {
     const { mujoco, model } = this;
-    if (this.handModel === model) return this.handIds;
-    this.handModel = model;
-    this.handIds = null;
-    if (!model || this.net) return null;
-    const ids = {};
-    for (const side of HAND_SIDES) {
-      ids[side] = new Map();
-      for (const j of HAND_JOINTS) {
-        const b = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY.value, HAND_PREFIX + handBodyName(side, j));
-        if (b < 0 || model.body_mocapid[b] < 0) return null;
-        ids[side].set(j, model.body_mocapid[b]);
-      }
+    if (this.avatarModel === model) return this.avatarIds;
+    this.avatarModel = model;
+    this.avatarIds = [];
+    if (!model) return this.avatarIds;
+    const n = this.net ? (model.avatar_slots ?? 0) : LOCAL_SLOTS;
+    const body = this.net ? ((name) => model.names.body.indexOf(name))
+      : ((name) => mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY.value, name));
+    for (let s = 0; s < n; s++) {
+      const ids = AVATAR_PARTS.map((p) => { const b = body(avatarBodyName(s, p)); return b >= 0 ? model.body_mocapid[b] : -1; });
+      if (ids.some((m) => m < 0)) return (this.avatarIds = []);
+      this.avatarIds.push(ids);
     }
-    return (this.handIds = ids);
+    return this.avatarIds;
   }
 
-  // Puts a hand's balls on its joints (joint -> {pos}, scene frame), or parks
-  // it (null; joints not tracked are parked too). xr.js, every session frame.
-  setHand(side, joints) {
-    const ids = this.handMocaps()?.[side];
-    if (!ids) return;
-    const on = joints && this.xrSettings.handCollision !== false;
-    for (const [j, m] of ids) {
-      this.data.mocap_pos.set((on && joints.get(j)?.pos) || HAND_PARK, 3 * m);
+  // Who has which avatar slot: slot -> client id ('you' in the page's own
+  // world), and this page's own slot (null: none).
+  avatarOwners() {
+    if (!this.net) return this.avatarOn ? { 0: 'you' } : {};
+    return this.netAvatars ?? {};
+  }
+
+  ownAvatarSlot() {
+    if (!this.net) return this.avatarOn ? 0 : null;
+    const you = this.control?.you, owners = this.netAvatars ?? {};
+    const s = Object.keys(owners).find((k) => owners[k] === you);
+    return s == null ? null : +s;
+  }
+
+  // This page's avatar (xr.js, every session frame in Avatar mode): pose
+  // {head: {pos, quat}, left, right: joint -> {pos} (a hand not tracked:
+  // null; joints missing: parked)}, or null: parked, the slot let go. In the
+  // page's own world its slot 0 directly; in a shared world sent to the
+  // server (op avatar, every AVATAR_SEND_MS), which moves its slot's bodies.
+  setAvatar(pose) {
+    const was = this.avatarOn;
+    this.avatarOn = !!pose;
+    if (this.net) {
+      if (!pose) {
+        if (was) this.net.send('avatar', { off: true });
+        return;
+      }
+      const now = performance.now();
+      if (now - (this.avatarSentAt ?? 0) < AVATAR_SEND_MS) return;
+      this.avatarSentAt = now;
+      const r = (v) => Math.round(v * 1e4) / 1e4;
+      const hand = (m) => (m ? HAND_JOINTS.map((j) => { const p = m.get(j)?.pos; return p ? p.map(r) : null; }) : null);
+      this.net.send('avatar', { head: pose.head?.pos.map(r) ?? null, head_quat: pose.head?.quat?.map(r) ?? null,
+        left: hand(pose.left), right: hand(pose.right) });
+      return;
     }
+    const ids = this.avatarSlots()[0];
+    if (!ids || !this.data) return;
+    const home = avatarPark(0), d = this.data;
+    AVATAR_PARTS.forEach((part, i) => {
+      const m = ids[i];
+      let p = null;
+      if (part === 'head') {
+        p = pose?.head?.pos;
+        if (p && pose.head.quat) d.mocap_quat.set(pose.head.quat, 4 * m);
+      } else {
+        const k = part.indexOf('_'), side = part.slice(0, k), joint = part.slice(k + 1);
+        p = pose?.[side]?.get(joint)?.pos;
+      }
+      d.mocap_pos.set(p || home, 3 * m);
+    });
   }
 
   // The robot that body b (of the world) belongs to, or undefined.
@@ -1767,6 +1810,8 @@ class App {
         inst.delete();
       }
     }
+    this.avatarView ??= new AvatarView(this);  // the avatars where their bodies are (render/avatars.js)
+    this.avatarView.sync();
   }
 
   // A see-through copy of `robot` on OVERLAY (the window and WebXR views,
@@ -2081,6 +2126,8 @@ class App {
     });
     this.xrControls ??= new XrControls(this, (rod) => this.xrPart(rod), (...size) => this.xrPanel(...size));
     this.xrControls.start();
+    // The Meta button (the system's menu) blurs the session: the hands let go (xr.js).
+    session.addEventListener('visibilitychange', () => this.xrControls?.visibility(session.visibilityState));
     this.xr = { session, gl, layer, space, eyes, near, far, ar, frames: 0, t0: performance.now() };
     this.shadows();
     if (ar) this.passthrough(true);
@@ -2514,15 +2561,15 @@ try {
     }
     progress(`compiling ${list.length} robots…`);
     await nextFrame();
-    const model = compileWorld(mujoco, specs, app.physics, true);  // your hands last (world/hands.js)
+    const model = compileWorld(mujoco, specs, app.physics, LOCAL_SLOTS);  // the avatars last (world/avatar.js)
     let offset = 1;
     for (const r of list) {
       r.bodyOffset = offset;
       offset += r.visual.inertia.nbody - 1;
     }
-    offset += HAND_BODIES;
+    offset += LOCAL_SLOTS * SLOT_BODIES;
     const { total } = stateLayout(list);
-    total.nmocap += HAND_BODIES;
+    total.nmocap += LOCAL_SLOTS * SLOT_BODIES;
     const mismatch = Object.keys(total).find((k) => total[k] !== model[k]);
     if (offset !== model.nbody || mismatch) {
       const msg = mismatch ? `world has ${mismatch} ${model[mismatch]}, expected ${total[mismatch]}`
@@ -3112,7 +3159,10 @@ try {
         r.bodyOffset = offset;
         offset += r.visual.inertia.nbody - 1;
       }
+      const avatars = (msg.world.avatar_slots ?? 0) * SLOT_BODIES;  // the avatars after the robots (server/avatar.py)
+      offset += avatars;
       const layout = stateLayout(list);
+      layout.total.nmocap += avatars;
       const mismatch = Object.keys(layout.total).find((k) => layout.total[k] !== model[k]);
       if (offset !== model.nbody || mismatch) {
         throw new Error(mismatch ? `server world has ${mismatch} ${model[mismatch]}, expected ${layout.total[mismatch]}`
@@ -3535,6 +3585,7 @@ try {
     app.net = new NetClient({
       hello: () => app.control.hello(),
       clients: (msg) => app.control.setClients(msg),
+      avatars: (msg) => { app.netAvatars = Object.fromEntries(Object.entries(msg.slots ?? {}).map(([s, c]) => [+s, c])); },
       holds: (msg) => app.control.setHolds(msg),
       scene: (msg) => { scenes.push(msg); buildScenes(); },
       meta: (msg) => applyMeta(msg),

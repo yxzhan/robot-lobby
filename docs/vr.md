@@ -51,7 +51,8 @@ controller: its gestures are not read), each pointing the same kind of ray, its 
   the goal marker, selecting a robot.
 - **Palm on a marker**: hold the middle of your palm (between the wrist
   and the middle finger's knuckle) within 5 cm of an IK marker's center
-  for 3 s (it lights up meanwhile) and it sticks to your palm, following
+  for 3 s (it lights up, and a countdown by your hand shows the seconds left)
+  and it sticks to your palm, following
   it as a held grip does. The robot's fingers then follow yours: each
   actuator of that chain's gripper goes with a finger by its name (thumb,
   index, middle, ring, pinky / little) and closes as far as your finger is
@@ -60,22 +61,28 @@ controller: its gestures are not read), each pointing the same kind of ray, its 
   closes as far as you pinch. If the headset loses track of the hand, the
   marker stays stuck where it is and is taken up again from wherever the
   hand comes back.
-- **Palm up, all five fingers straight, held still** (within 3 cm) for
-  3 s lets go of the marker that hand is stuck to. While any hand is stuck
-  to a marker, this is the only gesture (the other hand can still stick to
-  another marker by holding its palm on it).
+- **Letting go**: opening the menu (the left pinch below) or pressing the Meta button (the
+  system's menu: the session loses focus) lets go of every marker the hands are stuck to.
+  While a hand is stuck, the menu is the only other gesture (the other hand can still stick
+  to another marker by holding its palm on it).
 - **Right hand pointing** (index straight, middle, ring and little fingers
   curled in) aims a **teleport**: the ray's spot on the floor shows where
   (the spawn marker). Open the hand all the way and you are there; curl it
   into a full fist instead to call it off.
 - **Left pinch with the palm towards you**, held 0.4 s, opens or closes the
-  **menu** (Y).
+  **menu** (Y); opening it lets go of the stuck markers.
 - Otherwise there are no sticks and no pulling bodies: walking the robot,
   snap turns and pulling stay on the controllers.
-- **Your hands collide** with the scene (with the physics in the page; not
-  yet in a shared world): a ball on each of the 25 joints
-  (`public/js/world/hands.js`, mocap bodies after every robot) follows the
-  hand, so you can push, tip over and poke objects and robots. Mocap
-  bodies are not pushed back, so the hands go through what they cannot
-  move, and they cannot hold anything (no grip). Rays pass through them.
-  The menu's **Hand collision** turns it off (kept in this browser).
+- **Modes** (the menu's **Mode**, kept in this browser):
+  - **Teleop** (the default): the gestures and buttons above drive the robots; your hands
+    collide with nothing.
+  - **Avatar**: you are in the physics as a solid head and two hands
+    (`public/js/world/avatar.js`: a ball per hand joint, a controller its wrist; mocap bodies
+    after every robot, not under gravity), so you push, tip over and poke objects and robots.
+    Mocap bodies are not pushed back: the hands go through what they cannot move (a fast hand
+    can pass through a small object) and hold nothing. The hands only push here: no sticking
+    to markers, no grabbing or pulling, the trigger only on the menu, the left stick no longer
+    walks the robot; the menu, teleporting and turning stay. In a shared world everyone sees
+    your avatar in your color (`public/js/render/avatars.js`; the server has 4 avatar slots,
+    `server/avatar.py`, one per client in Avatar mode, free again when it leaves the mode or the
+    world). Rays pass through avatars.

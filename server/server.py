@@ -29,6 +29,10 @@ Protocol (client -> server, JSON {op, ...}; `rid` asks for a reply):
                     targets back on its tips; from the browser publishing its
                     ROS (ros_hold) or its holder, the robot's hold not needed
                     (a VR client may be driving it)
+  avatar {head, head_quat, left, right} or {off: true}  this client's avatar
+                    (VR Avatar mode, server/avatar.py): its head and hand joints
+                    where it sends them, a slot taken on the first; off: parked,
+                    the slot free (also when the client leaves)
   joint_cmd {id, ctrl: [[a, v], ...], takeover}  ROS joint commands for robot
                     `id` (public/js/drive/drive.js jointCommand, the same rules): an
                     actuator a switched-on controller drives (item.owners) is
@@ -69,6 +73,7 @@ Server -> client:
                               (item.use, item.errors, item.ik / base / policy:
                               their describe(), item.owners: {actuator:
                               'policy' | 'base' | 'ik'}, what they drive)
+  {type: 'avatars', slots: {slot: client id}}   who has which avatar slot
   {type: 'status', robots: {id: {ik: {targets, err}, base: {measured},
                               goal: {phase, dist, dyaw}, policy: {command,
                               skill, active}}}} (skill: the manual one
@@ -142,6 +147,7 @@ import numpy as np
 from aiohttp import WSMsgType, web, web_fileresponse
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import avatar as AVATAR  # noqa: E402
 import base as BASE  # noqa: E402
 import control as CONTROL  # noqa: E402
 import goal as GOAL  # noqa: E402
@@ -544,11 +550,14 @@ def compile_world(robots, physics):
     frame = spec.worldbody.add_frame(pos=r.pos, quat=[math.cos(r.yaw / 2), 0, 0, math.sin(r.yaw / 2)])
     spec.attach(child, frame=frame, prefix=r.prefix)
   share_assets(spec, robots)
+  # The avatars after every robot (avatar.py), so the robots' indices stay theirs.
+  spec.attach(mujoco.MjSpec.from_string(AVATAR.avatar_xml()), frame=spec.worldbody.add_frame(), prefix='')
   model = spec.compile()
   offset = 1
   for r in robots:
     r.body_offset = offset
     offset += r.info['nbody'] - 1
+  offset += AVATAR.SLOTS * AVATAR.SLOT_BODIES
   if offset != model.nbody:
     raise RuntimeError(f'world has {model.nbody} bodies, expected {offset}')
   return model
@@ -724,6 +733,7 @@ class World:
     self.transports = {}  # ws -> its connection's transport (how much it still has to send)
     self.dynamics = set()  # clients that want qvel and qfrc_actuator in the states
     self.ros_holds = {}  # robot id or 'clock' -> the client publishing its ROS (op ros_hold)
+    self.avatars = AVATAR.Avatars()  # the VR clients' avatars (op avatar)
     self.control = CONTROL.Control()  # who drives which robot (control.py)
     self.lock = asyncio.Lock()  # one scene change at a time
     # The model and data belong to the stepping thread while it holds this
@@ -885,6 +895,7 @@ class World:
       r.initial = {'qpos': data.qpos[at['qpos']:at['qpos'] + d['nq']].copy(),
                    'ctrl': data.ctrl[at['ctrl']:at['ctrl'] + d['nu']].copy()}
     self.model, self.data, self.robots = model, data, robots
+    self.avatars.bind(model, mujoco)
     self.next_control = data.time
     self.perturbs.clear()
     self.version += 1
@@ -978,6 +989,7 @@ class World:
     c = ctl.by_ws[ws]
     if op == 'hello':
       ctl.hello(ws, msg.get('id'), msg.get('name'), msg.get('touch'))
+      await self.send_avatars(ws)
       return
     if op == 'rename':
       ctl.rename(c, msg.get('name'))
@@ -1098,6 +1110,8 @@ class World:
       self.dirty = True
     elif op == 'real_sync':
       return self.real_sync(ws, msg)
+    elif op == 'avatar':
+      await self.avatar(self.control.by_ws[ws], msg)
     elif op == 'dynamics':
       (self.dynamics.add if msg.get('on') else self.dynamics.discard)(ws)
     elif op == 'perturb':
@@ -1303,6 +1317,36 @@ class World:
     d.qvel[dof:dof + 6] = 0
     mujoco.mj_forward(m, d)
     self.jumped()
+
+  async def avatar(self, c, msg):
+    """Op avatar: client c's avatar where its head and hands are (avatar.py
+    Avatars.set), a slot taken for it if it had none; {off: true} frees it."""
+    av = self.avatars
+    if msg.get('off'):
+      if av.release(self.data, c.id):
+        self.dirty = True
+        await self.send_avatars()
+      return
+    if self.model is None:
+      return
+    had = av.slot_of(c.id, take=False)
+    slot = av.slot_of(c.id)
+    if slot is None:
+      raise ValueError(f'no free avatar slot ({AVATAR.SLOTS} in use)')
+    av.set(self.data, slot, msg)
+    self.dirty = True
+    if had is None:
+      await self.send_avatars()
+
+  async def send_avatars(self, only=None):
+    """Who has which avatar slot ({type: 'avatars', slots: {slot: client id}}),
+    to every client (or `only`): render/avatars.js colors them."""
+    text = json.dumps({'type': 'avatars', 'slots': {str(s): cid for s, cid in self.avatars.owners.items()}})
+    for ws in ([only] if only else list(self.clients)):
+      try:
+        await ws.send_str(text)
+      except (ConnectionError, RuntimeError):
+        pass
 
   def real_sync(self, ws, msg):
     """Op real_sync: robot `id`'s joints and actuator targets where its real
@@ -1531,6 +1575,7 @@ class World:
         'light_type', 'light_active', 'light_bodyid', 'light_pos', 'light_dir', 'light_diffuse', 'light_intensity',
         'light_range', 'light_cutoff', 'light_exponent')}
     out.update({k: int(getattr(m, k)) for k in ('nbody', 'njnt', 'ngeom', 'nsite', 'nu', 'nq', 'nv', 'na', 'nmocap', 'nlight')})
+    out['avatar_slots'] = AVATAR.SLOTS
     out['names'] = {'body': names(mujoco.mjtObj.mjOBJ_BODY, m.nbody), 'joint': names(mujoco.mjtObj.mjOBJ_JOINT, m.njnt),
                     'actuator': names(mujoco.mjtObj.mjOBJ_ACTUATOR, m.nu), 'site': names(mujoco.mjtObj.mjOBJ_SITE, m.nsite)}
     return out
@@ -1685,8 +1730,12 @@ async def ws_handler(request):
     world.clients.discard(ws)
     world.transports.pop(ws, None)
     world.dynamics.discard(ws)
+    gone = world.control.by_ws.get(ws)
     world.control.leave(ws)
     await world.sync_control()
+    if gone and world.avatars.release(world.data, gone.id):  # its avatar parked, the slot free
+      world.dirty = True
+      await world.send_avatars()
     if ws in world.ros_holds.values():  # its robots' ROS free for others
       await world.send_holds()
     async with world.stepping:

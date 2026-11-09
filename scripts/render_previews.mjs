@@ -127,7 +127,7 @@ try {
       // fixture parts 10 m up).
       const [rlo, rhi] = room ? bounds((g) => ours(m.geom_bodyid[g]) && shell(m.geom_bodyid[g])) : [];
       const inside = (g) => [0, 1, 2].every((k) => d.geom_xpos[3 * g + k] > rlo[k] && d.geom_xpos[3 * g + k] < rhi[k]);
-      // Only the asset's own geoms: not the VR hands' collision balls, parked 1 km up.
+      // Only the asset's own geoms: not the avatars' bodies (VR), parked 1 km up.
       const [lo, hi] = bounds((g) => ours(m.geom_bodyid[g]) && (!room || (!shell(m.geom_bodyid[g]) && inside(g))));
       const c = lo.map((v, k) => (v + hi[k]) / 2), radius = 0.5 * Math.hypot(...hi.map((v, k) => v - lo[k]));
       app.orbit.center = c;
