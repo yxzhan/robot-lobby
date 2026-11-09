@@ -83,13 +83,9 @@ controller: its gestures are not read), each pointing the same kind of ray, its 
 - **Modes** (the menu's **Mode**, kept in this browser):
   - **Teleop** (the default): the gestures and buttons above drive the robots; your hands
     collide with nothing.
-  - **Avatar**: you are in the physics as a solid head, torso, legs and two hands
-    (`public/js/world/avatar.js`: the torso and legs MuJoCo's humanoid's capsules, a ball per
-    hand joint, a controller its wrist; mocap bodies after every robot, not under gravity), so
-    you push, tip over and poke objects and robots. The torso hangs below your head, the legs
-    stand on the floor under you, both turned the way you look; they are apart (a crouch sinks
-    the torso toward the legs, a tall user stands above them). In VR you see your own torso
-    and legs looking down.
+  - **Avatar**: you are in the physics as two solid hands and a head (seen, colliding with nothing)
+    (`public/js/world/avatar.js`: a ball per hand joint, a controller its wrist; mocap bodies
+    after every robot, not under gravity), so you push, tip over and poke objects and robots.
     Mocap bodies are not pushed back: the hands go through what they cannot move (a fast hand
     can pass through a small object) and hold nothing. The hands only push here: no sticking
     to markers, no grabbing or pulling, the trigger only on the menu, the left stick no longer

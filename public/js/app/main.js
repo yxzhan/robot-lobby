@@ -1580,8 +1580,8 @@ class App {
   }
 
   // This page's avatar (xr.js, every session frame in Avatar mode): pose
-  // {head, torso, legs: {pos, quat}, left, right: joint -> {pos} (a hand not
-  // tracked: null; joints missing: parked)}, or null: parked, the slot let go. In the
+  // {head: {pos, quat}, left, right: joint -> {pos} (a hand not tracked:
+  // null; joints missing: parked)}, or null: parked, the slot let go. In the
   // page's own world its slot 0 directly; in a shared world sent to the
   // server (op avatar, every AVATAR_SEND_MS), which moves its slot's bodies.
   setAvatar(pose) {
@@ -1597,12 +1597,8 @@ class App {
       this.avatarSentAt = now;
       const r = (v) => Math.round(v * 1e4) / 1e4;
       const hand = (m) => (m ? HAND_JOINTS.map((j) => { const p = m.get(j)?.pos; return p ? p.map(r) : null; }) : null);
-      const msg = { left: hand(pose.left), right: hand(pose.right) };
-      for (const part of ['head', 'torso', 'legs']) {
-        msg[part] = pose[part]?.pos.map(r) ?? null;
-        msg[`${part}_quat`] = pose[part]?.quat?.map(r) ?? null;
-      }
-      this.net.send('avatar', msg);
+      this.net.send('avatar', { head: pose.head?.pos.map(r) ?? null, head_quat: pose.head?.quat?.map(r) ?? null,
+        left: hand(pose.left), right: hand(pose.right) });
       return;
     }
     const ids = this.avatarSlots()[0];
@@ -1611,9 +1607,9 @@ class App {
     AVATAR_PARTS.forEach((part, i) => {
       const m = ids[i];
       let p = null;
-      if (part === 'head' || part === 'torso' || part === 'legs') {
-        p = pose?.[part]?.pos;
-        if (p && pose[part].quat) d.mocap_quat.set(pose[part].quat, 4 * m);
+      if (part === 'head') {
+        p = pose?.head?.pos;
+        if (p && pose.head.quat) d.mocap_quat.set(pose.head.quat, 4 * m);
       } else {
         const k = part.indexOf('_'), side = part.slice(0, k), joint = part.slice(k + 1);
         p = pose?.[side]?.get(joint)?.pos;
