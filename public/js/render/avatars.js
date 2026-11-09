@@ -1,12 +1,16 @@
 // The avatars (world/avatar.js) drawn where their bodies are: a head (a ball
-// with a dark visor the way its owner looks) and two hands (a ball per joint,
-// rods along the fingers), in the owner's color (a shared world: its client's,
-// net/control.js). A slot whose bodies are all parked is hidden, and so is
-// this page's own avatar while it is in VR (it sees its hands as their
-// skeleton, xr.js, and has no use for its own head). Shapes are made the
+// with a dark visor the way its owner looks), a torso and legs (the humanoid's
+// capsules) and two hands (a ball per joint, rods along the fingers), in the
+// owner's color (a shared world: its client's, net/control.js). A slot whose
+// bodies are all parked is hidden; this page's own avatar in VR shows only its
+// torso and legs (its hands are their skeleton, xr.js; its head would be in
+// the way). Shapes are made the
 // first time a slot is used (App.xrPart: a unit ball / rod on OVERLAY).
 
-import { BONES, HEAD_RADIUS, PARTS, SIDES, parked, radius } from '../world/avatar.js';
+import { BONES, CAPSULES, HEAD_RADIUS, PARTS, SIDES, parked, radius } from '../world/avatar.js';
+
+const HANDS = PARTS.filter((p) => p.includes('_'));  // the hand joints' parts
+const BODY_PARTS = Object.keys(CAPSULES);           // torso, legs
 
 const ZERO = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1];
 const VISOR = [0.075, 0.045, 0.03];  // m: the visor's half axes (sideways, up, depth)
@@ -28,7 +32,7 @@ export class AvatarView {
     const owners = app.avatarOwners(), own = app.xr ? app.ownAvatarSlot() : null;
     ids.forEach((mocap, s) => {
       const pos = (i) => d.mocap_pos.subarray(3 * mocap[i], 3 * mocap[i] + 3);
-      const active = s !== own && owners[s] != null && mocap.some((_, i) => !parked(pos(i)));
+      const active = owners[s] != null && mocap.some((_, i) => !parked(pos(i)));
       const v = this.slots[s];
       if (!active) {
         if (v?.shown) this.hide(v);
@@ -36,7 +40,7 @@ export class AvatarView {
       }
       const view = v ?? (this.slots[s] = this.make());
       this.color(view, owners[s]);
-      this.place(view, mocap, d);
+      this.place(view, mocap, d, s === own);
     });
   }
 
@@ -45,8 +49,10 @@ export class AvatarView {
     const visor = part(false);
     visor.mi.setColor4Parameter('baseColor', Filament.RgbaType.sRGB, VISOR_COLOR);
     visor.mi.setFloatParameter('roughness', 0.15);
-    return { head: part(false), visor, balls: PARTS.slice(1).map(() => part(false)), bones: SIDES.flatMap(() => BONES.map(() => part(true))),
-             color: null, shown: false };
+    // A capsule: a rod and a ball at each end.
+    const capsules = Object.fromEntries(BODY_PARTS.map((b) => [b, CAPSULES[b].map(() => ({ rod: part(true), ends: [part(false), part(false)] }))]));
+    return { head: part(false), visor, balls: HANDS.map(() => part(false)), bones: SIDES.flatMap(() => BONES.map(() => part(true))),
+             capsules, color: null, shown: false };
   }
 
   color(v, owner) {
@@ -55,7 +61,7 @@ export class AvatarView {
     if (v.color === hex) return;
     v.color = hex;
     const rgba = [...hexRgb(hex), 1];
-    for (const p of [v.head, ...v.balls, ...v.bones]) p.mi.setColor4Parameter('baseColor', Filament.RgbaType.sRGB, rgba);
+    for (const p of this.colored(v)) p.mi.setColor4Parameter('baseColor', Filament.RgbaType.sRGB, rgba);
   }
 
   put(p, m) {
@@ -64,38 +70,59 @@ export class AvatarView {
     inst.delete();
   }
 
+  colored(v) {
+    return [v.head, ...v.balls, ...v.bones, ...Object.values(v.capsules).flat().flatMap((c) => [c.rod, ...c.ends])];
+  }
+
   hide(v) {
-    for (const p of [v.head, v.visor, ...v.balls, ...v.bones]) this.put(p, null);
+    for (const p of [v.visor, ...this.colored(v)]) this.put(p, null);
     v.shown = false;
   }
 
-  place(v, mocap, d) {
+  // `own`: this page's own avatar in VR: its torso and legs only.
+  place(v, mocap, d, own = false) {
     v.shown = true;
+    const index = new Map(PARTS.map((p, i) => [p, i]));
     const at = (i) => Array.from(d.mocap_pos.subarray(3 * mocap[i], 3 * mocap[i] + 3));
-    const ball = (p, c, r) => this.put(p, parked(c) ? null : [r, 0, 0, 0, 0, r, 0, 0, 0, 0, r, 0, ...c, 1]);
-    // The head, and its visor in front (the view's -z, from the head's quaternion).
-    const head = at(0);
+    const cols = (i) => quatColumns(d.mocap_quat.subarray(4 * mocap[i], 4 * mocap[i] + 4));
+    const ball = (p, c, r) => this.put(p, c && !parked(c) ? [r, 0, 0, 0, 0, r, 0, 0, 0, 0, r, 0, ...c, 1] : null);
+    // The head, and its visor in front (the view's -z).
+    const head = own ? null : at(index.get('head'));
     ball(v.head, head, HEAD_RADIUS);
-    if (parked(head)) this.put(v.visor, null);
+    if (!head || parked(head)) this.put(v.visor, null);
     else {
-      const [w, x, y, z] = d.mocap_quat.subarray(4 * mocap[0], 4 * mocap[0] + 4);
-      const col = [  // the rotation's columns
-        [1 - 2 * (y * y + z * z), 2 * (x * y + w * z), 2 * (x * z - w * y)],
-        [2 * (x * y - w * z), 1 - 2 * (x * x + z * z), 2 * (y * z + w * x)],
-        [2 * (x * z + w * y), 2 * (y * z - w * x), 1 - 2 * (x * x + y * y)],
-      ];
+      const col = cols(index.get('head'));
       const c = head.map((h, i) => h - 0.8 * HEAD_RADIUS * col[2][i]);
       this.put(v.visor, [...col[0].map((a) => a * VISOR[0]), 0, ...col[1].map((a) => a * VISOR[1]), 0,
         ...col[2].map((a) => a * VISOR[2]), 0, ...c, 1]);
     }
+    // The torso and legs: their capsules, where their body is and turned as it is.
+    for (const b of BODY_PARTS) {
+      const o = at(index.get(b)), col = cols(index.get(b)), off = parked(o);
+      const world = (p) => o.map((x, i) => x + col[0][i] * p[0] + col[1][i] * p[1] + col[2][i] * p[2]);
+      CAPSULES[b].forEach((c, k) => {
+        const parts = v.capsules[b][k], a = world(c.from), z = world(c.to);
+        this.put(parts.rod, off ? null : rod(a, z, c.r));
+        ball(parts.ends[0], off ? null : a, c.r);
+        ball(parts.ends[1], off ? null : z, c.r);
+      });
+    }
     // The hands: a ball per joint, rods along the bones.
-    const index = new Map(PARTS.map((p, i) => [p, i]));
-    PARTS.slice(1).forEach((part, k) => ball(v.balls[k], at(k + 1), radius(part)));
+    HANDS.forEach((part, k) => ball(v.balls[k], own ? null : at(index.get(part)), radius(part)));
     SIDES.forEach((side, si) => BONES.forEach(([a, b], bi) => {
       const p = at(index.get(`${side}_${a}`)), q = at(index.get(`${side}_${b}`));
-      this.put(v.bones[si * BONES.length + bi], parked(p) || parked(q) ? null : rod(p, q, BONE_RADIUS));
+      this.put(v.bones[si * BONES.length + bi], own || parked(p) || parked(q) ? null : rod(p, q, BONE_RADIUS));
     }));
   }
+}
+
+// A quaternion [w, x, y, z]'s rotation as its three columns.
+function quatColumns([w, x, y, z]) {
+  return [
+    [1 - 2 * (y * y + z * z), 2 * (x * y + w * z), 2 * (x * z - w * y)],
+    [2 * (x * y - w * z), 1 - 2 * (x * x + z * z), 2 * (y * z + w * x)],
+    [2 * (x * z + w * y), 2 * (y * z - w * x), 1 - 2 * (x * x + y * y)],
+  ];
 }
 
 // The unit rod (App.xrPart(true): radius 1, z from -0.5 to 0.5) from p to q, w wide.
