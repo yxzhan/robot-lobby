@@ -1,5 +1,6 @@
 // A real robot following this one (RealLink, rr.real): the lobby side of
-// real_robot/ (python -m real_robot), on the robot's own bridge and prefix.
+// robot-station (github.com/yxzhan/robot-station: its follower, behind
+// rosbridge_server), on the robot's own bridge and prefix.
 // The robot's joint states (robot.js) are the real robot's targets; from
 // the bridge come, under the prefix:
 //   real/joint_states  sensor_msgs/JointState: the real robot's joints, in
@@ -167,7 +168,7 @@ export class RealLink {
   syncToReal() {
     const app = this.app, { mujoco, model, data } = app;
     if (!model || !data) return 'no world';
-    if (!this.fresh) return 'no state from the real robot (is python -m real_robot running?)';
+    if (!this.fresh) return 'no state from the real robot (is robot-station running?)';
     if (this.state === 'enabled') return '';
     const t = this.rr.tables(), qpos = [], ctrl = [];  // [[adr, dof, v]], [[a, u]] in the world's indices
     for (const [name, v] of this.joints) {
@@ -228,7 +229,7 @@ export class RealLink {
 
   // One line for the panels: the bridge's state and why.
   text() {
-    if (!this.live) return this.rr.on ? 'no real_robot bridge on this address' : 'switch the robot\'s ROS on';
+    if (!this.live) return this.rr.on ? 'no robot-station on this bridge' : 'switch the robot\'s ROS on';
     const s = this.status;
     const parts = [`${s.robot}: ${s.state}`];
     if (s.state === 'enabled') parts.push(s.stale ? 'holding (no targets)' : `following, ${s.error?.toFixed(3) ?? '–'} rad behind`);

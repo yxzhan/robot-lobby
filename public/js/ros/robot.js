@@ -57,8 +57,8 @@
 //             driven by that actuator (ctrl = position * scale + offset;
 //             e.g. a gripper on a tendon), beside those with actuators on
 //             their joints
-//   real      {robot}: a real robot can follow it (real.js: real_robot/'s
-//             bridge, its --robot name)
+//   real      {robot}: a real robot can follow it (real.js: robot-station's
+//             follower over rosbridge, its robot name)
 //   cameras   {camera: {topic, frame}}: its topic namespace (…/image_raw,
 //             …/camera_info) and optical frame, as the real driver names
 //             them (a RealSense: camera/camera/color, camera_color_optical_frame)
