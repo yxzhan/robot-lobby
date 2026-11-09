@@ -1,4 +1,54 @@
 {
+  "agibot/g2_crsB_wuji/g2_crsB_wuji.xml": {
+    "chains": [
+      { "name": "hand_l_base", "tip": "hand_l_base_link", "root": "arm_l_link1", "site": "left_tcp", "offset": [0, 0, 0], "locked": [], "gripper": [
+        { "actuator": "hand_l_thumb_joint1", "open": 0.0475, "closed": 1.1984 },
+        { "actuator": "hand_l_thumb_joint2", "open": 0.0, "closed": -0.053 },
+        { "actuator": "hand_l_thumb_joint3", "open": 0.0, "closed": 0.8267 },
+        { "actuator": "hand_l_thumb_joint4", "open": 0.0, "closed": 1.1548 },
+        { "actuator": "hand_l_index_joint1", "open": 0.0, "closed": 1.4824 },
+        { "actuator": "hand_l_index_joint2", "open": -0.12, "closed": -0.18 },
+        { "actuator": "hand_l_index_joint3", "open": 0.0, "closed": 1.4711 },
+        { "actuator": "hand_l_index_joint4", "open": 0.0, "closed": 1.3469 },
+        { "actuator": "hand_l_middle_joint1", "open": 0.0, "closed": 1.474 },
+        { "actuator": "hand_l_middle_joint2", "open": 0.0, "closed": 0.0 },
+        { "actuator": "hand_l_middle_joint3", "open": 0.0, "closed": 1.4736 },
+        { "actuator": "hand_l_middle_joint4", "open": 0.0, "closed": 1.3462 },
+        { "actuator": "hand_l_ring_joint1", "open": 0.0, "closed": 1.4806 },
+        { "actuator": "hand_l_ring_joint2", "open": 0.06, "closed": 0.0 },
+        { "actuator": "hand_l_ring_joint3", "open": 0.0, "closed": 1.4713 },
+        { "actuator": "hand_l_ring_joint4", "open": 0.0, "closed": 1.3367 },
+        { "actuator": "hand_l_pinky_joint1", "open": 0.0, "closed": 1.4806 },
+        { "actuator": "hand_l_pinky_joint2", "open": 0.12, "closed": 0.06 },
+        { "actuator": "hand_l_pinky_joint3", "open": 0.0, "closed": 1.4715 },
+        { "actuator": "hand_l_pinky_joint4", "open": 0.0, "closed": 1.3453 }
+      ] },
+      { "name": "hand_r_base", "tip": "hand_r_base_link", "root": "arm_r_link1", "site": "right_tcp", "offset": [0, 0, 0], "locked": [], "gripper": [
+        { "actuator": "hand_r_thumb_joint1", "open": 0.0475, "closed": 1.1984 },
+        { "actuator": "hand_r_thumb_joint2", "open": 0.0, "closed": -0.053 },
+        { "actuator": "hand_r_thumb_joint3", "open": 0.0, "closed": 0.8267 },
+        { "actuator": "hand_r_thumb_joint4", "open": 0.0, "closed": 1.1548 },
+        { "actuator": "hand_r_index_joint1", "open": 0.0, "closed": 1.4824 },
+        { "actuator": "hand_r_index_joint2", "open": 0.12, "closed": 0.18 },
+        { "actuator": "hand_r_index_joint3", "open": 0.0, "closed": 1.4711 },
+        { "actuator": "hand_r_index_joint4", "open": 0.0, "closed": 1.3469 },
+        { "actuator": "hand_r_middle_joint1", "open": 0.0, "closed": 1.474 },
+        { "actuator": "hand_r_middle_joint2", "open": 0.0, "closed": 0.0 },
+        { "actuator": "hand_r_middle_joint3", "open": 0.0, "closed": 1.4736 },
+        { "actuator": "hand_r_middle_joint4", "open": 0.0, "closed": 1.3462 },
+        { "actuator": "hand_r_ring_joint1", "open": 0.0, "closed": 1.4806 },
+        { "actuator": "hand_r_ring_joint2", "open": -0.06, "closed": 0.0 },
+        { "actuator": "hand_r_ring_joint3", "open": 0.0, "closed": 1.4713 },
+        { "actuator": "hand_r_ring_joint4", "open": 0.0, "closed": 1.3367 },
+        { "actuator": "hand_r_pinky_joint1", "open": 0.0, "closed": 1.4806 },
+        { "actuator": "hand_r_pinky_joint2", "open": -0.12, "closed": -0.06 },
+        { "actuator": "hand_r_pinky_joint3", "open": 0.0, "closed": 1.4715 },
+        { "actuator": "hand_r_pinky_joint4", "open": 0.0, "closed": 1.3453 }
+      ] },
+      { "name": "head_link3", "tip": "head_link3", "root": "body_link1", "site": "", "offset": [0, 0, 0], "locked": [], "gripper": "" }
+    ],
+    "auto": true
+  },
   "aicor/garmi/garmi.xml": {
     "chains": [
       { "name": "left", "root": "left_fr3_link1", "tip": "left_fr3_hand", "offset": [0, 0, 0.1034], "locked": [], "gripper": "left_gripper" },
