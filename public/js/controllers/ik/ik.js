@@ -319,15 +319,21 @@ export class IkController {
     return pts.reduce((sum, p) => sum + Math.hypot(p[0] - mid[0], p[1] - mid[1], p[2] - mid[2]), 0) / pts.length;
   }
 
-  // A config's gripper (see the top of the file) as [{a, open, closed}].
+  // A config's gripper (see the top of the file) as [{a, open, closed,
+  // source?, range?}]: source and range, for VR hand tracking, the angle of
+  // the hand that drives it and that angle's values for open and closed
+  // (render/handmap.js).
   gripperOf(g) {
     const { model } = this;
     if (typeof g === 'string') {
       const a = g ? this.id('mjOBJ_ACTUATOR', g) : -1;
       return a < 0 ? [] : [{ a, open: model.actuator_ctrlrange[2 * a + 1], closed: model.actuator_ctrlrange[2 * a] }];
     }
-    return (g ?? []).map(({ actuator, open, closed }) => ({ a: this.id('mjOBJ_ACTUATOR', actuator), open: +open, closed: +closed }))
-      .filter((x) => x.a >= 0 && Number.isFinite(x.open) && Number.isFinite(x.closed));
+    const range = (r) => (Array.isArray(r) && r.length === 2 && r.every(Number.isFinite) ? r.map(Number) : undefined);
+    return (g ?? []).map(({ actuator, open, closed, source, range: r }) => ({
+      a: this.id('mjOBJ_ACTUATOR', actuator), open: +open, closed: +closed,
+      ...(typeof source === 'string' ? { source } : {}), ...(range(r) ? { range: range(r) } : {}),
+    })).filter((x) => x.a >= 0 && Number.isFinite(x.open) && Number.isFinite(x.closed));
   }
 
   id(type, name) {

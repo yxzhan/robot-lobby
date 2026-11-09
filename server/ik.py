@@ -324,7 +324,7 @@ class IkController:
     return float(np.linalg.norm(pts - pts.mean(0), axis=1).mean())
 
   def gripper_of(self, g):
-    """A config's gripper as [{a, open, closed}] (ik.js gripperOf)."""
+    """A config's gripper as [{a, open, closed, source?, range?}] (ik.js gripperOf)."""
     m = self.model
     if isinstance(g, str):
       a = self.id('mjOBJ_ACTUATOR', g) if g else -1
@@ -336,7 +336,15 @@ class IkController:
       except (KeyError, TypeError, ValueError):
         continue
       if a >= 0 and math.isfinite(o) and math.isfinite(c):
-        out.append({'a': a, 'open': o, 'closed': c})
+        e = {'a': a, 'open': o, 'closed': c}
+        # VR hand tracking (public/js/render/handmap.js): which angle of the
+        # hand drives it, and that angle's values for open and closed.
+        if isinstance(x.get('source'), str):
+          e['source'] = x['source']
+        r = x.get('range')
+        if isinstance(r, list) and len(r) == 2 and all(isinstance(v, (int, float)) for v in r):
+          e['range'] = [float(r[0]), float(r[1])]
+        out.append(e)
     return out
 
   # -- chains from the config -----------------------------------------------

@@ -59,6 +59,7 @@
 import { BALL } from '../app/marker.js';
 import { XrMenu } from './xrmenu.js';
 import { HEAD_BACK } from '../world/avatar.js';
+import { FINGERS as HAND_FINGERS, amountFor, handAngles } from './handmap.js';
 import { snapToTip, strain } from '../controllers/ik/leash.js';
 
 const RUMBLE_MS = 80;           // a rumble pulse while a held marker is at its leash's end
@@ -366,6 +367,9 @@ export class XrControls {
     }
     const pinch = Math.min(1, Math.max(0, (PINCH_SPAN[1] - d) / (PINCH_SPAN[1] - PINCH_SPAN[0])));
     h.pinch = pinch;
+    // The hand's angles, curls and pinch: what a gripper entry's source names (handmap.js).
+    h.values = { ...handAngles(joints, h.name), pinch };
+    for (const [f, v] of Object.entries(h.curls)) h.values[`${f}.curl`] = v;
     const as = h.pinchAs, plain = !as || as === 'trigger';
     const buttons = [button(as === 'trigger', plain ? pinch : 0), button(h.fisted), button(false), button(false),
       button(h.fisted), button(as === 'menu')];
@@ -438,6 +442,10 @@ export class XrControls {
           action: () => { this.ik()?.targets.clear(); return true; } },  // every IK target back on its tip
         ...this.realItems(),
         { label: 'Quality', menu: () => this.qualityMenu() },
+        { label: 'Hand angles', menu: () => ({ title: 'Hand angles', items: [
+          { label: 'Left hand', menu: () => this.anglesMenu('left') },
+          { label: 'Right hand', menu: () => this.anglesMenu('right') },
+        ] }) },
         { label: 'FPS', info: true, value: () => (app.xr?.fps ? app.xr.fps.toFixed(0) : '…') },
         { label: 'Close', action: () => true },
       ],
@@ -462,6 +470,23 @@ export class XrControls {
         ],
       }),
     }];
+  }
+
+  // A tracked hand's angles live (handmap.js), degrees: for setting a robot
+  // hand's gripper sources and ranges (json/ik_defaults.json).
+  anglesMenu(side) {
+    const v = () => this.hands.get(side)?.values ?? {};
+    const show = (keys) => () => (keys.every((k) => v()[k] == null) ? 'not tracked' : keys.map((k) => (v()[k] == null ? '–' : Math.round(v()[k]))).join('  '));
+    return {
+      title: `${side === 'left' ? 'Left' : 'Right'} hand, degrees`,
+      items: [
+        { label: 'finger', info: true, value: () => 'mcp  pip  dip  spread' },
+        ...HAND_FINGERS.map((f) => ({ label: f, info: true, value: show(['mcp', 'pip', 'dip', 'spread'].map((k) => `${f}.${k}`)) })),
+        { label: 'thumb', info: true, value: () => 'cmc  abduct  mcp  ip' },
+        { label: '', info: true, value: show(['thumb.cmc', 'thumb.abduct', 'thumb.mcp', 'thumb.ip']) },
+        { label: 'pinch', info: true, value: () => (v().pinch == null ? '–' : v().pinch.toFixed(2)) },
+      ],
+    };
   }
 
   qualityMenu() {
@@ -610,8 +635,10 @@ export class XrControls {
     }
   }
 
-  // A stuck hand's fingers on the gripper of the chain it holds: each
-  // actuator as far as its finger is curled (one on no named finger: as the
+  // A stuck hand's fingers on the gripper of the chain it holds: an actuator
+  // whose entry names a source as that angle of the hand says (handmap.js:
+  // per robot hand, json/ik_defaults.json), the others as far as their
+  // finger is curled (by the actuator's name; one on no named finger: as the
   // hand is, on average); a gripper with no named fingers as far as you pinch.
   fingers(h, g) {
     const { app } = this, grip = g.chain.gripper ?? [];
@@ -619,7 +646,7 @@ export class XrControls {
     g.fingerOf ??= grip.map(({ a }) => fingerOf(g.ik.nameOf('mjOBJ_ACTUATOR', a)));
     const curls = Object.values(h.curls), all = curls.reduce((s, v) => s + v, 0) / (curls.length || 1);
     const named = g.fingerOf.some(Boolean);
-    const amounts = grip.map((_, i) => (!named ? h.pinch ?? 0 : h.curls[g.fingerOf[i]] ?? all));
+    const amounts = grip.map((e, i) => amountFor(e, h.values) ?? (!named ? h.pinch ?? 0 : h.curls[g.fingerOf[i]] ?? all));
     const now = performance.now();
     if (g.amounts && !amounts.some((v, i) => Math.abs(v - g.amounts[i]) > 0.02)) return;
     if (app.net && now - (g.sentAt ?? -Infinity) < FINGER_SEND_MS) return;
