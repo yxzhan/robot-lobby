@@ -12,8 +12,11 @@
 //
 // Enable first syncs: the robot (its joints, their actuators' targets, the
 // IK's targets) is put where the real one is, so the real robot starts from
-// where it stands; the bridge refuses a target too far from it. Sync needs
-// the physics in this page (local mode, as in the Quest's browser).
+// where it stands; the bridge refuses a target too far from it. With the
+// physics in this page (local mode) here; in a shared world on the server
+// (op real_sync, from the browser publishing the robot's ROS: e.g. a PC
+// next to the robot, while a VR client drives it), and the robot enabled
+// once the synced pose has come back (SYNC_TOL, within SYNC_WAIT_MS).
 //
 // For the robot files with a `real` entry in their ROS profile
 // (json/ros_profiles.json): {robot: the bridge's --robot name}.
@@ -22,6 +25,8 @@ import { every } from '../app/ticker.js';
 
 const STALE_MS = 1500;       // no status this long: no bridge
 const ENABLE_DELAY_MS = 150; // after a sync, before enabling: the synced joint states go out first
+const SYNC_TOL = 0.02;       // rad (m): a shared world's robot this close to the real one: synced
+const SYNC_WAIT_MS = 3000;   // ... at most this long after asking the server
 const COLORS = {
   disabled: [0.35, 0.65, 1, 0.3],
   enabled: [0.3, 1, 0.45, 0.35],
@@ -117,8 +122,38 @@ export class RealLink {
     const why = this.syncToReal();
     this.note = why;
     if (why) return why;
-    setTimeout(() => this.send(true), ENABLE_DELAY_MS);
+    if (this.app.net) this.enableWhenSynced();
+    else setTimeout(() => this.send(true), ENABLE_DELAY_MS);
     return '';
+  }
+
+  // How far the robot (as this page has it) is from the real one: the
+  // largest difference over the real robot's joints, rad (m).
+  offFromReal() {
+    const t = this.rr.tables(), q = this.app.data?.qpos;
+    let off = 0;
+    for (const [name, v] of this.joints ?? []) {
+      const jt = t.byName.get(name);
+      if (jt && q) off = Math.max(off, Math.abs(q[jt.q] - v));
+    }
+    return off;
+  }
+
+  // A shared world: enables once the server's synced state is here (the
+  // joint states this page publishes are the real robot's targets).
+  enableWhenSynced() {
+    const t0 = performance.now();
+    const check = () => {
+      if (this.state === 'enabled') return;
+      if (this.fresh && this.offFromReal() < SYNC_TOL) { this.send(true); return; }
+      if (performance.now() - t0 > SYNC_WAIT_MS) {
+        this.note = `not synced: the robot is still ${this.offFromReal().toFixed(3)} from the real one (Sync again)`;
+        this.rr.world.changed();
+        return;
+      }
+      setTimeout(check, 50);
+    };
+    setTimeout(check, 50);
   }
 
   disable() {
@@ -131,23 +166,30 @@ export class RealLink {
   // the IK's targets start again on its tips. '' or why not.
   syncToReal() {
     const app = this.app, { mujoco, model, data } = app;
-    if (app.net) return 'Sync needs the physics in this page (local mode)';
     if (!model || !data) return 'no world';
     if (!this.fresh) return 'no state from the real robot (is python -m real_robot running?)';
     if (this.state === 'enabled') return '';
-    const t = this.rr.tables();
+    const t = this.rr.tables(), qpos = [], ctrl = [];  // [[adr, dof, v]], [[a, u]] in the world's indices
     for (const [name, v] of this.joints) {
       const jt = t.byName.get(name);
       if (!jt) continue;
-      data.qpos[jt.q] = v;
-      data.qvel[jt.v] = 0;
+      qpos.push([jt.q, jt.v, v]);
       const drives = t.commands.get(name) ?? (t.acts.get(jt.j) ?? []).map((a) => ({ a, scale: 1, offset: 0 }));
       for (const { a, scale, offset } of drives) {
         let u = v * scale + offset;
         if (model.actuator_ctrllimited[a]) u = Math.min(model.actuator_ctrlrange[2 * a + 1], Math.max(model.actuator_ctrlrange[2 * a], u));
-        data.ctrl[a] = u;
+        ctrl.push([a, u]);
       }
     }
+    if (app.net) {  // the server's world: it puts the robot there (and resets its IK targets)
+      app.net.request('real_sync', { id: this.rr.robot.netId, qpos, ctrl }).catch((e) => {
+        this.note = e.message;
+        this.rr.world.changed();
+      });
+      return '';
+    }
+    for (const [q, v, x] of qpos) { data.qpos[q] = x; data.qvel[v] = 0; }
+    for (const [a, u] of ctrl) data.ctrl[a] = u;
     mujoco.mj_forward(model, data);
     this.rr.robot.ik?.reset();
     app.syncTransforms();

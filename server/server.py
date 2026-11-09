@@ -23,6 +23,12 @@ Protocol (client -> server, JSON {op, ...}; `rid` asks for a reply):
                     ROS (or /clock) from now on, or no longer: one browser
                     per robot (public/js/ros/robot.js), the first to ask; let
                     go when it leaves
+  real_sync {id, qpos: [[adr, dof, v], ...], ctrl: [[a, v], ...]}  robot `id`
+                    put where its real robot is (public/js/ros/real.js Sync):
+                    those joints (at rest) and actuator targets, its IK
+                    targets back on its tips; from the browser publishing its
+                    ROS (ros_hold) or its holder, the robot's hold not needed
+                    (a VR client may be driving it)
   joint_cmd {id, ctrl: [[a, v], ...], takeover}  ROS joint commands for robot
                     `id` (public/js/drive/drive.js jointCommand, the same rules): an
                     actuator a switched-on controller drives (item.owners) is
@@ -1090,6 +1096,8 @@ class World:
     elif op == 'joint_cmd':
       self.robot(msg['id']).joint_command(msg.get('ctrl') or [], bool(msg.get('takeover')), d)
       self.dirty = True
+    elif op == 'real_sync':
+      return self.real_sync(ws, msg)
     elif op == 'dynamics':
       (self.dynamics.add if msg.get('on') else self.dynamics.discard)(ws)
     elif op == 'perturb':
@@ -1295,6 +1303,32 @@ class World:
     d.qvel[dof:dof + 6] = 0
     mujoco.mj_forward(m, d)
     self.jumped()
+
+  def real_sync(self, ws, msg):
+    """Op real_sync: robot `id`'s joints and actuator targets where its real
+    robot is, its IK targets back on its tips. Only from the browser
+    publishing its ROS or its holder; only the robot's own joints and
+    actuators."""
+    r = self.robot(msg['id'])
+    holder = self.control.holder(r.id)
+    if self.ros_holds.get(r.id) is not ws and (holder is None or holder is not self.control.by_ws.get(ws)):
+      raise ValueError('Sync: only the browser publishing this robot\'s ROS (or its holder) may')
+    m, d = self.model, self.data
+    at = state_layout(self.robots)[r.id]
+    inside = lambda i, field, size: at[field] <= i < at[field] + r.dims[size]
+    for adr, dof, v in msg.get('qpos') or []:
+      adr, dof = int(adr), int(dof)
+      if inside(adr, 'qpos', 'nq') and inside(dof, 'qvel', 'nv'):
+        d.qpos[adr] = float(v)
+        d.qvel[dof] = 0
+    for a, v in msg.get('ctrl') or []:
+      if inside(int(a), 'ctrl', 'nu'):
+        d.ctrl[int(a)] = float(v)
+    mujoco.mj_forward(m, d)
+    if r.ik:
+      r.ik.reset()
+    self.jumped()
+    return {'ok': True}
 
   def jumped(self):
     self.epoch += 1

@@ -51,6 +51,23 @@ behind its command (blocked, a collision) or when the robot reports an
 error. **Enable** recovers from a fault. When the last lobby disconnects,
 the robot is disabled.
 
+### In a shared world (server mode): VR drives, a PC follows
+
+With the physics on the lobby server (`npm run server`, every browser a client of one world),
+the robot and its real one are two jobs for two clients:
+
+- **The PC** (next to the robot, a browser on `http://<server>:<port>/`): in the ROS panel,
+  **Bridge** `<robot computer>:9090` and the robot ticked. Its ROS is this browser's then
+  (one browser publishes a robot: the first to switch it on), so its joint states, the real
+  robot's targets, go out from here. **Enable** syncs the server's robot to the real one
+  (op `real_sync`: its joints, actuator targets, IK targets on the tips) and enables once the
+  synced pose has come back (within 2 cm / rad).
+- **The Quest** (the same address, no `?local`): drives the robot (IK markers, hands) as any
+  client does; it needs no bridge, and does not care whether a real robot follows.
+
+Sync is allowed from the browser publishing the robot's ROS or the robot's holder, so the PC
+syncs while the Quest holds it.
+
 **Keep the physical E-stop at hand.** The software limits do not replace it.
 
 Step by step on the real Panda (both the lobby teleop and the giskard demo, Docker): [TESTING_zh.md](TESTING_zh.md).
