@@ -32,8 +32,9 @@
           color: #ddd; background: rgba(0,0,0,.45); padding: 4px; border-radius: 8px; --c: #8a94a6; }
     /* The status after the buttons, wrapping onto the next line like them
        when it does not fit; never wider than the toolbar (which stays between
-       the panels): too long, it ends in … (the whole text is its tooltip). */
-    #status { flex: 0 1 auto; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+       the panels) nor 40em (a long error would stretch the toolbar across
+       the whole gap): too long, it ends in … (the whole text is its tooltip). */
+    #status { flex: 0 1 auto; min-width: 0; max-width: min(100%, 40em); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
               font-size: var(--fs); color: #aaa; text-align: center; padding: 1px 6px 2px; }
     /* Toolbar buttons: an icon and a label, each tinted with its colour
        (--c): pause amber, resume green, reset blue, clear red, full restart
