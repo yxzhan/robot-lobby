@@ -12,6 +12,12 @@ debug overlays (public/js/render/debug.js): the geoms that collide as col_*
 tables, each mesh as its convex hull (the vertices it uses and its faces),
 and jnt_bodyid.
 
+mesh_facenormal and mesh_facetexcoord are left out when they are mesh_face
+itself (as the OBJ files of the importers have them, `f i/i/i`), listed in
+the header's `same_as_face`: the page uses mesh_face for them. A mesh
+without texcoords gets its faces as facetexcoord, never read (its
+texcoordadr is -1), so that it does not keep the array apart.
+
 Packed as: uint32 header length, JSON header ({arrays: {name: [dtype,
 offset, count]}, ...}), zero padding to 8 bytes, then the arrays (each at an
 8-byte aligned offset of that data block).
@@ -78,7 +84,7 @@ def build(spec, model, rel, public):
       adr['mesh_texcoordadr'].append(at['texcoord'])
       at['texcoord'] += nt
     else:
-      parts['mesh_facetexcoord'].append(np.zeros((nf, 3), np.int32))
+      parts['mesh_facetexcoord'].append(m.mesh_face[fa:fa + nf])   # never read (texcoordadr -1)
       adr['mesh_texcoordadr'].append(-1)
     at['vert'] += nv
     at['normal'] += nn
@@ -89,6 +95,9 @@ def build(spec, model, rel, public):
     arrays[k] = np.concatenate(v) if v else np.zeros(0, empty[k])
   for k, v in adr.items():
     arrays[k] = np.array(v, np.int32)
+  same_as_face = [k for k in ('mesh_facenormal', 'mesh_facetexcoord') if np.array_equal(arrays[k], arrays['mesh_face'])]
+  for k in same_as_face:
+    del arrays[k]
 
   # Materials (all; few) and textures: pixels only for 2D textures MuJoCo
   # made itself, image files go by path.
@@ -164,6 +173,7 @@ def build(spec, model, rel, public):
       'nbody': m.nbody, 'njnt': m.njnt,
       'dims': {'nq': m.nq, 'nv': m.nv, 'na': m.na, 'nu': m.nu, 'nmocap': m.nmocap},
       'images': {str(k): v for k, v in images.items()},
+      'same_as_face': same_as_face,
       'arrays': {},
   }
   blob = bytearray()
