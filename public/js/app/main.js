@@ -34,7 +34,7 @@ import { applyOptions, geomOverrides, geomSignature, injectGeomDefaults, loadPhy
 import { WorldPanel } from '../world/worldpanel.js';
 import { BehaviorPanel } from '../behavior/btpanel.js';
 import { AgentPanel } from '../agent/agent.js';
-import { RenderPanel, loadQuality } from '../render/render.js';
+import { RenderPanel, VIEW_FAR_DEFAULT, loadQuality } from '../render/render.js';
 import { ROD_WIDTH, debugLines } from '../render/debug.js';
 import { Reveal } from '../render/reveal.js';
 import { addSwarm } from './swarm.js';
@@ -67,6 +67,7 @@ const MAT_TEXTURED = 'materials/lit_textured.filamat';
 // Alpha-blended variants, for geoms whose rgba alpha is below 1.
 const MAT_TRANSPARENT = 'materials/lit_transparent.filamat';
 const FOLLOW = 'mujoco-filament/follow-selection';  // localStorage: the camera follows the selection
+const VIEW_FAR = 'mujoco-filament/view-distance';   // localStorage: how far the view reaches (m)
 const MAT_TEXTURED_TRANSPARENT = 'materials/lit_textured_transparent.filamat';
 const MAT_UNLIT_TEXTURED = 'materials/unlit_textured.filamat';  // the WebXR menu panel
 // The debug overlays' lines (render/debug.js), fetched on their own: a page
@@ -969,6 +970,10 @@ class App {
     // Whether the camera follows the selection (the Render panel's switch,
     // saved in this browser), else turns to it once.
     try { this.follow = localStorage.getItem(FOLLOW) === '1'; } catch { this.follow = false; }
+    // How far the view reaches, its far plane (the Render panel's View
+    // distance, saved in this browser): nothing farther is drawn.
+    this.viewFar = VIEW_FAR_DEFAULT;
+    try { this.viewFar = Number(localStorage.getItem(VIEW_FAR)) || VIEW_FAR_DEFAULT; } catch { /* no storage */ }
     // What the window shows of the robots (the Render panel's Show; saved in
     // this browser): their geoms (visual), the debug overlays once their
     // material is in, and whether they reveal on spawn and reset (reveal).
@@ -1045,6 +1050,18 @@ class App {
     try { localStorage.setItem(FOLLOW, on ? '1' : '0'); } catch { /* no storage */ }
     if (on) this.trackSelection();
     else this.orbit.track(null);
+  }
+
+  // How far the view reaches (m, its far plane): the window's, a look
+  // through a robot's camera, captures and VR (from its next frame).
+  setViewDistance(m) {
+    this.viewFar = m;
+    try { localStorage.setItem(VIEW_FAR, String(m)); } catch { /* no storage */ }
+    if (this.xr) {
+      this.xr.far = m;
+      this.xr.session.updateRenderState({ depthNear: this.xr.near, depthFar: m });
+    }
+    this.resize();
   }
 
   // Makes the camera follow the selected body until it is cleared or another
@@ -1173,7 +1190,7 @@ class App {
     const w = Math.round(this.canvas.clientWidth * dpr), h = Math.round(this.canvas.clientHeight * dpr);
     this.canvas.width = w; this.canvas.height = h;
     this.view.setViewport([0, 0, w, h]);
-    this.camera.setProjectionFov(45, w / h, 0.01, 200, Filament.Camera$Fov.VERTICAL);
+    this.camera.setProjectionFov(45, w / h, 0.01, this.viewFar, Filament.Camera$Fov.VERTICAL);
   }
 
   // Render data for one robot model: one part per visible geom, with GPU
@@ -1980,7 +1997,7 @@ class App {
       const look = this.cameras?.lookPose();  // looking through a camera (cameras.js)
       if (look) {
         this.camera.setModelMatrix(look.matrix);
-        this.camera.setProjectionFov(look.fovy, this.canvas.width / this.canvas.height, 0.01, 200, Filament.Camera$Fov.VERTICAL);
+        this.camera.setProjectionFov(look.fovy, this.canvas.width / this.canvas.height, 0.01, this.viewFar, Filament.Camera$Fov.VERTICAL);
       } else {
         this.orbit.update();  // follows the selection
         this.camera.lookAt(this.orbit.eye(), this.orbit.center, [0, 0, 1]);
@@ -2056,7 +2073,7 @@ class App {
     const aim = (camera) => {
       if (look) camera.setModelMatrix(look.matrix);
       else camera.lookAt(this.orbit.eye(), this.orbit.center, [0, 0, 1]);
-      camera.setProjectionFov(look?.fovy ?? 45, 1, 0.01, 200, Filament.Camera$Fov.VERTICAL);
+      camera.setProjectionFov(look?.fovy ?? 45, 1, 0.01, this.viewFar, Filament.Camera$Fov.VERTICAL);
     };
     for (const shot of [...this.captures]) {
       const pixels = this.cameras.snapshot(shot.size, aim);
@@ -2117,7 +2134,7 @@ class App {
     const session = await navigator.xr.requestSession(ar ? 'immersive-ar' : 'immersive-vr', { requiredFeatures: ['local-floor'], optionalFeatures: ['hand-tracking'] });
     const gl = this.canvas.getContext('webgl2');  // Filament's own context
     await gl.makeXRCompatible();
-    const near = 0.05, far = 200;
+    const near = 0.05, far = this.viewFar;
     session.updateRenderState({ depthNear: near, depthFar: far });
     const layer = this.xrLayer(session, gl, ar);
     const space = await session.requestReferenceSpace('local-floor');
