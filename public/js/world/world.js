@@ -1,5 +1,5 @@
 import { geomOverrides, optionXml } from './physics.js';
-import { avatarXml } from './avatar.js';
+import { avatarXml, PREFIX as AVATAR_PREFIX } from './avatar.js';
 
 // The shared world: an empty floor that robots are spawned into.
 //
@@ -77,7 +77,7 @@ export function compileWorld(mujoco, robots, physics, avatars = 0) {
       const child = mujoco.parseXMLString(avatarXml(avatars));
       try {
         const frame = mujoco.mjs_addFrame(worldbody, root);
-        if (!mujoco.mjs_attach(frame.element, child.element, '', '')) throw new Error('could not attach the avatars');
+        if (!mujoco.mjs_attach(frame.element, child.element, AVATAR_PREFIX, '')) throw new Error('could not attach the avatars');
       } finally {
         child.delete();
       }

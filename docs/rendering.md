@@ -156,7 +156,7 @@ matc -a opengl -p mobile -o public/materials/unlit_reveal_wire.filamat materials
 ## Relation to MuJoCo's own Filament renderer
 
 MuJoCo's native Filament backend (`mjrfilament`, `src/render/filament/`) is
-not part of the `@mujoco/mujoco` npm package (3.15.0). Its CMake has an
+not part of the `@mujoco/mujoco` npm package (4.0.0). Its CMake has an
 Emscripten branch, but it requires a native build first (to compile the
 materials with matc) and then a full Emscripten build of Filament + MuJoCo.
 This example instead drives Filament.js directly from JavaScript.

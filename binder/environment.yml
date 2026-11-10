@@ -9,7 +9,7 @@ dependencies:
   - nodejs=22
   - pip
   - pip:
-      - mujoco==3.16.0
+      - mujoco==4.0.0
       - numpy
       - aiohttp
       - onnxruntime

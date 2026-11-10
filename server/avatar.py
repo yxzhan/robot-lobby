@@ -28,8 +28,13 @@ PARTS = ['head'] + [f'{s}_{p}' for s in SIDES for p in HAND_PARTS]
 SLOT_BODIES = len(PARTS)
 
 
+# Every avatar name starts with PREFIX: the avatars' spec is attached under it
+# (MuJoCo 4 warns on an empty prefix), its own names without it.
+PREFIX = 'avatar'
+
+
 def body_name(slot, part):
-  return f'avatar{slot}_{part}'
+  return f'{PREFIX}{slot}_{part}'
 
 
 def park(slot):
@@ -48,13 +53,13 @@ def avatar_xml(slots=SLOTS):
       if p == 'head':
         g = geom(f'type="sphere" size="{HEAD_RADIUS:g}"', 0)  # the head touches nothing
       elif part == 'palm':
-        g = geom('type="mesh" mesh="avatar_palm"')
+        g = geom('type="mesh" mesh="_palm"')
       else:
         _, r, length = bones[part]
         g = geom(f'type="cylinder" size="{r:g} {length / 2:g}"')
-      bodies.append(f'<body name="{body_name(s, p)}" mocap="true" pos="{at}">{g}</body>')
+      bodies.append(f'<body name="{body_name(s, p)[len(PREFIX):]}" mocap="true" pos="{at}">{g}</body>')
   verts = ' '.join(f'{v:g}' for z in (-PALM_HALF, PALM_HALF) for x, y in PALM for v in (x, y, z))
-  return (f'<mujoco model="avatars"><asset><mesh name="avatar_palm" vertex="{verts}"/></asset>'
+  return (f'<mujoco model="avatars"><asset><mesh name="_palm" vertex="{verts}"/></asset>'
           f'<worldbody>{"".join(bodies)}</worldbody></mujoco>')
 
 

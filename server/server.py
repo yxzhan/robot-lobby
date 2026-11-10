@@ -551,7 +551,7 @@ def compile_world(robots, physics):
     spec.attach(child, frame=frame, prefix=r.prefix)
   share_assets(spec, robots)
   # The avatars after every robot (avatar.py), so the robots' indices stay theirs.
-  spec.attach(mujoco.MjSpec.from_string(AVATAR.avatar_xml()), frame=spec.worldbody.add_frame(), prefix='')
+  spec.attach(mujoco.MjSpec.from_string(AVATAR.avatar_xml()), frame=spec.worldbody.add_frame(), prefix=AVATAR.PREFIX)
   model = spec.compile()
   offset = 1
   for r in robots:

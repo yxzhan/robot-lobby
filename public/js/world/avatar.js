@@ -51,7 +51,10 @@ export const HAND_PARTS = ['palm', ...HAND_BONES.map((b) => b[0])];
 export const PARTS = ['head', ...SIDES.flatMap((s) => HAND_PARTS.map((p) => `${s}_${p}`))];
 export const SLOT_BODIES = PARTS.length;
 
-export const bodyName = (slot, part) => `avatar${slot}_${part}`;
+// Every avatar name starts with PREFIX: the avatars' spec is attached under it
+// (MuJoCo 4 warns on an empty prefix), its own names without it.
+export const PREFIX = 'avatar';
+export const bodyName = (slot, part) => `${PREFIX}${slot}_${part}`;
 
 // Where a slot's unused bodies wait: 1 km up, the slots apart.
 export const park = (slot) => [2 * slot, 0, 1000];
@@ -68,12 +71,12 @@ export function avatarXml(slots) {
     for (const p of PARTS) {
       const part = p.slice(p.indexOf('_') + 1), bone = HAND_BONES.find((b) => b[0] === part);
       const g = p === 'head' ? geom(`type="sphere" size="${HEAD_RADIUS}"`, 0)  // the head touches nothing
-        : part === 'palm' ? geom('type="mesh" mesh="avatar_palm"')
+        : part === 'palm' ? geom('type="mesh" mesh="_palm"')
           : geom(`type="cylinder" size="${bone[3]} ${bone[4] / 2}"`);
-      bodies.push(`<body name="${bodyName(s, p)}" mocap="true" pos="${at}">${g}</body>`);
+      bodies.push(`<body name="${bodyName(s, p).slice(PREFIX.length)}" mocap="true" pos="${at}">${g}</body>`);
     }
   }
-  return `<mujoco model="avatars"><asset><mesh name="avatar_palm" vertex="${palmVertices().flat().join(' ')}"/></asset>`
+  return `<mujoco model="avatars"><asset><mesh name="_palm" vertex="${palmVertices().flat().join(' ')}"/></asset>`
     + `<worldbody>${bodies.join('')}</worldbody></mujoco>`;
 }
 
