@@ -845,34 +845,17 @@ class World:
         await self.broadcast_scene()
 
   async def restart(self):
-    """Full restart (the toolbar's button): the model files read again
-    (their cached sizes and keyframes dropped), every robot made anew at its
-    spawn point (numbered from 1 again; fresh controllers, the policy loaded
-    again, the same ones switched on), in a new MjData from time 0."""
-    async with self.lock:
-      old, first = list(self.robots), 1
-
-      def make():
-        _infos.clear()
-        robots = []
-        for k, r in enumerate(old):
-          n = Robot(first + k, r.rel, r.label, r.pos, r.yaw)
-          if n.key and r.use:
-            n.use.update(r.use)
-            n.make_policy()
-          robots.append(n)
-        return robots, compile_world(robots, self.physics)
-
-      robots, model = await asyncio.to_thread(make)
-      async with self.stepping:
-        for r in old:
-          if r.policy is not None:
-            r.policy.unbind()
-        self.next_id = first + len(robots)
-        self.data, self.robots = None, []  # nothing carries over
-        self.swap(model, robots, robots)
-        await self.broadcast_scene()
-        await self.send_all(json.dumps({'type': 'reset', 'id': None}))  # pages drop goals and the like
+    """Full restart (the toolbar's button): the world cleared and MuJoCo
+    started anew, in a new process (this one exec'd again with the same
+    command line), which gives back all of its memory: Python's allocator
+    keeps what the models, their caches (_infos, render data) and the
+    policies used. Every page is disconnected and reconnects (net.js) to the
+    empty world of the new process."""
+    print('full restart: clearing the world, starting the server process anew', flush=True)
+    for ws in list(self.control.by_ws):
+      await ws.close(code=1012, message=b'full restart')  # (1012: service restart)
+    # Its sockets are not inherited (PEP 446): the new process binds the port again.
+    os.execv(sys.executable, sys.orig_argv)
 
   def swap(self, model, robots, fresh):
     data = mujoco.MjData(model)

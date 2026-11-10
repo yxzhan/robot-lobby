@@ -3544,7 +3544,9 @@ try {
     if (robots.length && confirm(`Remove all ${robots.length} spawned model${robots.length > 1 ? 's' : ''}?`)) respawn([]);
   };
   document.getElementById('restart').onclick = () => {
-    if (app.net && confirm('Restart the shared world for everyone? The server reads the model files again and starts the simulation anew.')) app.net.send('restart');
+    if (!app.net || !confirm('Full restart of the shared world, for everyone? Every robot is removed and the server starts MuJoCo anew (a new process, its memory freed); every page reconnects to the empty world.')) return;
+    status.textContent = 'full restart: the server starts anew…';
+    app.net.send('restart');
   };
 
   // Enter VR / Enter AR: each shown only where that kind of session is
@@ -3598,6 +3600,7 @@ try {
         setBusy(null);
       }
     };
+    document.getElementById('restart').hidden = false;  // a shared world's only (the server's process)
     // Who drives which robot (net/control.js): the Teleop panel shows a
     // robot's holder, the Share panel who is connected; presence.js shows
     // both over the view.
