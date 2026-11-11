@@ -35,6 +35,8 @@ const BINDER_LAUNCH = true;
 // once a server is connected.
 const pageParams = new URLSearchParams(location.search);
 const AUTO_LAUNCH = pageParams.has('online') && !pageParams.has('local');
+// This page goes on to a server it starts (main.js keeps ?behavior for it).
+export const autoLaunching = () => AUTO_LAUNCH && !server;
 
 // sessionStorage: the id of the stage (My stages) a Go online carries over,
 // for the page once it is on the server.

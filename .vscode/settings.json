@@ -1,0 +1,6 @@
+{
+    // The repo's uv venv (server/server.py, scripts/*.py): MuJoCo 4.0.0 etc.
+    "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python",
+    // New terminals in this workspace start with the venv activated.
+    "python.terminal.activateEnvironment": true
+}

@@ -41,7 +41,7 @@ import { addSwarm } from './swarm.js';
 import { FLOOR_STYLES, floorTexture, hexRgb, loadFloor, saveFloor } from '../render/floor.js';
 import { AMBIENT, SUN_LUX, linearRgb, loadLighting, saveLighting, sunDirection } from '../render/lighting.js';
 import { SceneLights } from '../render/scenelights.js';
-import { ServerPanel, takeCarried } from '../net/serverpanel.js';
+import { ServerPanel, autoLaunching, takeCarried } from '../net/serverpanel.js';
 import { Control } from '../net/control.js';
 import { Presence } from '../net/presence.js';
 import { SharePanel } from '../net/share.js';
@@ -3693,7 +3693,9 @@ try {
   // ?behavior=<example>: that behaviour tree example runs now that the page is
   // ready (btpanel.js runExample: its name or file). Once, like ?stage: the
   // parameter goes, or every page a link is shared with would start it again.
-  const behavior = new URLSearchParams(location.search).get('behavior');
+  // Not on a page that is about to start a server (?online in local mode):
+  // the parameter stays for the page on that server, which runs it.
+  const behavior = autoLaunching() ? null : new URLSearchParams(location.search).get('behavior');
   if (behavior) {
     const u = new URL(location.href);
     u.searchParams.delete('behavior');
