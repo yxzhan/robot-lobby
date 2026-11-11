@@ -269,6 +269,12 @@ def asset_path(rel):
 # Per model file: sizes and first keyframe (compiled on its own, cached).
 
 _infos = {}
+# /render's parts: each this much of the render data, gzipped on its own.
+# jupyter-server-proxy (Binder, JupyterHub) reads a whole response into
+# memory before passing it on, at most tornado's max_buffer_size (100 MB);
+# a larger one is cut off (599 Connection closed): a site of kilometres
+# (cuxhaven_site_cramera) has over 400 MB, 106 MB gzipped.
+RENDER_PART = 32 << 20
 
 
 def model_info(rel):
@@ -281,9 +287,10 @@ def model_info(rel):
       key = {'qpos': np.array(k.qpos) if len(k.qpos) == m.nq else None,
              'ctrl': np.array(k.ctrl) if len(k.ctrl) == m.nu else None}
     raw = render_asset.build(spec, m, rel, PUBLIC)
+    etag = hashlib.sha1(raw).hexdigest()
     _infos[rel] = {'dims': {'nq': m.nq, 'nv': m.nv, 'na': m.na, 'nu': m.nu, 'nmocap': m.nmocap},
-                   'nbody': m.nbody, 'key': key, 'render': gzip.compress(raw, 5), 'render_size': len(raw),
-                   'etag': '"' + hashlib.sha1(raw).hexdigest() + '"'}
+                   'nbody': m.nbody, 'key': key, 'render_size': len(raw), 'etag': etag,
+                   'render': [gzip.compress(raw[i:i + RENDER_PART], 5) for i in range(0, max(len(raw), 1), RENDER_PART)]}
   return _infos[rel]
 
 
@@ -838,34 +845,17 @@ class World:
         await self.broadcast_scene()
 
   async def restart(self):
-    """Full restart (the toolbar's button): the model files read again
-    (their cached sizes and keyframes dropped), every robot made anew at its
-    spawn point (numbered from 1 again; fresh controllers, the policy loaded
-    again, the same ones switched on), in a new MjData from time 0."""
-    async with self.lock:
-      old, first = list(self.robots), 1
-
-      def make():
-        _infos.clear()
-        robots = []
-        for k, r in enumerate(old):
-          n = Robot(first + k, r.rel, r.label, r.pos, r.yaw)
-          if n.key and r.use:
-            n.use.update(r.use)
-            n.make_policy()
-          robots.append(n)
-        return robots, compile_world(robots, self.physics)
-
-      robots, model = await asyncio.to_thread(make)
-      async with self.stepping:
-        for r in old:
-          if r.policy is not None:
-            r.policy.unbind()
-        self.next_id = first + len(robots)
-        self.data, self.robots = None, []  # nothing carries over
-        self.swap(model, robots, robots)
-        await self.broadcast_scene()
-        await self.send_all(json.dumps({'type': 'reset', 'id': None}))  # pages drop goals and the like
+    """Full restart (the toolbar's button): the world cleared and MuJoCo
+    started anew, in a new process (this one exec'd again with the same
+    command line), which gives back all of its memory: Python's allocator
+    keeps what the models, their caches (_infos, render data) and the
+    policies used. Every page is disconnected and reconnects (net.js) to the
+    empty world of the new process."""
+    print('full restart: clearing the world, starting the server process anew', flush=True)
+    for ws in list(self.control.by_ws):
+      await ws.close(code=1012, message=b'full restart')  # (1012: service restart)
+    # Its sockets are not inherited (PEP 446): the new process binds the port again.
+    os.execv(sys.executable, sys.orig_argv)
 
   def swap(self, model, robots, fresh):
     data = mujoco.MjData(model)
@@ -1782,17 +1772,27 @@ async def index(_request):
 
 
 async def render(request):
+  """A model's render data (render_asset.py) in parts of RENDER_PART bytes,
+  `part` (default 0) of them; X-Render-Parts says how many there are, the
+  page fetches the others and joins them (net.js loadRender)."""
   rel = request.query.get('rel', '')
   try:
     info = await asyncio.to_thread(model_info, rel)
   except Exception as err:
     raise web.HTTPNotFound(text=f'{rel}: {err}')
+  parts = info['render']
+  try:
+    part = int(request.query.get('part', 0))
+    body = parts[part]
+  except (ValueError, IndexError):
+    raise web.HTTPNotFound(text=f'{rel}: no part {request.query.get("part")} (of {len(parts)})')
   # Cached by the browser, checked again on every use (ETag).
-  headers = {'Cache-Control': 'no-cache', 'ETag': info['etag']}
-  if request.headers.get('If-None-Match') == info['etag']:
+  etag = f'"{info["etag"]}-{part}"'
+  headers = {'Cache-Control': 'no-cache', 'ETag': etag, 'X-Render-Parts': str(len(parts)),
+             'X-Raw-Size': str(info['render_size']), 'Access-Control-Expose-Headers': 'X-Render-Parts, X-Raw-Size'}
+  if request.headers.get('If-None-Match') == etag:
     return web.Response(status=304, headers=headers)
-  return web.Response(body=info['render'], content_type='application/octet-stream',
-                      headers={**headers, 'Content-Encoding': 'gzip', 'X-Raw-Size': str(info['render_size'])})
+  return web.Response(body=body, content_type='application/octet-stream', headers={**headers, 'Content-Encoding': 'gzip'})
 
 
 async def api_robots(_request):

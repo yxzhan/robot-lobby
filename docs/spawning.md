@@ -16,11 +16,11 @@ dragging, a marker there shows the spawn point and heading (the model's
 from the surface shows the height; it is kept for the next drag), and Esc cancels. The drag
 label shows the spawn position and heading. The toolbar (top middle) runs the
 simulation: Clear removes every spawned item (the Stage panel's ✕ one of
-them), Reset puts every robot back in its spawn pose. In a shared world, **Full restart** (its button hidden for now)
-(after a confirmation, for everyone) has the server read the model files
-again and start anew: a fresh MjData at time 0, every robot at its spawn
-point with fresh controllers (the same ones switched on), so edits to the
-MJCF files take effect without restarting the server.
+them), Reset puts every robot back in its spawn pose. In a shared world, **Full restart**
+(after a confirmation, for everyone) clears the world and starts the
+server's MuJoCo anew: the server process runs itself again (same command
+line), which frees all the memory its models, caches and policies took,
+and every page reconnects to the new, empty world.
 
 **Record** (its button hidden for now; red, Stop while it records) keeps the simulation's state, 30
 times a second of simulated time (qpos and the mocap poses, up to 5 minutes:

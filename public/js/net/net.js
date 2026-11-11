@@ -259,11 +259,29 @@ const ARRAY_TYPES = { f4: Float32Array, f8: Float64Array, i4: Int32Array, u1: Ui
 
 // Render data of a model file (server/render_asset.py): a stand-in model with
 // the fields main.js buildVisual reads, plus the kinematic tree; `images`
-// maps texture names to image paths under public/ (like vfs.js).
+// maps texture names to image paths under public/ (like vfs.js). It comes in
+// parts (server.py RENDER_PART: a proxy may refuse a response of 100 MB and
+// more), the first saying how many (X-Render-Parts), the rest fetched at once.
 export async function loadRender(rel) {
-  const res = await fetch(serverUrl('render', { rel }));
-  if (!res.ok) throw new Error(`${rel}: ${(await res.text()) || `HTTP ${res.status}`}`);
-  const buf = await res.arrayBuffer();
+  const part = async (i) => {
+    const res = await fetch(serverUrl('render', i ? { rel, part: i } : { rel }));
+    if (!res.ok) throw new Error(`${rel}: ${(await res.text()) || `HTTP ${res.status}`}`);
+    return res;
+  };
+  const first = await part(0);
+  const n = Number(first.headers.get('X-Render-Parts')) || 1;
+  const chunks = await Promise.all([first.arrayBuffer(), ...Array.from({ length: n - 1 }, (_, i) => part(i + 1).then((r) => r.arrayBuffer()))]);
+  let buf = chunks[0];
+  if (n > 1) {
+    const all = new Uint8Array(chunks.reduce((s, c) => s + c.byteLength, 0));
+    let at = 0;
+    for (const c of chunks) { all.set(new Uint8Array(c), at); at += c.byteLength; }
+    buf = all.buffer;
+  }
+  return parseRender(buf);
+}
+
+function parseRender(buf) {
   const n = new DataView(buf).getUint32(0, true);
   const head = JSON.parse(new TextDecoder().decode(new Uint8Array(buf, 4, n)));
   const base = 4 + n;
@@ -272,6 +290,8 @@ export async function loadRender(rel) {
     model[name] = new ARRAY_TYPES[dtype](buf, base + offset, count);
   }
   delete model.arrays;
+  for (const k of head.same_as_face ?? []) model[k] = model.mesh_face;  // left out: the same as mesh_face
+  delete model.same_as_face;
   const images = new Map(Object.entries(head.images).map(([t, path]) => [`#${t}`, [path]]));
   return { model, images };
 }

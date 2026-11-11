@@ -22,13 +22,15 @@
 // what the window shows of the robots (their geoms, and the debug overlays
 // of debug.js: collision geoms, body frames, joints; the spawn effect of
 // reveal.js) and
-// whether the camera follows the selection, each saved in this browser and
-// applied as soon as a field changes.
+// the camera: whether it follows the selection and how far the view
+// reaches (its far plane, 200 m by default; a site of kilometres needs more),
+// each saved in this browser and applied as soon as a field changes.
 
 import { FLOOR_STYLES, floorDefaults } from './floor.js';
 import { LIGHTING_DEFAULTS } from './lighting.js';
 
 const STORE = 'mujoco-filament/render';
+export const VIEW_FAR_DEFAULT = 200;  // m: the far plane (App.viewFar), a room or a lab and well beyond
 
 export const PRESETS = {
   high: { pixelRatio: 'screen', antialiasing: 'msaa', ao: 'high', shadows: 'on', reflections: 'on', textures: 2048 },
@@ -125,7 +127,7 @@ export class RenderPanel {
     this.floor(field, num);
     this.lighting(field);
     this.overlays();
-    this.camera(field);
+    this.camera(field, num);
   }
 
   // The Show section: the robots' geoms and the debug overlays
@@ -148,13 +150,24 @@ export class RenderPanel {
   }
 
   // The Camera section, last: whether the camera follows the selection
-  // (App.setFollow; saved in this browser, off by default).
-  camera(row) {
+  // (App.setFollow; saved in this browser, off by default) and how far the
+  // view reaches (App.setViewDistance).
+  camera(row, num) {
     this.body.append(el('div', { className: 'sub', textContent: 'Camera' }));
     const title = 'The camera keeps following the body selected with a double-click; off: it only turns to it once';
     const box = el('input', { type: 'checkbox', checked: !!this.app.follow, title });
     box.onchange = () => this.app.setFollow(box.checked);
     this.body.append(row('Follow selection', '', title, box));
+    const tip = `how far the view reaches: nothing farther away is drawn (default ${VIEW_FAR_DEFAULT} m; `
+      + 'a site of kilometres needs more, but far away surfaces may flicker and the sun\'s shadows get coarser)';
+    const far = num(this.app.viewFar, (v) => {
+      if (v >= 1 && v <= 1e6) this.app.setViewDistance(v);
+      this.render();
+    }, tip);
+    far.min = 1;
+    const reset = el('button', { type: 'button', textContent: 'Default', title: `back to ${VIEW_FAR_DEFAULT} m` });
+    reset.onclick = () => { this.app.setViewDistance(VIEW_FAR_DEFAULT); this.render(); };
+    this.body.append(row('View distance', 'm', tip, far, reset));
   }
 
   // The Lighting section: the global light (sun and ambient) on or off and
