@@ -58,7 +58,8 @@ MuJoCo, onnxruntime and Node; `postBuild` vendors the page's runtimes
 `jupyter_server_config.py`, which puts server.py behind the session's
 jupyter-server-proxy at `<session>/robot-lobby/`, started on the first request,
 and makes it the page a session opens on (`default_url`; JupyterLab stays
-at `<session>/lab`). A launch link can also say so itself, whatever the
+at `<session>/lab`), with `PHYSICS_THREADS=1`: MuJoCo's thread pool
+made steps slower on the hub's two-socket nodes. A launch link can also say so itself, whatever the
 hub's own default: `https://<binderhub>/v2/gh/<owner>/robot-lobby/<branch>?urlpath=robot-lobby/`.
 `start` runs as the pod starts, when the volume is there: it indexes the
 library and the policies (`scripts/vendor.mjs`, which indexes through
