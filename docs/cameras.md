@@ -15,7 +15,10 @@ down; **follow** "position only" keeps its turn in the robot's frame while
 following where the link is (how MJCF track / trackcom cameras come in).
 Each has a size (width × height, 256×256 unless the model gives a
 `resolution`), rate (5 to 30 Hz) and vertical field of view.
-**Output** is what it gives: *color* (the picture), *depth* (the distance
+**Output** is what it gives: *color* (the picture), *color + depth* (an
+RGB-D camera: both from the same pose at the same time, for a colored point
+cloud, see [ros.md](ros.md); the window shows the picture, a click on it the
+depth), *depth* (the distance
 along its view axis in metres; to ROS as `<camera>/depth/image_raw`,
 `32FC1`, 0 where nothing is) or *segmentation* (which geom each pixel shows,
 as `robot << 16 | geom + 1`: the robot's number in this page, 1–255, and

@@ -46,7 +46,25 @@ switch and state; unfolded, its settings:
   vertical field of view, fx = fy = (h/2)/tan(fovy/2), centered, no
   distortion); with TF on, also `<camera>_optical_frame` (z forward, x
   right, y down) in its link's frame. Frames are dropped while the
-  WebSocket is more than 8 MB behind (counted).
+  WebSocket is more than 8 MB behind (counted). A depth or segmentation
+  camera gives `<camera>/depth/image_raw` (`32FC1`, metres) or
+  `<camera>/segmentation/image_raw` (`32SC1`) with its own
+  `…/camera_info`; an **RGB-D** one both the picture and
+  `<camera>/depth/…`, with one stamp and frame. A colored point cloud for
+  RViz (PointCloud2, fixed frame `world`) from an RGB-D camera, with
+  **Format** raw:
+
+  ```
+  ros2 run depth_image_proc point_cloud_xyzrgb_node --ros-args \
+    -r rgb/image_rect_color:=/r1/<camera>/image_raw \
+    -r rgb/camera_info:=/r1/<camera>/camera_info \
+    -r depth_registered/image_rect:=/r1/<camera>/depth/image_raw \
+    -r points:=/r1/<camera>/points
+  ```
+
+  (JPEG: add `-p image_transport:=compressed`; a depth camera alone:
+  `point_cloud_xyz_node` with `image_rect:=…/depth/image_raw`,
+  `camera_info:=…/depth/camera_info`.)
 - Subscribed, both into the drive layer (`public/js/drive/drive.js`, which also
   takes the Teleop panel's keys and goals): `cmd_vel`
   (`geometry_msgs/Twist`: linear x / y and angular z drive the walking

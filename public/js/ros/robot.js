@@ -32,7 +32,9 @@
 //               (sensor_msgs/CameraInfo: a pinhole of the camera's vertical
 //               field of view, square pixels, no distortion); with TF on,
 //               each camera's <camera>_optical_frame (z forward, x right,
-//               y down) in its link's frame.
+//               y down) in its link's frame. Depth / segmentation cameras:
+//               <camera>/depth|segmentation/image_raw (32FC1 / 32SC1) and
+//               …/camera_info; RGB-D ones both the picture and the depth.
 // One prefix per robot (the robot's id, r1, unless set; / for none) goes
 // before every name, so robots of one model on one bridge do not overwrite
 // each other: the topics (r1/joint_states, r1/wrist_cam/image_raw/compressed;
@@ -598,15 +600,18 @@ export class RosRobot {
       this.camTopics.add(topic);
       this.send(topic, msg);
     };
-    if (c.aux) {
-      // Depth (32FC1, metres, 0 where nothing) or segmentation (32SC1 ids,
-      // cameras.js), top row first, always raw: JPEG would garble the values.
-      const v = c.values, bytes = new Uint8Array(v.buffer.slice(v.byteOffset, v.byteOffset + v.byteLength));
-      const [sub, encoding] = c.aux === 'depth' ? ['depth', '32FC1'] : ['segmentation', '32SC1'];
+    // Depth (32FC1, metres, 0 where nothing) or segmentation (32SC1 ids,
+    // cameras.js), top row first, always raw: JPEG would garble the values.
+    const aux = (t) => {
+      const v = t.values, bytes = new Uint8Array(v.buffer.slice(v.byteOffset, v.byteOffset + v.byteLength));
+      const [sub, encoding] = t.aux === 'depth' ? ['depth', '32FC1'] : ['segmentation', '32SC1'];
       send(`${base}/${sub}/image_raw`, TYPES.image, { header, height: h, width: w, encoding, is_bigendian: 0, step: 4 * w, data: base64(bytes) });
       send(`${base}/${sub}/camera_info`, TYPES.info, info);
-      return;
-    }
+    };
+    if (c.aux) return aux(c);
+    // RGB-D: the depth beside the picture, the same stamp, frame and
+    // intrinsics (registered to it, as depth_image_proc point_cloud_xyzrgb wants).
+    if (c.d) aux(c.d);
     if (cs.format === 'raw') {
       const rgb = new Uint8Array(3 * w * h), px = c.pixels;
       for (let y = 0; y < h; y++) {  // top row first, alpha dropped

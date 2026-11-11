@@ -1198,7 +1198,7 @@ class App {
     maxTexture = q.textures;
     if (textures) for (const e of this.images.values()) e.reload?.();  // the scene's image textures at the new size
     this.viewQuality(this.view);
-    for (const c of this.cameras?.on.values() ?? []) if (c.view) this.viewQuality(c.view);  // the robots' cameras (cameras.js) look the same
+    for (const c of this.cameras?.on.values() ?? []) if (c.view && !c.aux) this.viewQuality(c.view);  // the robots' cameras (cameras.js) look the same
     this.shadows();
     this.resize();
   }

@@ -41,6 +41,10 @@
 // model; 1 the floor; 0 nothing). Decoded into c.values (top row first:
 // Float32Array metres, 0 for nothing; Int32Array ids); the window shows
 // depth as grey (near bright) and segments in colors of their ids.
+// 'rgbd' is both the picture and depth (as an RGB-D camera, a RealSense:
+// for a colored point cloud), taken from the same pose at the same time:
+// the depth pass is c.d (a target like an aux camera's), the window shows
+// the picture (a click on it: the depth).
 
 const CAM_STORE = 'robot-lobby/cameras/';
 // The layers of the geoms' depth and segmentation copies (main.js AUX).
@@ -335,15 +339,18 @@ export class Cameras {
     if (!c) return;
     this.on.delete(key);
     const { engine } = this.app, gl = this.gl();
-    if (c.aux) this.app.auxCameras(c.aux, -1);
-    engine.destroyView(c.view);
+    for (const t of [c, c.d]) {
+      if (!t) continue;
+      if (t.aux) this.app.auxCameras(t.aux, -1);
+      engine.destroyView(t.view);
+      gl.deleteFramebuffer(t.fb);
+      gl.deleteRenderbuffer(t.rb);
+      if (t.depthRb) gl.deleteRenderbuffer(t.depthRb);
+      gl.deleteBuffer(t.pbo);
+      if (t.fence) gl.deleteSync(t.fence);
+    }
     engine.destroyCameraComponent(c.entity);
     Filament.EntityManager.get().destroy(c.entity);
-    gl.deleteFramebuffer(c.fb);
-    gl.deleteRenderbuffer(c.rb);
-    if (c.depthRb) gl.deleteRenderbuffer(c.depthRb);
-    gl.deleteBuffer(c.pbo);
-    if (c.fence) gl.deleteSync(c.fence);
     c.pip.remove();
     if (!keepLook && this.look === key) this.lookThrough(null);
     if (notify) this.onChange();
@@ -386,56 +393,14 @@ export class Cameras {
 
   gl() { return this.app.canvas.getContext('webgl2'); }
 
-  // Its view, framebuffer, pixel buffer and window.
+  // Its view(s), framebuffer(s), pixel buffer(s) and window.
   create(c) {
-    const { app } = this, F = Filament, gl = this.gl();
+    const { app } = this, F = Filament;
     c.entity = F.EntityManager.get().create();
     c.camera = app.engine.createCamera(c.entity);
-    c.view = app.engine.createView();
-    c.view.setCamera(c.camera);
-    c.view.setScene(app.scene);
-    c.view.setViewport([0, 0, c.width, c.height]);
-    c.aux = c.output === 'rgb' ? null : c.output;
-    if (c.aux) {
-      // Depth or segmentation: the geoms' unlit copies on their own layer
-      // (main.js AUX), the bytes as the material writes them.
-      c.view.setVisibleLayers(0xff, AUX[c.aux]);
-      c.view.setPostProcessingEnabled(false);
-      c.view.setAntiAliasing(F.View$AntiAliasing.NONE);
-      c.view.setMultiSampleAntiAliasingOptions({ enabled: false });
-      c.view.setAmbientOcclusionOptions({ enabled: false });
-      c.view.setScreenSpaceReflectionsOptions({ enabled: false });
-      c.view.setShadowingEnabled?.(false);
-      c.values = c.aux === 'depth' ? new Float32Array(c.width * c.height) : new Int32Array(c.width * c.height);
-      app.auxCameras(c.aux, +1);
-    } else {
-      c.view.setVisibleLayers(0xff, 0x5);  // the world only, not the viewer's markers (main.js SCENE | HIDDEN)
-      app.viewQuality(c.view);  // anti-aliasing, SSAO and reflections as the Render panel says (App.setQuality keeps it so)
-    }
-    c.rb = gl.createRenderbuffer();
-    gl.bindRenderbuffer(gl.RENDERBUFFER, c.rb);
-    gl.renderbufferStorage(gl.RENDERBUFFER, gl.RGBA8, c.width, c.height);
-    gl.bindRenderbuffer(gl.RENDERBUFFER, null);
-    c.fb = gl.createFramebuffer();
-    gl.bindFramebuffer(gl.FRAMEBUFFER, c.fb);
-    gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.RENDERBUFFER, c.rb);
-    if (c.aux) {
-      // Without post-processing Filament draws straight into this
-      // framebuffer (with it, into targets of its own, then copies), so it
-      // needs a depth buffer of its own: else the last drawn wins.
-      c.depthRb = gl.createRenderbuffer();
-      gl.bindRenderbuffer(gl.RENDERBUFFER, c.depthRb);
-      gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT24, c.width, c.height);
-      gl.bindRenderbuffer(gl.RENDERBUFFER, null);
-      gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, c.depthRb);
-    }
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    c.pixels = new Uint8Array(4 * c.width * c.height);  // the last frame, bottom row first (as read)
-    c.pbo = gl.createBuffer();
-    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, c.pbo);
-    gl.bufferData(gl.PIXEL_PACK_BUFFER, c.pixels.length, gl.STREAM_READ);
-    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
-    c.fence = null;  // a read in flight
+    c.aux = c.output === 'rgb' || c.output === 'rgbd' ? null : c.output;
+    this.target(c, c.aux);
+    if (c.output === 'rgbd') this.target(c.d = {}, 'depth', c);
     c.frames = 0;
     // The window: title bar (drag it), look-through and close buttons, the picture.
     const canvas = el('canvas', { width: c.width, height: c.height });
@@ -447,10 +412,65 @@ export class Cameras {
     c.pip = el('div', { className: 'pip' }, bar, canvas);
     c.image = canvas.getContext('2d').createImageData(c.width, c.height);
     c.canvas = canvas;
+    if (c.d) {
+      canvas.title = 'Click: depth / color';
+      canvas.onclick = () => { c.showDepth = !c.showDepth; if (c.frames) this.show(c); };
+    }
     look.onclick = () => this.lookThrough(this.look === c.key ? null : c.key);
     close.onclick = () => this.switchOff(c.key);
     this.draggable(c.pip, bar);
     this.pips.append(c.pip);
+  }
+
+  // A view of the world through c's camera (t: c itself, or c's depth pass
+  // c.d) drawing into a framebuffer of its own, read through a pixel
+  // buffer: aux (depth, segmentation) the geoms' unlit copies on their own
+  // layer (main.js AUX), the bytes as the material writes them.
+  target(t, aux, c = t) {
+    const { app } = this, F = Filament, gl = this.gl();
+    t.aux = aux;
+    t.view = app.engine.createView();
+    t.view.setCamera(c.camera);
+    t.view.setScene(app.scene);
+    t.view.setViewport([0, 0, c.width, c.height]);
+    if (aux) {
+      t.view.setVisibleLayers(0xff, AUX[aux]);
+      t.view.setPostProcessingEnabled(false);
+      t.view.setAntiAliasing(F.View$AntiAliasing.NONE);
+      t.view.setMultiSampleAntiAliasingOptions({ enabled: false });
+      t.view.setAmbientOcclusionOptions({ enabled: false });
+      t.view.setScreenSpaceReflectionsOptions({ enabled: false });
+      t.view.setShadowingEnabled?.(false);
+      t.values = aux === 'depth' ? new Float32Array(c.width * c.height) : new Int32Array(c.width * c.height);
+      app.auxCameras(aux, +1);
+    } else {
+      t.view.setVisibleLayers(0xff, 0x5);  // the world only, not the viewer's markers (main.js SCENE | HIDDEN)
+      app.viewQuality(t.view);  // anti-aliasing, SSAO and reflections as the Render panel says (App.setQuality keeps it so)
+    }
+    t.rb = gl.createRenderbuffer();
+    gl.bindRenderbuffer(gl.RENDERBUFFER, t.rb);
+    gl.renderbufferStorage(gl.RENDERBUFFER, gl.RGBA8, c.width, c.height);
+    gl.bindRenderbuffer(gl.RENDERBUFFER, null);
+    t.fb = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, t.fb);
+    gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.RENDERBUFFER, t.rb);
+    if (aux) {
+      // Without post-processing Filament draws straight into this
+      // framebuffer (with it, into targets of its own, then copies), so it
+      // needs a depth buffer of its own: else the last drawn wins.
+      t.depthRb = gl.createRenderbuffer();
+      gl.bindRenderbuffer(gl.RENDERBUFFER, t.depthRb);
+      gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT24, c.width, c.height);
+      gl.bindRenderbuffer(gl.RENDERBUFFER, null);
+      gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, t.depthRb);
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    t.pixels = new Uint8Array(4 * c.width * c.height);  // the last frame, bottom row first (as read)
+    t.pbo = gl.createBuffer();
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, t.pbo);
+    gl.bufferData(gl.PIXEL_PACK_BUFFER, t.pixels.length, gl.STREAM_READ);
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+    t.fence = null;  // a read in flight
   }
 
   // Drags a window by its bar; from then on it stays where it is put. The
@@ -525,14 +545,17 @@ export class Cameras {
     }
   }
 
-  // A finished read into c.pixels; false while it is still in flight.
+  // A finished read into c.pixels (and c.d.pixels); false while one is
+  // still in flight.
   collect(c) {
-    const gl = this.gl();
-    if (gl.getSyncParameter(c.fence, gl.SYNC_STATUS) !== gl.SIGNALED) return false;
-    gl.deleteSync(c.fence);
-    c.fence = null;
-    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, c.pbo);
-    gl.getBufferSubData(gl.PIXEL_PACK_BUFFER, 0, c.pixels);
+    const gl = this.gl(), ts = c.d ? [c, c.d] : [c];
+    if (ts.some((t) => gl.getSyncParameter(t.fence, gl.SYNC_STATUS) !== gl.SIGNALED)) return false;
+    for (const t of ts) {
+      gl.deleteSync(t.fence);
+      t.fence = null;
+      gl.bindBuffer(gl.PIXEL_PACK_BUFFER, t.pbo);
+      gl.getBufferSubData(gl.PIXEL_PACK_BUFFER, 0, t.pixels);
+    }
     gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
     c.frames++;
     c.stamp = c.shot;
@@ -541,15 +564,28 @@ export class Cameras {
   }
 
   capture(c) {
-    const { app } = this, gl = this.gl();
     c.camera.setModelMatrix(Cameras.matrix(this.pose(c)));
     c.camera.setProjectionFov(c.cam.fovy, c.width / c.height, NEAR, FAR, Filament.Camera$Fov.VERTICAL);
-    // Filament renders into c.fb where it would the canvas (App.fbTarget);
+    // RGB-D: the depth first; were the picture then skipped, both are
+    // taken again (the depth read just waits).
+    if (c.d && !this.draw(c.d, c)) return false;
+    if (!this.draw(c, c)) return false;
+    c.shot = Date.now();  // when it was taken (stamp: of the frame in c.pixels)
+    c.simShot = this.app.data?.time ?? 0;  // and in simulated time (a ROS bridge on sim time)
+    return true;
+  }
+
+  // Renders target t (c or c.d) into its framebuffer and starts reading it
+  // into its pixel buffer (collected once the fence has passed); false if
+  // Filament skipped the frame.
+  draw(t, c) {
+    const { app } = this, gl = this.gl();
+    // Filament renders into t.fb where it would the canvas (App.fbTarget);
     // its state cache believes the default framebuffer is bound throughout.
-    app.offscreen = c.fb;
+    app.offscreen = t.fb;
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     // Depth and segmentation: their geoms up to date, no sky, cleared to 0 (nothing).
-    if (c.aux) {
+    if (t.aux) {
       app.syncAux();
       app.scene.setSkybox(null);
       app.renderer.setClearOptions({ clearColor: [0, 0, 0, 0], clear: true });
@@ -558,28 +594,23 @@ export class Cameras {
     // (the framebuffer still holds the last frame), and it is tried again.
     const drawn = app.renderer.beginFrame(app.swapChain);
     if (drawn) {
-      app.renderer.renderView(c.view);
+      app.renderer.renderView(t.view);
       app.renderer.endFrame();
     }
     app.engine.execute();
-    if (c.aux) app.restoreSky();
-    if (!drawn) {
-      app.offscreen = null;
-      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-      return false;
+    if (t.aux) app.restoreSky();
+    if (drawn) {
+      if (t.fence) gl.deleteSync(t.fence);
+      gl.bindFramebuffer(gl.READ_FRAMEBUFFER, t.fb);
+      gl.bindBuffer(gl.PIXEL_PACK_BUFFER, t.pbo);
+      gl.readPixels(0, 0, c.width, c.height, gl.RGBA, gl.UNSIGNED_BYTE, 0);
+      gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
+      t.fence = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
+      gl.flush();
     }
-    // Into the pixel buffer, collected once the fence has passed.
-    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, c.fb);
-    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, c.pbo);
-    gl.readPixels(0, 0, c.width, c.height, gl.RGBA, gl.UNSIGNED_BYTE, 0);
-    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
-    c.fence = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
-    gl.flush();
-    c.shot = Date.now();  // when it was taken (stamp: of the frame in c.pixels)
-    c.simShot = app.data?.time ?? 0;  // and in simulated time (a ROS bridge on sim time)
     app.offscreen = null;
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    return true;
+    return drawn;
   }
 
   // One picture of the world, size x size, from a camera `aim(camera)`
@@ -631,25 +662,19 @@ export class Cameras {
   // as grey by disparity (nearest / depth: the nearest white, the horizon
   // dark, so near things keep their shading) and as colors.
   show(c) {
-    const { width: w, height: h, pixels, image } = c, row = 4 * w, out = image.data;
-    if (!c.aux) {
+    const { width: w, height: h, image } = c, row = 4 * w, out = image.data;
+    if (c.d) this.decode(c.d, w, h);
+    const t = c.d && c.showDepth ? c.d : c, pixels = t.pixels;
+    if (!t.aux) {
       for (let y = 0; y < h; y++) out.set(pixels.subarray((h - 1 - y) * row, (h - y) * row), y * row);
       for (let i = 3; i < out.length; i += 4) out[i] = 255;
       c.canvas.getContext('2d').putImageData(image, 0, 0);
       return;
     }
-    const v = c.values;
-    let near = Infinity;
-    for (let y = 0; y < h; y++) {
-      for (let x = 0, src = 4 * w * (h - 1 - y), dst = w * y; x < w; x++, src += 4, dst++) {
-        const n = pixels[src] + 256 * pixels[src + 1] + 65536 * pixels[src + 2];
-        v[dst] = c.aux === 'depth' ? n / 1e4 : n;
-        if (v[dst] > 0 && v[dst] < near) near = v[dst];
-      }
-    }
+    const near = t === c.d ? t.near : this.decode(t, w, h), v = t.values;
     for (let i = 0; i < v.length; i++) {
       let r = 0, g = 0, b = 0;
-      if (c.aux === 'depth') {
+      if (t.aux === 'depth') {
         if (v[i] > 0) r = g = b = 20 + 235 * near / v[i];
       } else if (v[i]) {
         // A color of its own per id (a hash, bright enough to tell apart from the black background).
@@ -659,6 +684,21 @@ export class Cameras {
       out[4 * i] = r; out[4 * i + 1] = g; out[4 * i + 2] = b; out[4 * i + 3] = 255;
     }
     c.canvas.getContext('2d').putImageData(image, 0, 0);
+  }
+
+  // An aux target's pixels into t.values (top row first; see the top); the
+  // nearest depth (t.near).
+  decode(t, w, h) {
+    const v = t.values, pixels = t.pixels;
+    let near = Infinity;
+    for (let y = 0; y < h; y++) {
+      for (let x = 0, src = 4 * w * (h - 1 - y), dst = w * y; x < w; x++, src += 4, dst++) {
+        const n = pixels[src] + 256 * pixels[src + 1] + 65536 * pixels[src + 2];
+        v[dst] = t.aux === 'depth' ? n / 1e4 : n;
+        if (v[dst] > 0 && v[dst] < near) near = v[dst];
+      }
+    }
+    return (t.near = near);
   }
 }
 
@@ -799,9 +839,9 @@ export class CamerasPanel {
       this.select(RATES.map((hz) => [String(hz), `${hz} Hz`]), String(cam.hz), (v) => edit({ hz: Number(v) }), 'Frames a second')));
     det.append(this.field('FOV', this.num(cam.fovy, { min: 5, max: 170, step: 1, id: id('fovy'), title: 'Vertical field of view (degrees)' },
       (v) => edit({ fovy: Math.min(170, Math.max(5, v)) })), el('span', { className: 'unit', textContent: '° vertical' })));
-    det.append(this.field('Output', this.select([['rgb', 'color (RGB)'], ['depth', 'depth'], ['segmentation', 'segmentation']], cam.output ?? 'rgb',
-      (v) => edit({ output: v }), 'What it gives: the picture; the distance along its view axis (m; ROS 32FC1); '
-        + 'or which geom each pixel shows (robot << 16 | geom + 1; ROS 32SC1)')));
+    det.append(this.field('Output', this.select([['rgb', 'color (RGB)'], ['rgbd', 'color + depth (RGB-D)'], ['depth', 'depth'], ['segmentation', 'segmentation']], cam.output ?? 'rgb',
+      (v) => edit({ output: v }), 'What it gives: the picture; the picture and its depth, taken together (for a colored point cloud); '
+        + 'the distance along its view axis (m; ROS 32FC1); or which geom each pixel shows (robot << 16 | geom + 1; ROS 32SC1)')));
     return det;
   }
 }
