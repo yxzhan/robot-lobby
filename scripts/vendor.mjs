@@ -1,13 +1,13 @@
-// Copies the MuJoCo and Filament runtime files out of node_modules so that
-// public/ is a self-contained static site (no bundler needed).
+// Copies the MuJoCo and Filament runtime files out of node_modules (Filament:
+// its GitHub release's web build, see FILAMENT) so that public/ is a
+// self-contained static site (no bundler needed).
 import { createHash } from 'node:crypto';
+import { gunzipSync } from 'node:zlib';
 import { cpSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 
 const copies = {
   'node_modules/@mujoco/mujoco/mujoco.js': 'public/vendor/mujoco/mujoco.js',
   'node_modules/@mujoco/mujoco/mujoco.wasm': 'public/vendor/mujoco/mujoco.wasm',
-  'node_modules/filament/filament.js': 'public/vendor/filament/filament.js',
-  'node_modules/filament/filament.wasm': 'public/vendor/filament/filament.wasm',
   // onnxruntime-web, WASM backend only (runs the ONNX policies, public/js/controllers/policy.js).
   'node_modules/onnxruntime-web/dist/ort.wasm.min.mjs': 'public/vendor/onnxruntime/ort.wasm.min.mjs',
   'node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.mjs': 'public/vendor/onnxruntime/ort-wasm-simd-threaded.mjs',
@@ -26,6 +26,39 @@ for (const [from, to] of Object.entries(copies)) {
 }
 console.log('vendored', Object.keys(copies).length, 'files into public/vendor');
 
+// Filament.js: npm stopped at 1.53.4, the GitHub releases carry the web
+// build (filament.js, .wasm, .d.ts) of every version. Checked against its
+// hash, fetched once (FILAMENT.stamp: the hash of the one in place). The
+// materials (public/materials/*.filamat) must be compiled by the matc of the
+// same release (scripts/build_materials.sh).
+const FILAMENT = {
+  url: 'https://github.com/google/filament/releases/download/v1.80.0/filament-v1.80.0-web.tgz',
+  sha256: 'b183a737a23c25294805b1c0aa131b1bc71592d0ab8fbd685c3933eda659f571',
+  to: 'public/vendor/filament',
+  stamp: 'public/vendor/filament/.release',
+};
+const sha = (buf) => createHash('sha256').update(buf).digest('hex');
+if (!existsSync(FILAMENT.stamp) || readFileSync(FILAMENT.stamp, 'utf8').trim() !== FILAMENT.sha256
+    || !existsSync(`${FILAMENT.to}/filament.js`) || !existsSync(`${FILAMENT.to}/filament.wasm`)) {
+  const res = await fetch(FILAMENT.url);
+  if (!res.ok) throw new Error(`Filament: ${FILAMENT.url}: ${res.status} ${res.statusText}`);
+  const tgz = Buffer.from(await res.arrayBuffer());
+  if (sha(tgz) !== FILAMENT.sha256) throw new Error(`Filament: ${FILAMENT.url}: hash mismatch`);
+  // A tar of plain files: 512-byte headers (name, octal size at 124), the
+  // data padded to 512.
+  const tar = gunzipSync(tgz);
+  mkdirSync(FILAMENT.to, { recursive: true });
+  for (let at = 0; at + 512 <= tar.length && tar[at];) {
+    const name = tar.toString('utf8', at, at + 100).replace(/\0.*$/s, '').replace(/^\.\//, '');
+    const size = parseInt(tar.toString('utf8', at + 124, at + 136).replace(/\0.*$/s, '').trim() || '0', 8);
+    const type = String.fromCharCode(tar[at + 156] || 48);
+    if ((type === '0') && /^filament\.(js|wasm|d\.ts)$/.test(name)) writeFileSync(`${FILAMENT.to}/${name}`, tar.subarray(at + 512, at + 512 + size));
+    at += 512 + Math.ceil(size / 512) * 512;
+  }
+  writeFileSync(FILAMENT.stamp, FILAMENT.sha256 + '\n');
+  console.log('fetched Filament.js into', FILAMENT.to, 'from', FILAMENT.url);
+}
+
 // CodeMirror 6, the Behavior panel's editor: its modules bundled into one
 // (scripts/codemirror.mjs says which parts).
 const { build } = await import('esbuild');
@@ -43,7 +76,6 @@ const PY_TREES = {
   sha256: '78155ffaf02f49de0c4bfb458488a1f766ded5b35bf1254980d8f49e6fb89837',
   to: 'public/vendor/pyodide/py_trees-2.6.0-py2.py3-none-any.whl',
 };
-const sha = (buf) => createHash('sha256').update(buf).digest('hex');
 if (!existsSync(PY_TREES.to) || sha(readFileSync(PY_TREES.to)) !== PY_TREES.sha256) {
   try {
     const res = await fetch(PY_TREES.url);

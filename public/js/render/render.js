@@ -8,8 +8,8 @@
 // - ambient occlusion: Filament's SSAO, off, on (half resolution, low
 //   quality) or high (full resolution, high quality);
 // - shadows: the sun's (and the scene lights', lighting.js) shadow maps, on
-//   or off (their size cannot be set: Filament.js 1.53.4 does not bind
-//   LightManager's ShadowOptions);
+//   or off (PCF: VSM and PCSS draw no shadows in Filament.js 1.80's WebGL
+//   backend, so the scene's filament.shadows.type is not followed);
 // - reflections: Filament's screen-space reflections, on or off (the sky's
 //   reflections, IBL, are always on: they cost nothing extra);
 // - textures: the longest side image textures are scaled down to (main.js
@@ -51,7 +51,7 @@ const FIELDS = [
   ['ao', 'Occlusion', [['off', 'off'], ['on', 'on'], ['high', 'high']],
     'ambient occlusion (SSAO): contact darkening in corners and under objects; high is full resolution'],
   ['shadows', 'Shadows', [['off', 'off'], ['on', 'on']],
-    'the sun\'s shadows: off saves drawing the whole scene a second time, into the shadow map'],
+    'the sun\'s shadows: off saves drawing the whole scene again, into the shadow maps'],
   ['reflections', 'Reflections', [['off', 'off'], ['on', 'on']],
     'screen-space reflections: shiny surfaces (a floor with Shine, below) mirror what is on screen; one more pass over the image'],
   ['textures', 'Textures', [[64, '64'], [512, '512'], [1024, '1024'], [2048, '2048']],

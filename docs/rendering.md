@@ -9,8 +9,8 @@ browser) trades drawing quality for GPU load, applied at once: **Preset**
 presets keep the screen's, which on an iPhone 15 made little difference),
 **Anti-alias** (off, FXAA, MSAA 4×; High uses MSAA, Medium FXAA, Low and Ultra low none), **Occlusion** (SSAO off, on at half
 resolution, high at full; a radius of 8 cm, of the order of a Microduck's parts: a larger one darkened a
-halo round every silhouette), **Shadows** (the sun's and the scene lights', on or off:
-this Filament build binds no shadow-map options, so their size is fixed) and **Textures**
+halo round every silhouette), **Shadows** (the sun's and the scene lights', on or off; the sun's map
+2048² in 3 cascades) and **Textures**
 (64, 512, 1024 or 2048 px on the longer side; a change decodes the scene's
 images again, so it can be compared on the spot: a kitchen's 18 textures
 are 63 MB at 1024 and 0.3 MB at 64). Ultra low is Low with 64 px textures,
@@ -50,8 +50,8 @@ Below the quality settings (`public/js/render/render.js` too):
   **Light shadows**: how many of the scene's own lights cast shadows (none,
   1, 2 (the default), 4 or 8): the brightest of those with `castshadow`
   (MuJoCo's default), each a shadow pass more; none while Shadows is off,
-  and none in VR. Their maps are Filament's default (no cascades, unlike
-  MuJoCo's four for directional lights: no shadow options bound).
+  and none in VR. Their maps are mjrf's: `filament.shadows.map_size`
+  (2048 by default), four cascades for a directional light.
   The ambient light is brighter from above than from below (spherical
   harmonics bands 0 and 1: the sky over a darker floor), so a side the sun
   does not reach (in shadow) still shows its shape rather than one flat grey.
@@ -149,10 +149,13 @@ transforms (see [Memory](spawning.md#memory-physics-only-world-render-data-per-r
 ## Materials
 
 Filament.js can only load precompiled `.filamat` files, and they must match the
-runtime version exactly — that is why `filament` is pinned to `1.53.4` (the
-latest on npm). Sources are in `materials/`; to rebuild, use `matc` from the
+runtime version exactly. npm's `filament` stopped at 1.53.4, so
+`scripts/vendor.mjs` takes Filament.js from a GitHub release's web build
+instead (`filament-v1.80.0-web.tgz`, checked against its hash; to move to
+another version change FILAMENT there and recompile every material).
+Sources are in `materials/`; to rebuild, use `matc` from the
 same Filament release
-(`https://github.com/google/filament/releases/download/v1.53.4/filament-v1.53.4-linux.tgz`):
+(`https://github.com/google/filament/releases/download/v1.80.0/filament-v1.80.0-linux.tgz`):
 
 ```sh
 matc -a opengl -p mobile -o public/materials/lit.filamat     materials/lit.mat
@@ -209,17 +212,17 @@ that has any: color grading (`filament.cg.*`: tone mapping `aces`,
 saturation, temperature, tint, slope / offset / power,
 shadows / midtones / highlights, curves), fog (`filament.fog.*`), bloom
 (`filament.bloom.*`), vignette (`filament.vignette.*`), the AO's finer
-options (`filament.ao.*`: it may turn the Render panel's AO off, not on).
+options (`filament.ao.*`: it may turn the Render panel's AO off, not on),
+the scene lights' shadow maps (`filament.shadows.map_size`).
 They apply to the window, the robots' cameras and
 (color grading only) the VR eyes. In network mode the server sends them
 with the render data (`render_asset.py` render_settings).
 
-What Filament.js 1.53.4 cannot follow: the PBR neutral tone mapper (mjrf's
-default; `pbr_neutral` keeps Filament's), shadow options
-(`LightManager.setShadowOptions` throws: ShadowOptions is not bound, so no
-`filament.shadows.map_size` and no cascades), shadow types other than PCF (no
-`View.setShadowType` binding: no soft PCSS shadows, so `bulbradius` does
-nothing), image lights, mjrf's planar mirror reflections (`reflectance`:
+What Filament.js 1.80 cannot follow: the PBR neutral tone mapper (mjrf's
+default; its ColorGrading binding has no PBR_NEUTRAL, so `pbr_neutral` keeps
+Filament's), shadow types other than PCF (`filament.shadows.type`: VSM and
+PCSS, so soft shadows and `bulbradius`, draw no shadows at all in its WebGL
+backend, even in a minimal page of its own), image lights, mjrf's planar mirror reflections (`reflectance`:
 here the sky and SSR) and its object outlines.
 
 ## Relation to MuJoCo's own Filament renderer

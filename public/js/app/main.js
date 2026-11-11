@@ -41,7 +41,7 @@ import { addSwarm } from './swarm.js';
 import { FLOOR_STYLES, floorTexture, hexRgb, loadFloor, saveFloor } from '../render/floor.js';
 import { AMBIENT, SUN_LUX, linearRgb, loadLighting, saveLighting, sunDirection } from '../render/lighting.js';
 import { SceneLights } from '../render/scenelights.js';
-import { applySceneLook, buildColorGrading, geomLook, packOrm, renderSettings, sceneAo } from '../render/looks.js';
+import { applySceneLook, buildColorGrading, geomLook, num, packOrm, renderSettings, sceneAo } from '../render/looks.js';
 import { ServerPanel, autoLaunching, takeCarried } from '../net/serverpanel.js';
 import { Control } from '../net/control.js';
 import { Presence } from '../net/presence.js';
@@ -334,8 +334,9 @@ function uploadTexture(engine, w, h, rgba, srgb = true) {
     .levels(levels)
     .sampler(Filament.Texture$Sampler.SAMPLER_2D)
     .format(srgb ? Filament.Texture$InternalFormat.SRGB8_A8 : Filament.Texture$InternalFormat.RGBA8)
-    // generateMipmaps() renders into the texture, so it must be an attachment.
-    .usage(U.DEFAULT.value | U.COLOR_ATTACHMENT.value)
+    // generateMipmaps() renders into the texture (an attachment) and, since
+    // Filament 1.6x, wants it marked GEN_MIPMAPPABLE (else it throws).
+    .usage(U.DEFAULT.value | U.COLOR_ATTACHMENT.value | (U.GEN_MIPMAPPABLE?.value ?? 0))
     .build(engine);
   tex.setImage(engine, 0, Filament.PixelBuffer(rgba, Filament.PixelDataFormat.RGBA, Filament.PixelDataType.UBYTE));
   if (levels > 1) tex.generateMipmaps(engine);
@@ -397,30 +398,35 @@ function skyTexture(engine, size = 128) {
   ];
   const srgb = (c) => Math.round(255 * Math.min(1, Math.max(0, c)));
   const levels = Math.log2(size) + 1;
-  const tex = Filament.Texture.Builder()
-    .width(size).height(size).levels(levels)
-    .sampler(Filament.Texture$Sampler.SAMPLER_CUBEMAP)
-    .format(Filament.Texture$InternalFormat.SRGB8_A8)
-    .build(engine);
+  // A KTX1 cubemap in memory (Filament.js binds no per-face upload since
+  // setImageCube went, and setImage fills one face): the header, then per
+  // level its face size and the six faces.
+  let total = 64;
+  for (let level = 0; level < levels; level++) total += 4 + 6 * 4 * (size >> level) ** 2;
+  const ktx = new Uint8Array(total), dv = new DataView(ktx.buffer);
+  ktx.set([0xAB, 0x4B, 0x54, 0x58, 0x20, 0x31, 0x31, 0xBB, 0x0D, 0x0A, 0x1A, 0x0A]);
+  // endianness, type UNSIGNED_BYTE, type size, format RGBA, internal format
+  // SRGB8_ALPHA8, base format RGBA, width, height, depth, array elements, faces, levels, key-value bytes
+  [0x04030201, 0x1401, 1, 0x1908, 0x8C43, 0x1908, size, size, 0, 0, 6, levels, 0].forEach((v, i) => dv.setUint32(12 + 4 * i, v, true));
+  let o = 64;
   for (let level = 0; level < levels; level++) {
     const n = size >> level, t = level / (levels - 1), r = 1 - Math.sqrt(1 - t);
     const table = skyLobe(r * r), BINS = table.length / 3;
-    const px = new Uint8Array(6 * n * n * 4);
-    let o = 0;
+    dv.setUint32(o, 4 * n * n, true);
+    o += 4;
     for (const dir of faces) {
       for (let y = 0; y < n; y++) {
         for (let x = 0; x < n; x++) {
           const d = dir((2 * x + 1) / n - 1, (2 * y + 1) / n - 1);
           const f = Math.min(BINS - 1, Math.max(0, ((d[2] / Math.hypot(...d)) + 1) / 2 * BINS - 0.5));
           const i = Math.floor(f), j = Math.min(BINS - 1, i + 1), u = f - i;
-          for (let k = 0; k < 3; k++) px[o++] = srgb(table[3 * i + k] + (table[3 * j + k] - table[3 * i + k]) * u);
-          px[o++] = 255;
+          for (let k = 0; k < 3; k++) ktx[o++] = srgb(table[3 * i + k] + (table[3 * j + k] - table[3 * i + k]) * u);
+          ktx[o++] = 255;
         }
       }
     }
-    tex.setImageCube(engine, level, Filament.PixelBuffer(px, Filament.PixelDataFormat.RGBA, Filament.PixelDataType.UBYTE));
   }
-  return tex;
+  return engine.createTextureFromKtx1(ktx, { srgb: true });
 }
 
 // The pixels of a texture MuJoCo decoded itself (builtins, cube faces, …), from tex_data.
@@ -1204,15 +1210,16 @@ class App {
   }
 
   // The sun's shadows as the Render panel says, in VR as the VR menu does,
-  // and how many of the scene's lights cast them (none in VR). Their maps
-  // keep Filament's size: Filament.js 1.53.4 does not bind ShadowOptions
-  // (LightManager.setShadowOptions throws), so filament.shadows.map_size is
-  // not followed.
+  // and how many of the scene's lights cast them (none in VR). The sun's
+  // map: 2048² in 3 cascades (sharp near, reaching far); the scene lights'
+  // as the scene's filament.shadows.map_size says (scenelights.js).
   shadows() {
     const lm = this.engine.getLightManager(), sun = lm.getInstance(this.sun);
     const on = this.xr ? this.xrSettings.shadows : this.quality.shadows !== 'off';
+    lm.setShadowOptions(sun, { mapSize: 2048, shadowCascades: 3 });
     lm.setShadowCaster(sun, on);
     sun.delete();
+    this.sceneLights?.setShadowMap(Math.max(256, Math.min(4096, num(this.sceneSettings ?? new Map(), 'filament.shadows.map_size', 2048))));
     this.sceneLights?.setShadows(on && !this.xr ? this.lighting?.sceneShadows ?? 0 : 0);
   }
 

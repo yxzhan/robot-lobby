@@ -11,10 +11,10 @@
 // them, as in MuJoCo 4's own Filament renderer, but only the brightest few
 // (the Render panel's Light shadows, setShadows; 0 while the Shadows setting
 // is off), each a shadow pass more of the scene: a lab twin has 43 ceiling
-// panels. Their maps keep Filament's defaults (one cascade, 1024²): Filament.js
-// 1.53.4 does not bind ShadowOptions, so neither cascades nor the scene's
-// filament.shadows.map_size can be set, nor soft shadows (bulbradius: PCSS,
-// no View.setShadowType either).
+// panels. Their maps are mjrf's: filament.shadows.map_size of the scene's
+// look (setShadowMap), else 2048², a directional light's in 4 cascades.
+// PCF only: VSM / PCSS (soft shadows, a light's bulbradius) draw no shadows
+// in Filament.js 1.80's WebGL backend.
 //
 // Brightness: a light with an intensity (MuJoCo 3.2+: candela, lux for a
 // directional one) is that times SCENE_GAIN, which makes up for the
@@ -49,6 +49,14 @@ export class SceneLights {
     this.lights = [];    // {entity, id (the model's light), type}
     this.key = null;     // the model and settings the lights were made for
     this.shadowCount = 0;   // how many lights may cast shadows (setShadows)
+    this.mapSize = 2048;    // their shadow maps' size (setShadowMap)
+  }
+
+  // Their shadow maps `size` square (made again if it changes).
+  setShadowMap(size) {
+    if (size === this.mapSize) return;
+    this.mapSize = size;
+    this.key = null;
   }
 
   // At most `count` of the lights cast shadows.
@@ -117,7 +125,11 @@ export class SceneLights {
           b = b.spotLightCone(outer / (1 + model.light_exponent[id] / 4), outer);
         }
       }
-      b.color(color).castShadows(casters.has(id)).build(this.engine, entity);
+      b = b.color(color).castShadows(casters.has(id));
+      if (casters.has(id)) {
+        b = b.shadowOptions({ mapSize: this.mapSize, shadowCascades: type === 1 ? 4 : 1 });
+      }
+      b.build(this.engine, entity);
       this.scene.addEntity(entity);
       this.lights.push({ entity, id, type });
     }

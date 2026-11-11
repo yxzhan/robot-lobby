@@ -1,5 +1,5 @@
 // How MuJoCo 4's own Filament renderer (mjrf, src/render/filament) draws a
-// model, as far as Filament.js 1.53.4 can follow it:
+// model, as far as Filament.js (1.80, scripts/vendor.mjs) can follow it:
 //
 // - materials (geomLook): a material without metallic / roughness (and
 //   without PBR texture layers) is drawn with Filament's specular-glossiness
@@ -14,13 +14,14 @@
 // - the model's own render settings (renderSettings): <custom> <text> /
 //   <numeric> elements named filament.*, the same names mjrf reads: color
 //   grading (filament.cg.*), fog, bloom, vignette, ambient occlusion
-//   (filament.ao.*). applySceneLook puts them on a view.
+//   (filament.ao.*). applySceneLook puts them on a view; the scene lights'
+//   shadow map size (filament.shadows.map_size) main.js shadows().
 //
-// What Filament.js 1.53.4 cannot do of it: the PBR neutral tone mapper (it
-// has ACES, ACES legacy, filmic and linear: pbr_neutral leaves the default),
-// shadow options (ShadowOptions is not bound: no filament.shadows.map_size,
-// no cascades), shadow types other than PCF (no View.setShadowType, so no
-// soft PCSS shadows and no light bulbradius) and image lights (mjLIGHT_IMAGE).
+// What Filament.js (1.80) cannot do of it: the PBR neutral tone mapper (its
+// ColorGrading binds ACES, ACES legacy, filmic and linear: pbr_neutral
+// leaves the default), shadow types other than PCF (filament.shadows.type:
+// VSM and PCSS, so soft shadows and bulbradius, draw no shadows at all in its
+// WebGL backend, even in a page of its own) and image lights (mjLIGHT_IMAGE).
 
 export const ROLE = { RGB: 1, OCCLUSION: 2, ROUGHNESS: 3, METALLIC: 4, NORMAL: 5, OPACITY: 6, EMISSIVE: 7, RGBA: 8, ORM: 9 };
 export const NROLE = 10;
