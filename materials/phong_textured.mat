@@ -1,0 +1,26 @@
+// phong.mat with the material's RGB texture, modulated by its rgba as in
+// MuJoCo (texrepeat is baked into the UVs on the CPU).
+material {
+    name : mujoco_phong_textured,
+    shadingModel : specularGlossiness,
+    doubleSided : true,  // instances are one-sided unless set (environments: one-sided walls)
+    reflections : screenspace,
+    requires : [ uv0 ],
+    parameters : [
+        { type : float4,    name : baseColor },
+        { type : sampler2d, name : baseColorMap },
+        { type : float,     name : specular },
+        { type : float,     name : glossiness },
+        { type : float3,    name : emissive }
+    ]
+}
+
+fragment {
+    void material(inout MaterialInputs material) {
+        prepareMaterial(material);
+        material.baseColor = materialParams.baseColor * texture(materialParams_baseColorMap, getUV0());
+        material.specularColor = vec3(materialParams.specular);
+        material.glossiness = materialParams.glossiness;
+        material.emissive = vec4(materialParams.emissive, 0.0);
+    }
+}

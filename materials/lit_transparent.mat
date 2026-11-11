@@ -9,7 +9,8 @@ material {
     parameters : [
         { type : float4, name : baseColor },
         { type : float,  name : roughness },
-        { type : float,  name : metallic }
+        { type : float,  name : metallic },
+        { type : float3, name : emissive }
     ]
 }
 
@@ -20,5 +21,6 @@ fragment {
         material.baseColor = vec4(color.rgb * color.a, color.a);
         material.roughness = materialParams.roughness;
         material.metallic = materialParams.metallic;
+        material.emissive = vec4(materialParams.emissive, 0.0);
     }
 }

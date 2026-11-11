@@ -1563,7 +1563,7 @@ class World:
         'site_bodyid', 'site_pos', 'site_quat',
         # The model's lights, for the Render panel's Scene lights (scenelights.js): placed by their bodies.
         'light_type', 'light_active', 'light_bodyid', 'light_pos', 'light_dir', 'light_diffuse', 'light_intensity',
-        'light_range', 'light_cutoff', 'light_exponent')}
+        'light_range', 'light_cutoff', 'light_exponent', 'light_castshadow')}
     out.update({k: int(getattr(m, k)) for k in ('nbody', 'njnt', 'ngeom', 'nsite', 'nu', 'nq', 'nv', 'na', 'nmocap', 'nlight')})
     out['avatar_slots'] = AVATAR.SLOTS
     out['names'] = {'body': names(mujoco.mjtObj.mjOBJ_BODY, m.nbody), 'joint': names(mujoco.mjtObj.mjOBJ_JOINT, m.njnt),

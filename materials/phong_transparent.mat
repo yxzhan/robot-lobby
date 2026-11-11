@@ -1,0 +1,24 @@
+// phong.mat alpha blended (rgba alpha below 1), premultiplied as Filament expects.
+material {
+    name : mujoco_phong_transparent,
+    shadingModel : specularGlossiness,
+    doubleSided : true,  // instances are one-sided unless set (environments: one-sided walls)
+    blending : transparent,
+    parameters : [
+        { type : float4, name : baseColor },
+        { type : float,  name : specular },
+        { type : float,  name : glossiness },
+        { type : float3, name : emissive }
+    ]
+}
+
+fragment {
+    void material(inout MaterialInputs material) {
+        prepareMaterial(material);
+        vec4 color = materialParams.baseColor;
+        material.baseColor = vec4(color.rgb * color.a, color.a);
+        material.specularColor = vec3(materialParams.specular);
+        material.glossiness = materialParams.glossiness;
+        material.emissive = vec4(materialParams.emissive, 0.0);
+    }
+}

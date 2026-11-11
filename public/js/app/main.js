@@ -41,6 +41,7 @@ import { addSwarm } from './swarm.js';
 import { FLOOR_STYLES, floorTexture, hexRgb, loadFloor, saveFloor } from '../render/floor.js';
 import { AMBIENT, SUN_LUX, linearRgb, loadLighting, saveLighting, sunDirection } from '../render/lighting.js';
 import { SceneLights } from '../render/scenelights.js';
+import { applySceneLook, buildColorGrading, geomLook, packOrm, renderSettings, sceneAo } from '../render/looks.js';
 import { ServerPanel, autoLaunching, takeCarried } from '../net/serverpanel.js';
 import { Control } from '../net/control.js';
 import { Presence } from '../net/presence.js';
@@ -48,7 +49,7 @@ import { SharePanel } from '../net/share.js';
 import { MARKER } from './marker.js';
 import { XrControls } from '../render/xr.js';
 import { AvatarView } from '../render/avatars.js';
-import { Cameras, CamerasPanel, cameraKey, modelCameras } from '../cameras/cameras.js';
+import { AUX, Cameras, CamerasPanel, cameraKey, modelCameras } from '../cameras/cameras.js';
 import { CHAIN_COLORS } from '../drive/teleop.js';
 import Stats from '../../vendor/stats/Stats.js';
 import { NET_MUJOCO, NetClient, forwardKinematics, loadRender, worldData, worldModel } from '../net/net.js';
@@ -70,6 +71,18 @@ const FOLLOW = 'mujoco-filament/follow-selection';  // localStorage: the camera 
 const VIEW_FAR = 'mujoco-filament/view-distance';   // localStorage: how far the view reaches (m)
 const MAT_TEXTURED_TRANSPARENT = 'materials/lit_textured_transparent.filamat';
 const MAT_UNLIT_TEXTURED = 'materials/unlit_textured.filamat';  // the WebXR menu panel
+// MuJoCo's classic look (render/looks.js): specular-glossiness, plain and
+// textured, opaque and alpha blended.
+const MAT_PHONG = {
+  plain: 'materials/phong.filamat', textured: 'materials/phong_textured.filamat',
+  transparent: 'materials/phong_transparent.filamat', texturedTransparent: 'materials/phong_textured_transparent.filamat',
+};
+// PBR with a material's texture layers (normal, ORM, emissive), opaque and blended.
+const MAT_MAPS = { opaque: 'materials/lit_maps.filamat', transparent: 'materials/lit_maps_transparent.filamat' };
+// The robots' cameras' depth and segmentation images (cameras.js).
+const MAT_DEPTH = 'materials/unlit_depth.filamat';
+const MAT_SEGMENTATION = 'materials/unlit_segmentation.filamat';
+const MATERIAL_STYLE = 'mujoco-filament/materials';  // localStorage: the Render panel's Materials, 'mujoco' or 'pbr'
 // The debug overlays' lines (render/debug.js), fetched on their own: a page
 // without them (not compiled yet) still runs, with no overlays.
 const MAT_LINES = 'materials/unlit_lines.filamat';
@@ -311,15 +324,16 @@ function surface(model, matid) {
   return { roughness: Math.min(1, Math.max(0.03, roughness)), metallic: metallic < 0 ? 0 : Math.min(1, metallic) };
 }
 
-// RGBA8 pixels (row 0 = v 0) -> Filament sRGB texture with mipmaps.
-function uploadTexture(engine, w, h, rgba) {
+// RGBA8 pixels (row 0 = v 0) -> Filament texture with mipmaps: sRGB (colors),
+// or linear (`srgb` false: data such as normal and ORM maps).
+function uploadTexture(engine, w, h, rgba, srgb = true) {
   const levels = Math.floor(Math.log2(Math.max(w, h))) + 1;
   const U = Filament.Texture$Usage;
   const tex = Filament.Texture.Builder()
     .width(w).height(h)
     .levels(levels)
     .sampler(Filament.Texture$Sampler.SAMPLER_2D)
-    .format(Filament.Texture$InternalFormat.SRGB8_A8)
+    .format(srgb ? Filament.Texture$InternalFormat.SRGB8_A8 : Filament.Texture$InternalFormat.RGBA8)
     // generateMipmaps() renders into the texture, so it must be an attachment.
     .usage(U.DEFAULT.value | U.COLOR_ATTACHMENT.value)
     .build(engine);
@@ -409,8 +423,8 @@ function skyTexture(engine, size = 128) {
   return tex;
 }
 
-// A texture MuJoCo decoded itself (builtins, cube faces, …) from tex_data.
-function mjTexture(engine, model, t) {
+// The pixels of a texture MuJoCo decoded itself (builtins, cube faces, …), from tex_data.
+function mjPixels(model, t) {
   const w = model.tex_width[t], h = model.tex_height[t], nc = model.tex_nchannel[t];
   const src = model.tex_data.subarray(model.tex_adr[t], model.tex_adr[t] + w * h * nc);
   const rgba = new Uint8Array(4 * w * h);
@@ -419,7 +433,7 @@ function mjTexture(engine, model, t) {
     rgba[4 * i] = r; rgba[4 * i + 1] = g; rgba[4 * i + 2] = b;
     rgba[4 * i + 3] = nc === 4 ? src[i * nc + 3] : nc === 2 ? src[i * nc + 1] : 255;
   }
-  return uploadTexture(engine, w, h, rgba);
+  return { w, h, rgba };
 }
 
 // An image file decoded by the browser (off the main thread) -> RGBA8 pixels,
@@ -466,8 +480,9 @@ function geomShape(model, g) {
 // Filament helpers
 
 // GPU buffers for one shape: {vb, ib, box}. `uv` (Float32Array, 2 per
-// vertex) is only passed for textured materials.
-function makeGeometry(engine, shape, uv = null) {
+// vertex) is only passed for textured materials; `uvTangents` aligns the
+// tangent frames with them (normal maps), else they come from the normals alone.
+function makeGeometry(engine, shape, uv = null, uvTangents = false) {
   const pos = new Float32Array(shape.pos);
   const nrm = new Float32Array(shape.nrm);
   const idx = new Uint32Array(shape.idx);
@@ -479,6 +494,12 @@ function makeGeometry(engine, shape, uv = null) {
   const sob = new Filament.SurfaceOrientation$Builder();
   sob.vertexCount(n);
   sob.normals(nrm, 0);
+  if (uv && uvTangents) {
+    sob.uvs(uv, 0);
+    sob.positions(pos, 0);
+    sob.triangleCount(idx.length / 3);
+    sob.triangles32(idx);
+  }
   const so = sob.build();
   const quats = so.getQuats(n);
   so.delete();
@@ -833,11 +854,31 @@ class App {
     this.matTransparent = engine.createMaterial(MAT_TRANSPARENT);
     this.matTexturedTransparent = engine.createMaterial(MAT_TEXTURED_TRANSPARENT);
     this.matUnlitTextured = engine.createMaterial(MAT_UNLIT_TEXTURED);
+    this.matPhong = Object.fromEntries(Object.entries(MAT_PHONG).map(([k, url]) => [k, engine.createMaterial(url)]));
+    this.matMaps = Object.fromEntries(Object.entries(MAT_MAPS).map(([k, url]) => [k, engine.createMaterial(url)]));
+    this.matDepth = engine.createMaterial(MAT_DEPTH);
+    this.matSegmentation = engine.createMaterial(MAT_SEGMENTATION);
+    // How geoms without metallic / roughness look (the Render panel's
+    // Materials, saved in this browser): 'mujoco', MuJoCo's own Filament
+    // renderer's specular-glossiness (render/looks.js), or 'pbr', PBR with a
+    // roughness estimated from the classic attributes (surface()).
+    this.materialStyle = 'mujoco';
+    try { if (localStorage.getItem(MATERIAL_STYLE) === 'pbr') this.materialStyle = 'pbr'; } catch { /* no storage */ }
+    // The model whose filament.* settings give the scene its look (color
+    // grading, fog, bloom, …: looks.js; sceneLook()), and those settings.
+    this.sceneSettings = new Map();
+    this.sceneSettingsFrom = null;  // that model's robot label, null: none
+    this.useSceneLook = true;       // the Render panel's "Model's look"
+    // The scene's color grading (null: Filament's default, defaultGrading,
+    // which a view goes back to).
+    this.defaultGrading = Filament.ColorGrading.Builder().build(engine);
+    this.sceneGrading = null;
     // The lit materials are compiled double-sided for environments (walls
     // modelled one-sided, seen from outside); their instances start
     // one-sided, back faces culled as MuJoCo draws (setDoubleSided also sets
     // the culling).
-    for (const mat of [this.matLit, this.matTextured, this.matTransparent, this.matTexturedTransparent]) {
+    for (const mat of [this.matLit, this.matTextured, this.matTransparent, this.matTexturedTransparent,
+      ...Object.values(this.matPhong), ...Object.values(this.matMaps), this.matDepth, this.matSegmentation]) {
       const create = mat.createInstance.bind(mat);
       mat.createInstance = () => { const mi = create(); mi.setDoubleSided(false); return mi; };
     }
@@ -847,7 +888,12 @@ class App {
     this.sampler.setAnisotropy(8);
     // Bound to textured materials until their image has been decoded.
     this.whiteTexture = uploadTexture(engine, 1, 1, new Uint8Array([255, 255, 255, 255]));
-    this.images = new Map();  // image file(s) -> shared texture entry (bindTexture)
+    // Neutral layers of lit_maps.mat: white ORM (no occlusion, the factors
+    // alone) and a flat normal, linear; an emissive layer stays white (the
+    // emissive color alone).
+    this.whiteLinear = uploadTexture(engine, 1, 1, new Uint8Array([255, 255, 255, 255]), false);
+    this.flatNormal = uploadTexture(engine, 1, 1, new Uint8Array([128, 128, 255, 255]), false);
+    this.images = new Map();  // image file(s) -> shared texture entry (texEntry)
 
     // Sun with shadows, an ambient light so nothing is pitch black, and the
     // sky's reflections. The ambient is brighter from above (the sky) than
@@ -1074,9 +1120,11 @@ class App {
 
   // The sun and the ambient light: `l` as loadLighting returns it (lighting.js).
   setLighting(l) {
+    const shadows = l.sceneShadows !== this.lighting?.sceneShadows;
     this.lighting = l;
     saveLighting(l);
     this.applyLighting();
+    if (shadows && this.sun) this.shadows();  // how many scene lights cast shadows
   }
 
   // The sun and ambient light as this.lighting says, none while its global
@@ -1097,6 +1145,7 @@ class App {
     saveFloor(f);
     const F = Filament, engine = this.engine, old = this.floor;
     if (old) {
+      this.forgetAux(old.e);
       this.scene.remove(old.e);
       engine.destroyEntity(old.e);
       engine.destroyVertexBuffer(old.vb);
@@ -1138,7 +1187,7 @@ class App {
     // other with the view). Offset, the world floor always loses such ties.
     mi.setPolygonOffset(1, 1);
     const geo = makeGeometry(engine, shape, uv);
-    this.floor = { e: makeEntity(engine, geo, mi), vb: geo.vb, ib: geo.ib, mi };
+    this.floor = { e: makeEntity(engine, geo, mi), vb: geo.vb, ib: geo.ib, box: geo.box, mi };
     if (!this.passthroughOn) this.scene.addEntity(this.floor.e);
   }
 
@@ -1154,11 +1203,46 @@ class App {
     this.resize();
   }
 
-  // The sun's shadows as the Render panel says, in VR as the VR menu does.
+  // The sun's shadows as the Render panel says, in VR as the VR menu does,
+  // and how many of the scene's lights cast them (none in VR). Their maps
+  // keep Filament's size: Filament.js 1.53.4 does not bind ShadowOptions
+  // (LightManager.setShadowOptions throws), so filament.shadows.map_size is
+  // not followed.
   shadows() {
     const lm = this.engine.getLightManager(), sun = lm.getInstance(this.sun);
-    lm.setShadowCaster(sun, this.xr ? this.xrSettings.shadows : this.quality.shadows !== 'off');
+    const on = this.xr ? this.xrSettings.shadows : this.quality.shadows !== 'off';
+    lm.setShadowCaster(sun, on);
     sun.delete();
+    this.sceneLights?.setShadows(on && !this.xr ? this.lighting?.sceneShadows ?? 0 : 0);
+  }
+
+  // The scene's look: the filament.* settings (render/looks.js) of an
+  // environment in the world, else of the first robot that has any, unless
+  // the Render panel's "Model's look" is off; applied to every view.
+  sceneLook() {
+    let from = null, settings = new Map();
+    if (this.useSceneLook) {
+      const withSettings = this.robots.filter((r) => r.visual?.parts?.settings?.size);
+      const r = withSettings.find((x) => isEnvironment(x.visual.rel ?? '')) ?? withSettings[0];
+      if (r) { from = r.label ?? r.visual.rel ?? 'a model'; settings = r.visual.parts.settings; }
+    }
+    if (settings === this.sceneSettings) return;
+    const old = this.sceneGrading;
+    this.sceneSettings = settings;
+    this.sceneSettingsFrom = from;
+    this.sceneGrading = buildColorGrading(Filament, this.engine, settings);
+    this.viewQuality(this.view);
+    for (const c of this.cameras?.on.values() ?? []) if (c.view && !c.aux) this.viewQuality(c.view);
+    for (const { view } of this.xr?.eyes ?? []) this.viewQuality(view, true);
+    if (old) this.engine.destroyColorGrading?.(old);
+    this.shadows();
+    this.renderPanel?.render?.();
+  }
+
+  // The Render panel's "Model's look": whether the scene's filament.* settings apply.
+  setUseSceneLook(on) {
+    this.useSceneLook = on;
+    this.sceneLook();
   }
 
   // Anti-aliasing and ambient occlusion of the window's view. A WebXR eye's
@@ -1171,13 +1255,17 @@ class App {
     view.setAntiAliasing(q.antialiasing === 'fxaa' && !xr ? F.View$AntiAliasing.FXAA : F.View$AntiAliasing.NONE);
     view.setMultiSampleAntiAliasingOptions({ enabled: samples > 1, sampleCount: samples });
     const high = q.ao === 'high', Q = F.View$QualityLevel;
-    view.setAmbientOcclusionOptions({
+    // The scene's own settings (filament.ao.*) refine the panel's: they may
+    // turn it off, not on.
+    view.setAmbientOcclusionOptions(sceneAo(F, this.sceneSettings, {
       // radius: of the order of a Microduck's parts (a larger one darkens a
       // halo round every silhouette); upsampling HIGH, else the half
       // resolution shows as blocks.
       enabled: q.ao !== 'off' && !xr, radius: 0.08, bilateralThreshold: 0.02,
       resolution: high ? 1 : 0.5, quality: high ? Q.HIGH : Q.MEDIUM, upsampling: Q.HIGH,
-    });
+    }));
+    // The scene's look (color grading, fog, bloom, vignette: render/looks.js).
+    applySceneLook(F, view, this.sceneSettings, this.sceneGrading ?? this.defaultGrading, xr);
     // Screen-space reflections (shiny floors mirror the robots): off in VR,
     // like SSAO, for the same reason.
     view.setScreenSpaceReflectionsOptions({ enabled: q.reflections === 'on' && !xr, thickness: 0.1, bias: 0.01, maxDistance: 3, stride: 2 });
@@ -1201,7 +1289,8 @@ class App {
   // `doubleSided` draws back faces too (environments). Free it with
   // freeVisual once nothing uses it.
   buildVisual(mujoco, model, images, read, doubleSided = false) {
-    const textures = new Map();  // MuJoCo texture id -> texture entry (bindTexture)
+    const textures = new Map();  // this model's texture entries (texEntry)
+    const settings = renderSettings(mujoco, model);  // its filament.* settings (render/looks.js)
     const parts = [];
     for (let g = 0; g < model.ngeom; g++) {
       const matid = model.geom_matid[g];
@@ -1211,43 +1300,45 @@ class App {
       const shape = geomShape(model, g);
       if (!shape) { console.warn(`geom ${g}: type ${model.geom_type[g]} not supported`); continue; }
 
-      // mat_texid is nmat x mjNTEXROLE; role 1 (mjTEXROLE_RGB) is the color map.
-      // Only 2D textures are drawn; cube textures fall back to the plain color.
-      const nrole = model.nmat ? model.mat_texid.length / model.nmat : 0;
-      const texid = matid >= 0 ? model.mat_texid[nrole * matid + 1] : -1;
-      const textured = texid >= 0 && model.tex_type[texid] === 0;
+      // Its look in either of the Render panel's Materials (render/looks.js;
+      // both kept, so a switch needs no model), and the texture layers they
+      // draw (2D textures only; cube textures fall back to the plain color).
+      const est = surface(model, matid);
+      const looks = {
+        mujoco: geomLook(model, matid, rgba, 'mujoco', settings, est),
+        pbr: geomLook(model, matid, rgba, 'pbr', settings, est),
+      };
+      const L = looks.pbr, tex = {};
+      const entry = (ids, srgb, pack = false) => this.texEntry(textures, mujoco, model, images, read, ids, srgb, pack);
+      if (L.rgb >= 0) tex.rgb = entry([L.rgb], true);
+      if (L.normal >= 0) tex.normal = entry([L.normal], false);
+      if (L.orm >= 0) tex.orm = entry([L.orm], false);
+      else if (L.occlusion >= 0 || L.roughnessTex >= 0 || L.metallicTex >= 0) tex.orm = entry([L.occlusion, L.roughnessTex, L.metallicTex], false, true);
+      if (L.emissiveTex >= 0) tex.emissive = entry([L.emissiveTex], true);
+      const uv = Object.keys(tex).length ? geomUVs(model, g, shape, matid) : null;
 
       // Alpha below 1 is drawn blended (back to front per renderable, so a
       // self-overlapping or interpenetrating transparent mesh can sort wrong).
       const transparent = rgba[3] < 1;
-      let mi, uv = null;
-      if (textured) {
-        mi = (transparent ? this.matTexturedTransparent : this.matTextured).createInstance();
-        this.bindTexture(textures, mujoco, model, images, read, texid, mi);
-        uv = geomUVs(model, g, shape, matid);
-      } else {
-        mi = (transparent ? this.matTransparent : this.matLit).createInstance();
-      }
-      if (doubleSided) mi.setDoubleSided(true);
       const color = [rgba[0], rgba[1], rgba[2], transparent ? rgba[3] : 1];
-      mi.setColor4Parameter('baseColor', Filament.RgbaType.sRGB, color);
-      const { roughness, metallic } = surface(model, matid);
-      mi.setFloatParameter('roughness', roughness);
-      mi.setFloatParameter('metallic', metallic);
-      parts.push({
-        ...makeGeometry(this.engine, shape, uv), mi, transparent,
+      const part = {
+        ...makeGeometry(this.engine, shape, uv, !!tex.normal), transparent, color, looks, tex, doubleSided, mis: {},
         // What the spawn effect (render/reveal.js) draws it with: the same
-        // look, and its triangles for the wireframe (not in environments,
-        // which it leaves out).
-        look: { rgba: color, roughness, metallic, tex: textured ? textures.get(texid) : null, doubleSided },
+        // color and texture, PBR, and its triangles for the wireframe (not
+        // in environments, which it leaves out).
+        look: { rgba: color, roughness: L.roughness, metallic: L.metallic, tex: tex.rgb ?? null, doubleSided },
         tri: doubleSided ? null : Uint32Array.from(shape.idx),
         body: model.geom_bodyid[g],
+        geom: g,
         pos: Array.from(model.geom_pos.subarray(3 * g, 3 * g + 3)),
         rot: quatToMat(model.geom_quat.subarray(4 * g, 4 * g + 4)),
-      });
+      };
+      part.mi = this.partMaterial(part, this.materialStyle);
+      parts.push(part);
     }
     parts.textures = [...new Set(textures.values())];
     for (const e of parts.textures) e.users++;
+    parts.settings = settings;
     // The debug overlays' lines (render/debug.js), while the model is at hand.
     try {
       parts.debug = debugLines(model);
@@ -1255,6 +1346,68 @@ class App {
       console.warn('debug overlays:', err);
     }
     return parts;
+  }
+
+  // Part `p`'s material instance in Materials `style` ('mujoco' or 'pbr'),
+  // made on first use: Phong (looks.js) or PBR, plain, textured or with its
+  // texture layers (lit_maps.mat), opaque or blended.
+  partMaterial(p, style) {
+    if (p.mis[style]) return p.mis[style];
+    const L = p.looks[style], t = p.tex;
+    let mi;
+    if (L.kind === 'phong') {
+      mi = this.matPhong[t.rgb ? (p.transparent ? 'texturedTransparent' : 'textured') : (p.transparent ? 'transparent' : 'plain')].createInstance();
+      mi.setFloatParameter('specular', L.specular);
+      mi.setFloatParameter('glossiness', L.glossiness);
+      if (t.rgb) this.useTexture(t.rgb, mi, 'baseColorMap', this.whiteTexture);
+    } else {
+      const mat = L.maps ? this.matMaps[p.transparent ? 'transparent' : 'opaque']
+        : t.rgb ? (p.transparent ? this.matTexturedTransparent : this.matTextured)
+          : (p.transparent ? this.matTransparent : this.matLit);
+      mi = mat.createInstance();
+      mi.setFloatParameter('roughness', L.roughness);
+      mi.setFloatParameter('metallic', L.metallic);
+      if (t.rgb || L.maps) this.useTexture(t.rgb, mi, 'baseColorMap', this.whiteTexture);
+      if (L.maps) {
+        this.useTexture(t.normal, mi, 'normalMap', this.flatNormal);
+        this.useTexture(t.orm, mi, 'ormMap', this.whiteLinear);
+        this.useTexture(t.emissive, mi, 'emissiveMap', this.whiteTexture);
+      }
+    }
+    mi.setFloat3Parameter('emissive', L.emissive);
+    mi.setColor4Parameter('baseColor', Filament.RgbaType.sRGB, p.color);
+    if (p.doubleSided) mi.setDoubleSided(true);
+    p.mis[style] = mi;
+    return mi;
+  }
+
+  // Binds texture entry `entry` (texEntry; none: `fallback`) to `param` of
+  // `mi`, `fallback` until its image has been decoded.
+  useTexture(entry, mi, param, fallback) {
+    if (entry) {
+      entry.uses.push([mi, param]);
+      entry.fallback = fallback;
+    }
+    mi.setTextureParameter(param, entry?.tex ?? fallback, this.sampler);
+  }
+
+  // The Render panel's Materials: every robot's geoms drawn in `style`
+  // ('mujoco' or 'pbr'), their other instances kept for switching back.
+  setMaterialStyle(style) {
+    if (style === this.materialStyle) return;
+    this.materialStyle = style;
+    try { localStorage.setItem(MATERIAL_STYLE, style); } catch { /* no storage */ }
+    const rcm = this.engine.getRenderableManager();
+    for (const r of this.robots) {
+      const reveal = this.reveal?.active?.get(r);  // a reveal draws with its own instances, then puts p.mi back
+      for (const [i, p] of r.visual.parts.entries()) {
+        p.mi = this.partMaterial(p, style);
+        if (!r.entities?.[i] || (reveal && !p.transparent)) continue;  // (a reveal only hides the transparent ones)
+        const inst = rcm.getInstance(r.entities[i]);
+        rcm.setMaterialInstanceAt(inst, 0, p.mi);
+        inst.delete();
+      }
+    }
   }
 
   // Gives back the GPU memory of buildVisual's `parts` (their entities
@@ -1267,15 +1420,16 @@ class App {
         this.engine.destroyIndexBuffer(g.ib);
       }
     }
-    const mis = new Set(parts.map((p) => p.mi));
+    const mis = new Set(parts.flatMap((p) => Object.values(p.mis)));
     for (const p of parts) {
       this.engine.destroyVertexBuffer(p.vb);
       this.engine.destroyIndexBuffer(p.ib);
       if (p.wireIb) this.engine.destroyIndexBuffer(p.wireIb);
-      this.engine.destroyMaterialInstance(p.mi);
+      for (const mi of Object.values(p.mis)) this.engine.destroyMaterialInstance(mi);
+      for (const mi of Object.values(p.aux ?? {})) this.engine.destroyMaterialInstance(mi);
     }
     for (const e of parts.textures ?? []) {
-      e.mis = e.mis.filter((mi) => !mis.has(mi));
+      e.uses = e.uses.filter(([mi]) => !mis.has(mi));
       if (--e.users > 0) continue;
       if (e.tex) this.engine.destroyTexture(e.tex);
       e.tex = null;
@@ -1284,46 +1438,60 @@ class App {
     }
   }
 
-  // Binds MuJoCo texture `texid` to `mi`, creating it on first use. Image
-  // textures are shared by every model that uses the same file (this.images:
-  // a RoboCasa kitchen alone names its 19 images 69 times) and decoded
-  // asynchronously; until then `mi` shows plain white.
-  bindTexture(textures, mujoco, model, images, read, texid, mi) {
-    let entry = textures.get(texid);
-    if (!entry) {
-      const name = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_TEXTURE.value, texid);
+  // The texture entry {tex, uses: [[mi, param]], users, key, …} of MuJoCo
+  // textures `ids` of `model`: one (`pack` false), or the occlusion,
+  // roughness and metallic layers packed into one ORM image (-1: none of
+  // that layer); `srgb` color, else linear data. Made on first use. Image
+  // textures are shared by every model that uses the same files the same way
+  // (this.images: a RoboCasa kitchen alone names its 19 images 69 times) and
+  // decoded asynchronously (until then the instances show their fallback);
+  // MuJoCo's own (builtins) are uploaded at once.
+  texEntry(textures, mujoco, model, images, read, ids, srgb, pack = false) {
+    const local = `${ids.join(',')}/${srgb ? 'srgb' : 'linear'}${pack ? '/orm' : ''}`;
+    let entry = textures.get(local);
+    if (entry) return entry;
+    const srcs = ids.map((t) => {
+      if (t < 0) return null;
+      const name = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_TEXTURE.value, t);
       const cands = images.get(name);
-      const key = cands && cands.join('\n');
-      entry = key && this.images.get(key);
-      if (!entry) {
-        entry = { tex: null, mis: [], users: 0, key, gen: 0 };
-        if (cands) {
-          this.images.set(key, entry);
-          entry.reload = () => this.loadImage(entry, read, cands, name);
-          entry.reload();
-        } else {
-          entry.tex = mjTexture(this.engine, model, texid);
-        }
+      return cands ? { cands, name } : { pixels: mjPixels(model, t), name };
+    });
+    // Shared when every source is an image file.
+    const files = srcs.every((s) => !s || s.cands);
+    const key = files ? `${srgb ? 'srgb' : 'linear'}${pack ? '/orm' : ''}\n${srcs.map((s) => s?.cands.join('\n') ?? '-').join('\n\n')}` : null;
+    entry = key && this.images.get(key);
+    if (!entry) {
+      entry = { tex: null, uses: [], users: 0, key, gen: 0, fallback: this.whiteTexture };
+      if (key) this.images.set(key, entry);
+      entry.reload = () => this.loadImage(entry, read, srcs, srgb, pack);
+      if (srcs.every((s) => !s || s.pixels)) {  // no files: at once
+        const imgs = srcs.map((s) => s?.pixels ?? null);
+        const { w, h, rgba } = pack ? packOrm(imgs) : imgs[0];
+        entry.tex = uploadTexture(this.engine, w, h, rgba, srgb);
+        entry.reload = null;
+      } else {
+        entry.reload();
       }
-      textures.set(texid, entry);
     }
-    entry.mis.push(mi);
-    mi.setTextureParameter('baseColorMap', entry.tex ?? this.whiteTexture, this.sampler);
+    textures.set(local, entry);
+    return entry;
   }
 
-  // Decodes an image texture (again, at the current maxTexture: reload) and
-  // puts it on every material instance that uses it.
-  async loadImage(entry, read, cands, name) {
+  // Decodes an entry's image files (again, at the current maxTexture:
+  // reload), packs them if it is an ORM of separate layers, and puts the
+  // texture on every material instance that uses it.
+  async loadImage(entry, read, srcs, srgb, pack) {
     const gen = ++entry.gen;
     try {
-      const { w, h, rgba } = await decodeImage(await readFirst(read, cands));
+      const imgs = await Promise.all(srcs.map(async (s) => (!s ? null : s.pixels ?? decodeImage(await readFirst(read, s.cands)))));
       if (entry.dead || gen !== entry.gen) return;  // freed, or a newer load under way
+      const { w, h, rgba } = pack ? packOrm(imgs) : imgs[0];
       const old = entry.tex;
-      entry.tex = uploadTexture(this.engine, w, h, rgba);
-      for (const mi of entry.mis) mi.setTextureParameter('baseColorMap', entry.tex, this.sampler);
+      entry.tex = uploadTexture(this.engine, w, h, rgba, srgb);
+      for (const [mi, param] of entry.uses) mi.setTextureParameter(param, entry.tex, this.sampler);
       if (old) this.engine.destroyTexture(old);
     } catch (err) {
-      console.warn(`texture ${name}:`, err);
+      console.warn(`texture ${srcs.filter(Boolean).map((s) => s.name).join(' + ')}:`, err);
     }
   }
 
@@ -1338,9 +1506,88 @@ class App {
   removeEntities(entities) {
     this.reveal?.forget(entities);
     for (const e of entities) {
+      this.forgetAux(e);
       this.scene.remove(e);
       this.engine.destroyEntity(e);
     }
+  }
+
+  // ---- the robots' cameras' depth and segmentation (cameras.js) ----
+
+  // `kind` ('depth' or 'segmentation') cameras switched on (+1) or off (-1):
+  // the geoms' copies (syncAux) are kept while any are on.
+  auxCameras(kind, delta) {
+    this.auxUse ??= { depth: 0, segmentation: 0 };
+    this.auxUse[kind] = Math.max(0, this.auxUse[kind] + delta);
+    if (!this.auxUse[kind]) {
+      for (const [e, a] of this.auxOf ?? []) if (a[kind]) this.dropAuxCopy(e, a, kind);
+    }
+  }
+
+  // A copy of every drawn geom (the robots' and the floor) for each kind in
+  // use, made where missing: a child of the geom's entity (so it follows
+  // its pose), its triangles on the kind's layer (cameras.js AUX), drawn
+  // with unlit_depth (one instance for one-sided geoms, one for
+  // double-sided) or unlit_segmentation (one per geom: its id's color, see
+  // cameras.js). A robot's segId (1-255) numbers it in the ids.
+  syncAux() {
+    this.auxOf ??= new Map();  // a geom's entity -> {depth, segmentation}: its copies
+    for (const kind of ['depth', 'segmentation']) {
+      if (!this.auxUse?.[kind]) continue;
+      for (const r of this.robots) {
+        if (!r.entities) continue;
+        r.segId ??= this.nextSegId = (this.nextSegId ?? 0) % 255 + 1;
+        r.entities.forEach((e, i) => this.auxCopy(e, r.visual.parts[i], kind, (r.segId << 16) | (r.visual.parts[i].geom + 1)));
+      }
+      if (this.floor) this.auxCopy(this.floor.e, this.floor, kind, 1);
+    }
+  }
+
+  auxCopy(e, part, kind, id) {
+    let a = this.auxOf.get(e);
+    if (!a) this.auxOf.set(e, a = {});
+    if (a[kind]) return;
+    let mi;
+    if (kind === 'depth') {
+      const two = !!part.doubleSided;
+      this.depthMis ??= {};
+      mi = this.depthMis[two] ??= this.matDepth.createInstance();
+      mi.setDoubleSided(two);
+    } else {
+      mi = this.matSegmentation.createInstance();
+      mi.setDoubleSided(!!part.doubleSided);
+      mi.setColor4Parameter('color', Filament.RgbaType.LINEAR, [id & 255, (id >> 8) & 255, (id >> 16) & 255, 255].map((v) => v / 255));
+    }
+    const c = makeEntity(this.engine, part, mi, false, AUX[kind], Filament.RenderableManager$PrimitiveType.TRIANGLES, false);
+    const tcm = this.engine.getTransformManager(), ci = tcm.getInstance(c), pi = tcm.getInstance(e);
+    tcm.setParent(ci, pi);
+    ci.delete();
+    pi.delete();
+    this.scene.addEntity(c);
+    a[kind] = { entity: c, mi: kind === 'segmentation' ? mi : null };
+  }
+
+  dropAuxCopy(e, a, kind) {
+    const { entity, mi } = a[kind];
+    this.scene.remove(entity);
+    this.engine.destroyEntity(entity);
+    if (mi) this.engine.destroyMaterialInstance(mi);
+    delete a[kind];
+    if (!a.depth && !a.segmentation) this.auxOf.delete(e);
+  }
+
+  // A geom's entity about to go: its copies with it.
+  forgetAux(e) {
+    const a = this.auxOf?.get(e);
+    if (!a) return;
+    for (const kind of ['depth', 'segmentation']) if (a[kind]) this.dropAuxCopy(e, a, kind);
+  }
+
+  // The sky and the clear color back after a depth or segmentation frame (none in AR).
+  restoreSky() {
+    const ar = !!this.passthroughOn;
+    this.scene.setSkybox(ar ? null : this.skybox);
+    this.renderer.setClearOptions({ clearColor: ar ? [0, 0, 0, 0] : [0.1, 0.11, 0.13, 1], clear: true });
   }
 
   // Swaps in a new physics world: `model` belongs to `mujoco` (a fresh
@@ -1367,6 +1614,7 @@ class App {
     this.teleop?.build();
     this.cameras?.build();
     this.ros.build();
+    this.sceneLook();  // the scene's filament.* settings, from what is in it now
   }
 
   // Network mode: swaps in the server's world. `model` and `data` are
@@ -1388,6 +1636,7 @@ class App {
     this.teleop?.build();
     this.cameras?.build();
     this.ros.build();
+    this.sceneLook();
   }
 
   // The controllers to tick: each robot's switched-on ones (robot.use).
@@ -2361,7 +2610,8 @@ function snapshot(app) {
 }
 
 try {
-  await new Promise((resolve) => Filament.init([MAT_LIT, MAT_TEXTURED, MAT_TRANSPARENT, MAT_TEXTURED_TRANSPARENT, MAT_UNLIT_TEXTURED], resolve));
+  await new Promise((resolve) => Filament.init([MAT_LIT, MAT_TEXTURED, MAT_TRANSPARENT, MAT_TEXTURED_TRANSPARENT, MAT_UNLIT_TEXTURED,
+    ...Object.values(MAT_PHONG), ...Object.values(MAT_MAPS), MAT_DEPTH, MAT_SEGMENTATION], resolve));
   Filament = window.Filament;
   const app = new App(document.getElementById('canvas'));
   app.panel = new StagePanel(app, document.getElementById('stage'), {

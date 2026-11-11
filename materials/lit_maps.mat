@@ -1,0 +1,39 @@
+// PBR with the texture layers of a MuJoCo material (<layer role=…>): color
+// (sRGB), normal (tangent space, OpenGL convention: +y up the image), ORM
+// (occlusion, roughness, metallic in r, g, b, linear; MuJoCo's separate
+// occlusion / roughness / metallic layers are packed into one on the CPU,
+// main.js) and emissive (sRGB). A layer the material lacks is bound to a
+// neutral 1x1 texture: white color and ORM, flat normal, black emissive.
+// roughness / metallic multiply the ORM's, as in mjrf's pbr_packed.mat.
+material {
+    name : mujoco_lit_maps,
+    shadingModel : lit,
+    doubleSided : true,  // instances are one-sided unless set (environments: one-sided walls)
+    reflections : screenspace,
+    requires : [ uv0 ],
+    parameters : [
+        { type : float4,    name : baseColor },
+        { type : sampler2d, name : baseColorMap },
+        { type : sampler2d, name : normalMap },
+        { type : sampler2d, name : ormMap },
+        { type : sampler2d, name : emissiveMap },
+        { type : float,     name : roughness },
+        { type : float,     name : metallic },
+        { type : float3,    name : emissive }
+    ]
+}
+
+fragment {
+    void material(inout MaterialInputs material) {
+        vec2 uv = getUV0();
+        material.normal = texture(materialParams_normalMap, uv).xyz * 2.0 - 1.0;
+        prepareMaterial(material);
+        vec4 color = materialParams.baseColor * texture(materialParams_baseColorMap, uv);
+        material.baseColor = color;
+        vec3 orm = texture(materialParams_ormMap, uv).rgb;
+        material.ambientOcclusion = orm.r;
+        material.roughness = materialParams.roughness * orm.g;
+        material.metallic = materialParams.metallic * orm.b;
+        material.emissive = vec4(materialParams.emissive * texture(materialParams_emissiveMap, uv).rgb, 0.0);
+    }
+}

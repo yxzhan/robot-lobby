@@ -7,8 +7,9 @@
 //   4 samples per pixel of memory and fill);
 // - ambient occlusion: Filament's SSAO, off, on (half resolution, low
 //   quality) or high (full resolution, high quality);
-// - shadows: the sun's shadow map, on or off (its size cannot be set: this
-//   Filament build does not bind LightManager's shadow options);
+// - shadows: the sun's (and the scene lights', lighting.js) shadow maps, on
+//   or off (their size cannot be set: Filament.js 1.53.4 does not bind
+//   LightManager's ShadowOptions);
 // - reflections: Filament's screen-space reflections, on or off (the sky's
 //   reflections, IBL, are always on: they cost nothing extra);
 // - textures: the longest side image textures are scaled down to (main.js
@@ -124,10 +125,31 @@ export class RenderPanel {
     };
     const field = (label, unit, title, ...inputs) => el('div', { className: 'field', title },
       el('span', { textContent: label }), el('div', { className: 'ctl' }, ...inputs), el('span', { className: 'unit', textContent: unit }));
+    this.look(field);
     this.floor(field, num);
     this.lighting(field);
     this.overlays();
     this.camera(field, num);
+  }
+
+  // The Look section: how materials are drawn (App.setMaterialStyle: MuJoCo
+  // 4's own renderer's look, or PBR throughout) and whether the scene's own
+  // render settings (filament.* in a model's <custom>: color grading, fog,
+  // bloom, …; render/looks.js) apply.
+  look(row) {
+    this.body.append(el('div', { className: 'sub', textContent: 'Look' }));
+    const tip = 'MuJoCo: as MuJoCo 4 draws them, a material without metallic / roughness in its classic look '
+      + '(specular and shininess), PBR otherwise; PBR: every geom PBR, the roughness of the classic ones estimated';
+    const sel = el('select', { title: tip });
+    for (const [v, text] of [['mujoco', 'MuJoCo'], ['pbr', 'PBR']]) sel.append(new Option(text, v, false, v === this.app.materialStyle));
+    sel.onchange = () => { this.app.setMaterialStyle(sel.value); sel.blur(); };
+    this.body.append(row('Materials', '', tip, sel));
+    const from = this.app.sceneSettingsFrom ?? this.app.robots?.find((r) => r.visual?.parts?.settings?.size)?.label;
+    const tip2 = from ? `the look ${from} gives the scene (filament.* settings: color grading, fog, bloom, vignette)`
+      : 'no model in the scene sets a look of its own (filament.* settings in its <custom>)';
+    const box = el('input', { type: 'checkbox', checked: this.app.useSceneLook !== false, disabled: !from, title: tip2 });
+    box.onchange = () => this.app.setUseSceneLook(box.checked);
+    this.body.append(row('Model\'s look', from ?? '', tip2, box));
   }
 
   // The Show section: the robots' geoms and the debug overlays
@@ -198,9 +220,19 @@ export class RenderPanel {
     slider('ambient', 'Ambient', 0, 300, 5, '%', 'light from all around (the sky): fills the shadows (100 %: the default)');
     // The model's own lights (scenelights.js), off by default: then the sun
     // and the ambient light alone light every scene alike.
-    check('scene', 'Scene lights', 'the scene\'s own lights (MJCF <light>: a lab\'s ceiling panels, a kitchen\'s lamps; '
-      + 'no shadows) shine too; indoors, turn Global light off or the Ambient down to see them');
+    check('scene', 'Scene lights', 'the scene\'s own lights (MJCF <light>: a lab\'s ceiling panels, a kitchen\'s lamps) '
+      + 'shine too; indoors, turn Global light off or the Ambient down to see them');
     slider('sceneLevel', 'Scene', 0, 300, 5, '%', 'brightness of the scene\'s own lights (100 %: the default)');
+    {
+      const tip = 'how many of the scene\'s lights cast shadows (the brightest with castshadow, MuJoCo\'s default): '
+        + 'each draws the scene once more; none while Shadows (above) is off';
+      this.body.append(row('Light shadows', '', tip, (() => {
+        const sel = el('select', { title: tip });
+        for (const n of [0, 1, 2, 4, 8]) sel.append(new Option(n ? `${n} brightest` : 'none', String(n), false, n === (l.sceneShadows ?? 2)));
+        sel.onchange = () => { this.app.setLighting({ ...this.app.lighting, sceneShadows: Number(sel.value) }); sel.blur(); };
+        return sel;
+      })()));
+    }
     const title = 'the sunlight\'s color';
     const color = el('input', { type: 'color', value: l.color, title });
     color.oninput = () => this.app.setLighting({ ...this.app.lighting, color: color.value });

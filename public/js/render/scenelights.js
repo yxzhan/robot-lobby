@@ -5,7 +5,16 @@
 // light) show a room as lit, where the ambient light, the sky, washes it
 // out, its glossy floor mirroring a blue sky through the roof. Spot, point
 // and directional lights; image lights are left out. They follow their
-// bodies (data.light_xpos, light_xdir) and cast no shadows.
+// bodies (data.light_xpos, light_xdir).
+//
+// Shadows: a light with castshadow (MJCF's default, as in MuJoCo) casts
+// them, as in MuJoCo 4's own Filament renderer, but only the brightest few
+// (the Render panel's Light shadows, setShadows; 0 while the Shadows setting
+// is off), each a shadow pass more of the scene: a lab twin has 43 ceiling
+// panels. Their maps keep Filament's defaults (one cascade, 1024²): Filament.js
+// 1.53.4 does not bind ShadowOptions, so neither cascades nor the scene's
+// filament.shadows.map_size can be set, nor soft shadows (bulbradius: PCSS,
+// no View.setShadowType either).
 //
 // Brightness: a light with an intensity (MuJoCo 3.2+: candela, lux for a
 // directional one) is that times SCENE_GAIN, which makes up for the
@@ -39,6 +48,14 @@ export class SceneLights {
     this.scene = scene;
     this.lights = [];    // {entity, id (the model's light), type}
     this.key = null;     // the model and settings the lights were made for
+    this.shadowCount = 0;   // how many lights may cast shadows (setShadows)
+  }
+
+  // At most `count` of the lights cast shadows.
+  setShadows(count) {
+    if (count === this.shadowCount) return;
+    this.shadowCount = count;
+    this.key = null;  // made again on the next sync
   }
 
   // Makes, updates or removes the lights for `model` / `data` (null: none)
@@ -65,23 +82,33 @@ export class SceneLights {
 
   build(model, level) {
     const F = Filament, T = F.LightManager$Type;
+    // The lights to make, and how bright (to pick the shadow casters by).
+    const list = [];
     for (let id = 0; id < model.nlight; id++) {
       const type = model.light_type[id];
       if (type > 2 || !model.light_active[id]) continue;  // an image light, or one switched off
       const diffuse = Array.from(model.light_diffuse.subarray(3 * id, 3 * id + 3));
       const peak = Math.max(...diffuse);
       if (peak <= 0) continue;
-      const color = diffuse.map((c) => c / peak);
       const intensity = model.light_intensity?.[id] ?? 0;
+      // Lux, or candela for a spot or point light; for ranking, a candela
+      // counts as the lux it gives at 2 m.
+      const amount = type === 1 ? (intensity > 0 ? intensity * SCENE_GAIN : peak * LEGACY_LUX) * level
+        : (intensity > 0 ? intensity * SCENE_GAIN : peak * LEGACY_CD) * level;
+      list.push({ id, type, diffuse, peak, amount, rank: type === 1 ? amount : amount / 4 });
+    }
+    // castshadow: MuJoCo's default is on (a model from before the field has none: on).
+    const casters = new Set(list.filter((x) => (model.light_castshadow?.[x.id] ?? 1) !== 0)
+      .sort((a, b) => b.rank - a.rank).slice(0, this.shadowCount).map((x) => x.id));
+    for (const { id, type, diffuse, peak, amount } of list) {
+      const color = diffuse.map((c) => c / peak);
       const entity = F.EntityManager.get().create();
       let b;
       if (type === 1) {
-        const lux = (intensity > 0 ? intensity * SCENE_GAIN : peak * LEGACY_LUX) * level;
-        b = F.LightManager.Builder(T.DIRECTIONAL).intensity(lux);
+        b = F.LightManager.Builder(T.DIRECTIONAL).intensity(amount);
       } else {
         // Filament's point and (unfocused) spot lights take lumens: 4π per candela.
-        const cd = (intensity > 0 ? intensity * SCENE_GAIN : peak * LEGACY_CD) * level;
-        b = F.LightManager.Builder(type === 2 ? T.POINT : T.SPOT).intensity(4 * Math.PI * cd)
+        b = F.LightManager.Builder(type === 2 ? T.POINT : T.SPOT).intensity(4 * Math.PI * amount)
           .falloff(model.light_range?.[id] || 10);
         if (type === 0) {
           // MuJoCo's cutoff is the cone's half angle in degrees; a larger
@@ -90,7 +117,7 @@ export class SceneLights {
           b = b.spotLightCone(outer / (1 + model.light_exponent[id] / 4), outer);
         }
       }
-      b.color(color).castShadows(false).build(this.engine, entity);
+      b.color(color).castShadows(casters.has(id)).build(this.engine, entity);
       this.scene.addEntity(entity);
       this.lights.push({ entity, id, type });
     }

@@ -2,7 +2,8 @@
 // browser: whether the global light (the sun and the ambient light) shines,
 // the sun's brightness, direction and color, the ambient light's
 // brightness, and whether the model's own lights (MJCF <light>,
-// scenelights.js) shine too and how bright. Brightness is a percentage of
+// scenelights.js) shine too, how bright, and how many of them cast shadows
+// (sceneShadows: the brightest ones with castshadow). Brightness is a percentage of
 // the defaults main.js was tuned at; the direction is where the sun stands:
 // azimuth (degrees from +x toward +y) and elevation above the horizon.
 
@@ -11,7 +12,7 @@ const STORE = 'mujoco-filament/lighting';
 export const SUN_LUX = 90000, AMBIENT = 25000;  // at 100 %
 
 export const LIGHTING_DEFAULTS = { sun: 100, azimuth: 200, elevation: 30, color: '#fffbf5', ambient: 100,
-  global: true, scene: false, sceneLevel: 100 };
+  global: true, scene: false, sceneLevel: 100, sceneShadows: 2 };
 
 export function loadLighting() {
   try {

@@ -49,6 +49,24 @@ def image_textures(spec, rel, public):
   return out
 
 
+def render_settings(m):
+  """The model's own render settings, as MuJoCo 4's Filament renderer reads
+  them: <custom> <text> / <numeric> named filament.* (public/js/render/looks.js
+  renderSettings does the same in local mode): name -> string or list."""
+  out = {}
+  for i in range(m.ntext):
+    name = mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_TEXT, i) or ''
+    if name.startswith('filament.'):
+      a = m.text_adr[i]
+      out[name] = bytes(m.text_data[a:a + max(0, m.text_size[i] - 1)]).decode(errors='replace').strip()
+  for i in range(m.nnumeric):
+    name = mujoco.mj_id2name(m, mujoco.mjtObj.mjOBJ_NUMERIC, i) or ''
+    if name.startswith('filament.'):
+      a = m.numeric_adr[i]
+      out[name] = [float(v) for v in m.numeric_data[a:a + m.numeric_size[i]]]
+  return out
+
+
 def build(spec, model, rel, public):
   m = model
   arrays = {}
@@ -102,7 +120,7 @@ def build(spec, model, rel, public):
   # Materials (all; few) and textures: pixels only for 2D textures MuJoCo
   # made itself, image files go by path.
   for f in ('mat_rgba', 'mat_texid', 'mat_texrepeat', 'mat_texuniform',
-            'mat_metallic', 'mat_roughness', 'mat_shininess', 'mat_specular', 'mat_reflectance'):
+            'mat_metallic', 'mat_roughness', 'mat_shininess', 'mat_specular', 'mat_reflectance', 'mat_emission'):
     arrays[f] = getattr(m, f)
   images = image_textures(spec, rel, public) if len(spec.textures) == m.ntex else {}
   data, tex_adr = [], []
@@ -169,6 +187,7 @@ def build(spec, model, rel, public):
 
   header = {
       'cameras': cameras,
+      'filament': render_settings(m),
       'ngeom': len(geoms), 'nmesh': len(meshes), 'nmat': m.nmat, 'ntex': m.ntex,
       'nbody': m.nbody, 'njnt': m.njnt,
       'dims': {'nq': m.nq, 'nv': m.nv, 'na': m.na, 'nu': m.nu, 'nmocap': m.nmocap},

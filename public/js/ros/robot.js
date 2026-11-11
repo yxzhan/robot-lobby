@@ -598,6 +598,15 @@ export class RosRobot {
       this.camTopics.add(topic);
       this.send(topic, msg);
     };
+    if (c.aux) {
+      // Depth (32FC1, metres, 0 where nothing) or segmentation (32SC1 ids,
+      // cameras.js), top row first, always raw: JPEG would garble the values.
+      const v = c.values, bytes = new Uint8Array(v.buffer.slice(v.byteOffset, v.byteOffset + v.byteLength));
+      const [sub, encoding] = c.aux === 'depth' ? ['depth', '32FC1'] : ['segmentation', '32SC1'];
+      send(`${base}/${sub}/image_raw`, TYPES.image, { header, height: h, width: w, encoding, is_bigendian: 0, step: 4 * w, data: base64(bytes) });
+      send(`${base}/${sub}/camera_info`, TYPES.info, info);
+      return;
+    }
     if (cs.format === 'raw') {
       const rgb = new Uint8Array(3 * w * h), px = c.pixels;
       for (let y = 0; y < h; y++) {  // top row first, alpha dropped

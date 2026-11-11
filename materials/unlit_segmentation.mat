@@ -1,0 +1,19 @@
+// A robot camera's segmentation image (cameras.js, Output: segmentation):
+// each geom drawn flat in its id's color (main.js: segmentation ids, 24 bits
+// over r, g, b as in unlit_depth.mat), post-processing off so the bytes are
+// exact; the background (no geom) is 0.
+material {
+    name : unlit_segmentation,
+    shadingModel : unlit,
+    doubleSided : true,
+    parameters : [
+        { type : float4, name : color }
+    ]
+}
+
+fragment {
+    void material(inout MaterialInputs material) {
+        prepareMaterial(material);
+        material.baseColor = materialParams.color;
+    }
+}

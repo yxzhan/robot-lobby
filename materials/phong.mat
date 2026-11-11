@@ -1,0 +1,27 @@
+// MuJoCo's classic look for a geom whose material sets no metallic /
+// roughness (most MJCF): Filament's specular-glossiness model, as MuJoCo's own
+// Filament renderer draws it (phong_color.mat in mjrf): specular and
+// glossiness are the material's specular and shininess (times the model's
+// filament.phong.* multipliers, applied in main.js), emissive its emission.
+material {
+    name : mujoco_phong,
+    shadingModel : specularGlossiness,
+    doubleSided : true,  // instances are one-sided unless set (environments: one-sided walls)
+    reflections : screenspace,  // SSR where the view turns it on (render.js), else the sky (IBL)
+    parameters : [
+        { type : float4, name : baseColor },
+        { type : float,  name : specular },
+        { type : float,  name : glossiness },
+        { type : float3, name : emissive }
+    ]
+}
+
+fragment {
+    void material(inout MaterialInputs material) {
+        prepareMaterial(material);
+        material.baseColor = materialParams.baseColor;
+        material.specularColor = vec3(materialParams.specular);
+        material.glossiness = materialParams.glossiness;
+        material.emissive = vec4(materialParams.emissive, 0.0);
+    }
+}

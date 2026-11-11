@@ -28,8 +28,23 @@
 // mjcf_assets/robots/ like json/ik_defaults.json, other models by theirs under
 // mjcf_assets/; the panel's Export copies a setup for it), else the MJCF
 // <camera>s of its model (autoCameras).
+//
+// Output (`output`): 'rgb', the picture; 'depth', the distance along the
+// view axis in metres; 'segmentation', which geom each pixel shows (as
+// MuJoCo 4's own renderer has them). The latter two see the world through
+// child entities of every geom with unlit materials of their own
+// (main.js syncAux: unlit_depth.mat, unlit_segmentation.mat) on layers only
+// their views show, rendered without post-processing (no tone mapping,
+// dithering, anti-aliasing) and without the sky, so the bytes come out
+// exact: depth in 0.1 mm over r, g, b, the segment id over r, g, b (robot
+// << 16 | geom + 1: the robot's segId, main.js, and the geom in its own
+// model; 1 the floor; 0 nothing). Decoded into c.values (top row first:
+// Float32Array metres, 0 for nothing; Int32Array ids); the window shows
+// depth as grey (near bright) and segments in colors of their ids.
 
 const CAM_STORE = 'robot-lobby/cameras/';
+// The layers of the geoms' depth and segmentation copies (main.js AUX).
+export const AUX = { depth: 0x8, segmentation: 0x10 };
 export const CAMERA_DEFAULTS = await fetch(new URL('../../json/camera_defaults.json', import.meta.url)).then((r) => r.json()).catch(() => ({}));
 // A model file's key in CAMERA_DEFAULTS.
 export const cameraKey = (rel) => rel.replace(/^(.*\/)?mjcf_assets\/(robots\/)?/, '');
@@ -135,7 +150,7 @@ export class Cameras {
 
   // Missing fields filled in.
   complete(c) {
-    return { name: 'camera', link: '', follow: 'link', pos: [0, 0, 0], rpy: [0, 0, 0], fovy: FOVY, width: SIZE, height: SIZE, hz: HZ, ...c };
+    return { name: 'camera', link: '', follow: 'link', pos: [0, 0, 0], rpy: [0, 0, 0], fovy: FOVY, width: SIZE, height: SIZE, hz: HZ, output: 'rgb', ...c };
   }
 
   // The MJCF <camera>s of a robot's model, as cameras (targetbody cameras
@@ -298,15 +313,15 @@ export class Cameras {
     const found = this.find(key);
     if (!found) return;
     let c = this.on.get(key);
-    const { width, height } = found.cam;
+    const { width, height } = found.cam, output = found.cam.output ?? 'rgb';
     let place = null;
-    if (c && (c.width !== width || c.height !== height)) {
+    if (c && (c.width !== width || c.height !== height || c.output !== output)) {
       place = c.pip.style.position === 'fixed' ? { left: c.pip.style.left, top: c.pip.style.top } : null;
       this.switchOff(key, true, false);
       c = null;
     }
     if (!c) {
-      c = { key, ...found, width, height, next: -Infinity };
+      c = { key, ...found, width, height, output, next: -Infinity };
       this.create(c);
       if (place) { Object.assign(c.pip.style, { position: 'fixed', ...place }); document.body.append(c.pip); }
       this.on.set(key, c);
@@ -320,11 +335,13 @@ export class Cameras {
     if (!c) return;
     this.on.delete(key);
     const { engine } = this.app, gl = this.gl();
+    if (c.aux) this.app.auxCameras(c.aux, -1);
     engine.destroyView(c.view);
     engine.destroyCameraComponent(c.entity);
     Filament.EntityManager.get().destroy(c.entity);
     gl.deleteFramebuffer(c.fb);
     gl.deleteRenderbuffer(c.rb);
+    if (c.depthRb) gl.deleteRenderbuffer(c.depthRb);
     gl.deleteBuffer(c.pbo);
     if (c.fence) gl.deleteSync(c.fence);
     c.pip.remove();
@@ -377,9 +394,24 @@ export class Cameras {
     c.view = app.engine.createView();
     c.view.setCamera(c.camera);
     c.view.setScene(app.scene);
-    c.view.setVisibleLayers(0xff, 0x5);  // the world only, not the viewer's markers (main.js SCENE | HIDDEN)
     c.view.setViewport([0, 0, c.width, c.height]);
-    app.viewQuality(c.view);  // anti-aliasing, SSAO and reflections as the Render panel says (App.setQuality keeps it so)
+    c.aux = c.output === 'rgb' ? null : c.output;
+    if (c.aux) {
+      // Depth or segmentation: the geoms' unlit copies on their own layer
+      // (main.js AUX), the bytes as the material writes them.
+      c.view.setVisibleLayers(0xff, AUX[c.aux]);
+      c.view.setPostProcessingEnabled(false);
+      c.view.setAntiAliasing(F.View$AntiAliasing.NONE);
+      c.view.setMultiSampleAntiAliasingOptions({ enabled: false });
+      c.view.setAmbientOcclusionOptions({ enabled: false });
+      c.view.setScreenSpaceReflectionsOptions({ enabled: false });
+      c.view.setShadowingEnabled?.(false);
+      c.values = c.aux === 'depth' ? new Float32Array(c.width * c.height) : new Int32Array(c.width * c.height);
+      app.auxCameras(c.aux, +1);
+    } else {
+      c.view.setVisibleLayers(0xff, 0x5);  // the world only, not the viewer's markers (main.js SCENE | HIDDEN)
+      app.viewQuality(c.view);  // anti-aliasing, SSAO and reflections as the Render panel says (App.setQuality keeps it so)
+    }
     c.rb = gl.createRenderbuffer();
     gl.bindRenderbuffer(gl.RENDERBUFFER, c.rb);
     gl.renderbufferStorage(gl.RENDERBUFFER, gl.RGBA8, c.width, c.height);
@@ -387,6 +419,16 @@ export class Cameras {
     c.fb = gl.createFramebuffer();
     gl.bindFramebuffer(gl.FRAMEBUFFER, c.fb);
     gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.RENDERBUFFER, c.rb);
+    if (c.aux) {
+      // Without post-processing Filament draws straight into this
+      // framebuffer (with it, into targets of its own, then copies), so it
+      // needs a depth buffer of its own: else the last drawn wins.
+      c.depthRb = gl.createRenderbuffer();
+      gl.bindRenderbuffer(gl.RENDERBUFFER, c.depthRb);
+      gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT24, c.width, c.height);
+      gl.bindRenderbuffer(gl.RENDERBUFFER, null);
+      gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, c.depthRb);
+    }
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     c.pixels = new Uint8Array(4 * c.width * c.height);  // the last frame, bottom row first (as read)
     c.pbo = gl.createBuffer();
@@ -506,6 +548,12 @@ export class Cameras {
     // its state cache believes the default framebuffer is bound throughout.
     app.offscreen = c.fb;
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    // Depth and segmentation: their geoms up to date, no sky, cleared to 0 (nothing).
+    if (c.aux) {
+      app.syncAux();
+      app.scene.setSkybox(null);
+      app.renderer.setClearOptions({ clearColor: [0, 0, 0, 0], clear: true });
+    }
     // Filament skips a frame while the GPU is behind: then nothing is read
     // (the framebuffer still holds the last frame), and it is tried again.
     const drawn = app.renderer.beginFrame(app.swapChain);
@@ -514,6 +562,7 @@ export class Cameras {
       app.renderer.endFrame();
     }
     app.engine.execute();
+    if (c.aux) app.restoreSky();
     if (!drawn) {
       app.offscreen = null;
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
@@ -577,11 +626,38 @@ export class Cameras {
     return pixels;
   }
 
-  // Into its window: rows flipped (GL reads bottom up), opaque.
+  // Into its window: rows flipped (GL reads bottom up), opaque. Depth and
+  // segmentation are decoded into c.values first (see the top) and shown
+  // as grey by disparity (nearest / depth: the nearest white, the horizon
+  // dark, so near things keep their shading) and as colors.
   show(c) {
     const { width: w, height: h, pixels, image } = c, row = 4 * w, out = image.data;
-    for (let y = 0; y < h; y++) out.set(pixels.subarray((h - 1 - y) * row, (h - y) * row), y * row);
-    for (let i = 3; i < out.length; i += 4) out[i] = 255;
+    if (!c.aux) {
+      for (let y = 0; y < h; y++) out.set(pixels.subarray((h - 1 - y) * row, (h - y) * row), y * row);
+      for (let i = 3; i < out.length; i += 4) out[i] = 255;
+      c.canvas.getContext('2d').putImageData(image, 0, 0);
+      return;
+    }
+    const v = c.values;
+    let near = Infinity;
+    for (let y = 0; y < h; y++) {
+      for (let x = 0, src = 4 * w * (h - 1 - y), dst = w * y; x < w; x++, src += 4, dst++) {
+        const n = pixels[src] + 256 * pixels[src + 1] + 65536 * pixels[src + 2];
+        v[dst] = c.aux === 'depth' ? n / 1e4 : n;
+        if (v[dst] > 0 && v[dst] < near) near = v[dst];
+      }
+    }
+    for (let i = 0; i < v.length; i++) {
+      let r = 0, g = 0, b = 0;
+      if (c.aux === 'depth') {
+        if (v[i] > 0) r = g = b = 20 + 235 * near / v[i];
+      } else if (v[i]) {
+        // A color of its own per id (a hash, bright enough to tell apart from the black background).
+        const k = Math.imul(v[i], 2654435761) >>> 0;
+        r = 60 + (k & 0xbf); g = 60 + ((k >>> 8) & 0xbf); b = 60 + ((k >>> 16) & 0xbf);
+      }
+      out[4 * i] = r; out[4 * i + 1] = g; out[4 * i + 2] = b; out[4 * i + 3] = 255;
+    }
     c.canvas.getContext('2d').putImageData(image, 0, 0);
   }
 }
@@ -723,6 +799,9 @@ export class CamerasPanel {
       this.select(RATES.map((hz) => [String(hz), `${hz} Hz`]), String(cam.hz), (v) => edit({ hz: Number(v) }), 'Frames a second')));
     det.append(this.field('FOV', this.num(cam.fovy, { min: 5, max: 170, step: 1, id: id('fovy'), title: 'Vertical field of view (degrees)' },
       (v) => edit({ fovy: Math.min(170, Math.max(5, v)) })), el('span', { className: 'unit', textContent: '° vertical' })));
+    det.append(this.field('Output', this.select([['rgb', 'color (RGB)'], ['depth', 'depth'], ['segmentation', 'segmentation']], cam.output ?? 'rgb',
+      (v) => edit({ output: v }), 'What it gives: the picture; the distance along its view axis (m; ROS 32FC1); '
+        + 'or which geom each pixel shows (robot << 16 | geom + 1; ROS 32SC1)')));
     return det;
   }
 }

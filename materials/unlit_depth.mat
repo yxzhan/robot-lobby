@@ -1,0 +1,25 @@
+// A robot camera's depth image (cameras.js, Output: depth): the distance
+// along the camera's view axis, in units of 0.1 mm, as a 24-bit integer
+// spread over r (low byte), g and b (high byte); a = 1. The view renders it
+// with post-processing off (no tone mapping, dithering or anti-aliasing), so
+// the bytes reach the framebuffer as written and decode exactly
+// (cameras.js: depth = (r + 256 g + 65536 b) / 1e4 m, up to 1677 m).
+material {
+    name : unlit_depth,
+    shadingModel : unlit,
+    doubleSided : true  // instances follow the geom they shadow (one-sided unless an environment's)
+}
+
+fragment {
+    void material(inout MaterialInputs material) {
+        prepareMaterial(material);
+        // highp throughout: the mobile profile's default (mediump, 16-bit)
+        // tops out at 65504, far below the 24-bit integer.
+        highp float z = -(getViewFromWorldMatrix() * vec4(getWorldPosition(), 1.0)).z;
+        highp float q = clamp(floor(z * 1e4 + 0.5), 0.0, 16777215.0);
+        highp float b = floor(q / 65536.0);
+        highp float g = floor((q - b * 65536.0) / 256.0);
+        highp float r = q - b * 65536.0 - g * 256.0;
+        material.baseColor = vec4(r, g, b, 255.0) / 255.0;
+    }
+}

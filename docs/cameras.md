@@ -15,6 +15,16 @@ down; **follow** "position only" keeps its turn in the robot's frame while
 following where the link is (how MJCF track / trackcom cameras come in).
 Each has a size (width × height, 256×256 unless the model gives a
 `resolution`), rate (5 to 30 Hz) and vertical field of view.
+**Output** is what it gives: *color* (the picture), *depth* (the distance
+along its view axis in metres; to ROS as `<camera>/depth/image_raw`,
+`32FC1`, 0 where nothing is) or *segmentation* (which geom each pixel shows,
+as `robot << 16 | geom + 1`: the robot's number in this page, 1–255, and
+the geom in its own model; 1 the floor, 0 nothing; to ROS as
+`<camera>/segmentation/image_raw`, `32SC1`). The window shows depth as
+grey, near bright, and segments in a color each. These two draw copies of
+the geoms with unlit materials on layers of their own, made while such a
+camera is on, with no post-processing and no sky, so the values are exact
+(depth to 0.1 mm).
 
 Ticking a camera opens it in a picture-in-picture window (drag it by its
 title bar; its **◉** looks through it in the main view, Esc: back); **⌖**
