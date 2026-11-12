@@ -49,13 +49,16 @@
 // - Speculative contacts (MuJoCo 4, <flag speculative>): contacts found
 //   ahead of time from the geoms' velocities, so that fast things do not
 //   pass through thin ones at large time steps. Off, as in MuJoCo; live.
+// - IPC (MuJoCo 4, <flag ipc>): incremental potential contacts for flex
+//   bodies, so cloth does not pass through itself or others (the bag
+//   example). Off, as in MuJoCo; set at compile time, so a change rebuilds.
 // - A model's own options: spawning one whose asset.json says "physics":
 //   "own" (the MuJoCo examples, environments/mujoco_examples) takes the
 //   options its <option> writes out (sceneOptions; not MuJoCo's defaults
 //   for the rest) into these settings, as if set in the panel, so that a
 //   scene made to show, say, speculative contacts at a 10 ms step runs as
-//   made: on top of the defaults (sceneBase), not of what an earlier one
-//   set. Other models' options lose against these, and so do those later
+//   made: on top of MuJoCo's own defaults (sceneBase: Euler, 2 ms,
+//   pyramidal, no sleep), not of the viewer's or what an earlier one set. Other models' options lose against these, and so do those later
 //   (a stage keeps its own settings).
 
 // MuJoCo's own defaults, but for sleep.
@@ -78,6 +81,7 @@ export const PHYSICS_DEFAULTS = Object.freeze({
   stateHz: 30,  // network mode: the server's state broadcasts per second
   sleep: true,
   speculative: false,
+  ipc: false,
   geom: { density: 1000, mass: null, friction: [1, 0.005, 0.0001], condim: 3, solref: [0.02, 1], solimp: [0.9, 0.95, 0.001] },
 });
 
@@ -100,24 +104,29 @@ const fmt = (v) => (Array.isArray(v) ? v.join(' ') : String(v));
 // The <option> element of the world spec.
 export function optionXml(s) {
   const attrs = OPTION_KEYS.map((k) => `${k}="${fmt(s[k])}"`).join(' ');
-  const flags = [s.sleep && 'sleep', s.speculative && 'speculative'].filter(Boolean).map((f) => `${f}="enable"`);
+  const flags = [s.sleep && 'sleep', s.speculative && 'speculative', s.ipc && 'ipc'].filter(Boolean).map((f) => `${f}="enable"`);
   return `<option ${attrs}>${flags.length ? `<flag ${flags.join(' ')}/>` : ''}</option>`;
 }
 
 const ENABLE_SPECULATIVE = 1 << 7;  // mjtEnableBit
+const FLAGS = ['sleep', 'speculative', 'ipc'];  // the <flag>s these settings have
 
-// What a model's own options go on top of: the defaults of the global
-// options and flags (not speed, sync rate or default geom properties).
-export function sceneBase() {
-  const out = {};
-  for (const k of [...OPTION_KEYS, 'sleep', 'speculative']) out[k] = structuredClone(PHYSICS_DEFAULTS[k]);
-  return out;
-}
+// What a model's own options go on top of: MuJoCo's own defaults (4.0) of
+// the global options and flags (not speed, sync rate or default geom
+// properties), so that it runs as in MuJoCo: an example that sets no
+// integrator runs with Euler (flex elasticity refuses implicitfast), one that
+// sets no time step at 2 ms.
+const MUJOCO_DEFAULTS = {
+  timestep: 0.002, gravity: [0, 0, -9.81], wind: [0, 0, 0], magnetic: [0, -0.5, 0], density: 0, viscosity: 0,
+  impratio: 1, cone: 'pyramidal', noslip_iterations: 0, noslip_tolerance: 1e-6, integrator: 'Euler',
+  solver: 'Newton', iterations: 100, tolerance: 1e-8, sleep: false, speculative: false, ipc: false,
+};
+export const sceneBase = () => structuredClone(MUJOCO_DEFAULTS);
 
 // The settings a model's own <option> elements set (in its parsed include
-// tree, `docs`): {key: value} for the attributes it writes out, and sleep /
-// speculative from its <flag>. An environment's, taken into the settings
-// when it is spawned.
+// tree, `docs`): {key: value} for the attributes it writes out, sleep /
+// speculative / ipc from its <flag>, and no gravity for gravity="disable".
+// Taken into the settings when it is spawned, for "physics": "own" models.
 export function sceneOptions(docs) {
   const out = {};
   for (const doc of docs) {
@@ -137,10 +146,11 @@ export function sceneOptions(docs) {
       }
       for (const flag of opt.children) {
         if (flag.tagName !== 'flag') continue;
-        for (const f of ['sleep', 'speculative']) {
+        for (const f of FLAGS) {
           const v = flag.getAttribute(f);
           if (v !== null) out[f] = v === 'enable';
         }
+        if (flag.getAttribute('gravity') === 'disable') out.gravity = [0, 0, 0];  // (pulley, belt)
       }
     }
   }
@@ -180,7 +190,7 @@ export function geomOverrides(s) {
 export const geomSignature = (s) => JSON.stringify(geomOverrides(s));
 
 // Whether going from settings a to b needs the world compiled again.
-export const needsRebuild = (a, b) => geomSignature(a) !== geomSignature(b) || !!a.sleep !== !!b.sleep;
+export const needsRebuild = (a, b) => geomSignature(a) !== geomSignature(b) || !!a.sleep !== !!b.sleep || !!a.ipc !== !!b.ipc;
 
 // Writes `attrs` into the root default class of a model's XML documents
 // (the parsed include tree, entry file first), keeping what it sets itself.

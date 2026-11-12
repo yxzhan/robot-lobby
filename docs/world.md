@@ -69,6 +69,10 @@ follows the selection, are the Render panel's: rendering.md):
   MuJoCo), so changing it rebuilds the world. The server does the same.
   Fixed and sleeping bodies also cost no drawing work: `syncTransforms`
   only updates the parts of bodies that moved (3.6 → 0.5 ms a frame there).
+- **IPC** (Contacts; off, as in MuJoCo): MuJoCo 4's incremental
+  potential contacts for flex bodies (`<flag ipc="enable"/>`): cloth never
+  passes through itself or other things (the bag example), at a large cost
+  in step time. Set at compile time, so changing it rebuilds the world.
 - **Speculative** (Contacts; off, as in MuJoCo): MuJoCo 4's speculative
   contacts (`<flag speculative="enable"/>`), found ahead of time from the
   geoms' velocities, so that fast things do not pass through thin ones at
@@ -77,10 +81,13 @@ follows the selection, are the Render panel's: rendering.md):
 - **A scene's own options**: spawning a model whose `asset.json` says
   `"physics": "own"` (the MuJoCo examples below) takes the options its
   `<option>` writes out (time step, integrator, cone, impratio, medium,
-  noslip, the sleep and speculative flags) into these settings, on top of
-  the defaults (not of what an earlier one set: an arch's impratio 100
-  would stay for the next scene), and the status line names those that
-  changed (`sceneOptions` in physics.js, `scene_options` in server.py).
+  noslip, the sleep / speculative / ipc flags, no gravity for
+  `gravity="disable"`) into these settings, on top of MuJoCo's own defaults
+  (sceneBase: Euler, 2 ms, pyramidal, no sleep; not the viewer's, nor what
+  an earlier one set: an arch's impratio 100 would stay for the next
+  scene), so that it runs as in MuJoCo (the flex examples that set no
+  integrator need Euler: flex elasticity refuses implicitfast), and the
+  status line names those that changed (`sceneOptions` in physics.js, `scene_options` in server.py).
   Every other model's `<option>` loses against these settings, as before:
   RoboCasa's kitchens set a 2 ms step (and impratio 20), which would make
   every robot's physics cost 2.5 times as much. They stay until changed,
@@ -97,9 +104,24 @@ options (above): surface velocity (a treadmill sweeping a passive humanoid
 off, a carousel of conveyor ramps), speculative contacts (a bat and ball, a
 dropped chain caught by a thin bar, a cradle of 3 mm plates), adhesion (a
 fridge door held shut by magnets, Shift+drag it open; a sand castle),
-plasticity (wires that stay bent), sleep (dominos) and rigid bodies (a
-house of cards, a deck of cards, three dry-stone arches, balloons). Only
-rigid ones: flex (soft) bodies are not drawn yet, so the cable, cloth and
-soft-body examples are left out, and so are those that need actuator
-controls or plugins (active adhesion, tactile). Tendons are not drawn
-either (the balloons' strings).
+plasticity (wires that stay bent; clay, foil, paper, a roller and a twisted
+bar that stay deformed), sleep (dominos), rigid bodies (a house of cards, a
+deck of cards, three dry-stone arches, balloons) and flex (soft) bodies:
+cables, coils and rods, cloth (a flag, a poncho, drapes, a hammock with a
+humanoid, a trampoline, a bag with IPC), shells and soft solids (bunnies,
+jelly, a soft box, spheres, grippers squeezing soft things, cantilevers).
+All of MuJoCo's flex examples but `cloth_sdf` (its SDF plugin is not in the
+WASM build); the actuator- or plugin-driven ones (active adhesion,
+tactile) are left out. Some are heavy: in the browser the bag steps at
+about 1/25 of real time, drape, poncho, cantilever and basket at 0.1–0.5×
+(on the server, natively, about twice as fast). Tendons are not drawn (the
+balloons' strings). A scene whose `<attach>`ed humanoid brought its own
+keyframes (treadmill, hammock) has them left out: the viewer starts a model
+in its first keyframe, which would put the humanoid at the origin.
+
+Flex bodies are drawn by `render/flex.js` as MuJoCo 4's own renderer
+draws them (2D: both faces offset by the flex radius and closed along the
+boundary; 3D: the boundary; 1D: rods and balls), from mjData's
+`flexvert_xpos` every frame; in network mode the server sends the flex
+vertices with every state (server.md). Not yet: flexes in the robots'
+depth / segmentation cameras, and Shift+drag on flex vertices.

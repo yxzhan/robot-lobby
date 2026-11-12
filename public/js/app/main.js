@@ -37,6 +37,7 @@ import { AgentPanel } from '../agent/agent.js';
 import { RenderPanel, VIEW_FAR_DEFAULT, loadQuality } from '../render/render.js';
 import { ROD_WIDTH, debugLines } from '../render/debug.js';
 import { Reveal } from '../render/reveal.js';
+import { FlexDraw, flexTemplates, flexVisible } from '../render/flex.js';
 import { addSwarm } from './swarm.js';
 import { FLOOR_STYLES, floorTexture, hexRgb, loadFloor, saveFloor } from '../render/floor.js';
 import { AMBIENT, SUN_LUX, linearRgb, loadLighting, saveLighting, sunDirection } from '../render/lighting.js';
@@ -1343,6 +1344,27 @@ class App {
       part.mi = this.partMaterial(part, this.materialStyle);
       parts.push(part);
     }
+    // Flex (soft) bodies (render/flex.js): their templates, each with a
+    // stand-in part for its material (the first element's, else
+    // flex_rgba), drawn per spawned copy (addEntities).
+    parts.flex = [];
+    parts.nflexvert = model.nflexvert ?? 0;  // (where the next robot's flex vertices start in the world)
+    for (const t of flexTemplates(model)) {
+      const rgba = t.matid >= 0 ? model.mat_rgba.slice(4 * t.matid, 4 * t.matid + 4) : Float32Array.from(t.rgba);
+      if (!flexVisible({ ...t, rgba })) continue;
+      const est = surface(model, t.matid);
+      const looks = {
+        mujoco: geomLook(model, t.matid, rgba, 'mujoco', settings, est),
+        pbr: geomLook(model, t.matid, rgba, 'pbr', settings, est),
+      };
+      const tex = {};
+      if (t.uv && looks.pbr.rgb >= 0) tex.rgb = this.texEntry(textures, mujoco, model, images, read, [looks.pbr.rgb], true);
+      for (const L of Object.values(looks)) L.maps = false;  // (no tangents for normal maps on flexes)
+      const transparent = rgba[3] < 1;
+      t.part = { looks, tex, transparent, color: [rgba[0], rgba[1], rgba[2], transparent ? rgba[3] : 1], doubleSided: false, mis: {} };
+      t.part.mi = this.partMaterial(t.part, this.materialStyle);
+      parts.flex.push(t);
+    }
     parts.textures = [...new Set(textures.values())];
     for (const e of parts.textures) e.users++;
     parts.settings = settings;
@@ -1414,6 +1436,7 @@ class App {
         rcm.setMaterialInstanceAt(inst, 0, p.mi);
         inst.delete();
       }
+      for (const f of r.entities?.flex ?? []) f.setMaterial(f.t.part.mi = this.partMaterial(f.t.part, style));
     }
   }
 
@@ -1427,7 +1450,8 @@ class App {
         this.engine.destroyIndexBuffer(g.ib);
       }
     }
-    const mis = new Set(parts.flatMap((p) => Object.values(p.mis)));
+    for (const t of parts.flex ?? []) for (const mi of Object.values(t.part.mis)) this.engine.destroyMaterialInstance(mi);
+    const mis = new Set([...parts, ...(parts.flex ?? []).map((t) => t.part)].flatMap((p) => Object.values(p.mis)));
     for (const p of parts) {
       this.engine.destroyVertexBuffer(p.vb);
       this.engine.destroyIndexBuffer(p.ib);
@@ -1503,14 +1527,24 @@ class App {
   }
 
   addEntities(parts) {
-    return parts.map((p) => {
+    const entities = parts.map((p) => {
       const e = makeEntity(this.engine, p, p.mi, !p.transparent);  // glass casts no shadow
       this.scene.addEntity(e);
       return e;
     });
+    // Its flexes' own (their vertices are each copy's): placed by syncTransforms.
+    if (parts.flex?.length) {
+      this.flexShapes ??= {
+        makeEntity, rodMatrix,
+        unitRod: makeGeometry(this.engine, cylinder(1, 0.5)), unitBall: makeGeometry(this.engine, roundShape(1, 1, 1)),
+      };
+      entities.flex = parts.flex.map((t) => new FlexDraw(this.engine, this.scene, t, t.part.mi, this.flexShapes));
+    }
+    return entities;
   }
 
   removeEntities(entities) {
+    for (const f of entities.flex ?? []) f.destroy();
     this.reveal?.forget(entities);
     for (const e of entities) {
       this.forgetAux(e);
@@ -2048,8 +2082,14 @@ class App {
   syncTransforms() {
     const tcm = this.engine.getTransformManager();
     const xpos = this.data.xpos, xmat = this.data.xmat;
+    let flexBase = 0;  // the robot's first flex vertex in the world (robots in attach order, as their flexes)
     for (const robot of this.robots) {
       const { visual, pos, yaw = 0, bodyOffset, entities } = robot;
+      if (entities?.flex) {
+        const fx = this.data.flexvert_xpos;
+        if (fx) for (const f of entities.flex) f.update(fx, flexBase + f.t.vertadr);
+      }
+      flexBase += visual.parts.nflexvert ?? 0;
       const c = Math.cos(yaw), s = Math.sin(yaw);
       const Rz = [c, -s, 0, s, c, 0, 0, 0, 1];
       // The robot's body poses as last drawn (12 per body: rotation, position).

@@ -94,8 +94,9 @@ Server -> client:
   {type: 'reply', rid, ...} / {type: 'error', op, msg, rid?, code?, id?, holder?}
   {type: 'pong', t}
   binary state, physics['stateHz'] times a second (30 by default): int32 [version, epoch, nq, nmocap,
-  nu, nv], float64 time, then float32 [qpos, mocap_pos, mocap_quat, ctrl,
-  qvel, qfrc_actuator]; ctrl only about CTRL_HZ times a second (nu 0 in the
+  nu, nv, nflexvert, 0], float64 time, then float32 [qpos, mocap_pos, mocap_quat, ctrl,
+  qvel, qfrc_actuator, flexvert_xpos] (the flex vertices: the page cannot place
+  them from qpos itself, render/flex.js); ctrl only about CTRL_HZ times a second (nu 0 in the
   other states); qvel and qfrc_actuator (nv 0 without) while a client asks
   for them (op dynamics {on}: the ROS bridge's joint velocities and
   efforts). `epoch` changes whenever the state jumps (reset, edits), so
@@ -196,11 +197,13 @@ PHYSICS_DEFAULTS = {
     'stateHz': 30,      # state broadcasts per second (not physics, but the server's too)
     'sleep': True,  # island sleeping (physics.js): set at compile time
     'speculative': False,  # speculative contacts (MuJoCo 4, physics.js), live
+    'ipc': False,  # IPC contacts for flex (MuJoCo 4, physics.js): set at compile time
 }
 CONES = ['pyramidal', 'elliptic']  # mjtCone order
 INTEGRATORS = ['Euler', 'RK4', 'implicit', 'implicitfast', 'discrete']  # mjtIntegrator order
 SOLVERS = ['PGS', 'CG', 'Newton']  # mjtSolver order
-OPTION_KEYS = [k for k in PHYSICS_DEFAULTS if k not in ('sleep', 'speculative', 'speed', 'stateHz')]
+FLAGS = ('sleep', 'speculative', 'ipc')  # the <flag>s of the settings
+OPTION_KEYS = [k for k in PHYSICS_DEFAULTS if k not in (*FLAGS, 'speed', 'stateHz')]
 
 # A model's own <option> loses against the world's (like in the browser):
 # no need to hear about it. Other MuJoCo warnings go to the console, not to
@@ -220,7 +223,7 @@ def fmt(v):
 
 def base_xml(physics):
   opts = ' '.join(f'{k}="{fmt(physics[k])}"' for k in OPTION_KEYS)
-  flags = ' '.join(f'{f}="enable"' for f in ('sleep', 'speculative') if physics.get(f))
+  flags = ' '.join(f'{f}="enable"' for f in FLAGS if physics.get(f))
   return f"""
 <mujoco model="world">
   <option {opts}>{f'<flag {flags}/>' if flags else ''}</option>
@@ -248,8 +251,9 @@ def apply_options(model, physics):
 def scene_options(path):
   """The settings a model file's own <option> elements set, in it and the
   files it includes (physics.js sceneOptions): the attributes it writes out,
-  and sleep / speculative from its <flag>. An environment's, taken into the
-  settings when it is spawned."""
+  sleep / speculative / ipc from its <flag>, and no gravity for
+  gravity="disable". Taken into the settings when it is spawned, for
+  own_physics ones."""
   out = {}
   names = {'cone': CONES, 'integrator': INTEGRATORS, 'solver': SOLVERS}
 
@@ -275,12 +279,24 @@ def scene_options(path):
           continue
         out[k] = nums if isinstance(PHYSICS_DEFAULTS[k], list) else int(nums[0]) if k.endswith('iterations') else nums[0]
       for flag in el.iter('flag'):
-        for f in ('sleep', 'speculative'):
+        for f in FLAGS:
           if flag.get(f) is not None:
             out[f] = flag.get(f) == 'enable'
+        if flag.get('gravity') == 'disable':  # (pulley, belt)
+          out['gravity'] = [0.0, 0.0, 0.0]
 
   visit(pathlib.Path(path))
   return out
+
+
+# What a model's own options go on top of (physics.js sceneBase): MuJoCo's
+# own defaults (4.0), so that it runs as in MuJoCo (Euler where it sets no
+# integrator: flex elasticity refuses implicitfast).
+MUJOCO_DEFAULTS = {
+    'timestep': 0.002, 'gravity': [0, 0, -9.81], 'wind': [0, 0, 0], 'magnetic': [0, -0.5, 0], 'density': 0, 'viscosity': 0,
+    'impratio': 1, 'cone': 'pyramidal', 'noslip_iterations': 0, 'noslip_tolerance': 1e-6, 'integrator': 'Euler',
+    'solver': 'Newton', 'iterations': 100, 'tolerance': 1e-8, 'sleep': False, 'speculative': False, 'ipc': False,
+}
 
 
 def own_physics(rel):
@@ -1066,7 +1082,7 @@ class World:
     if op == 'spawn':
       info = await asyncio.to_thread(model_info, msg['rel'])  # compile it off the event loop (cached)
       if info['options']:  # its own options into the settings (own_physics, physics.js sceneOptions)
-        base = {k: copy.deepcopy(PHYSICS_DEFAULTS[k]) for k in (*OPTION_KEYS, 'sleep', 'speculative')}  # main.js sceneBase
+        base = copy.deepcopy(MUJOCO_DEFAULTS)  # physics.js sceneBase
         self.physics = checked_physics({**self.physics, **base, **info['options']}, self.physics)
       r = Robot(self.next_id, msg['rel'], msg.get('label') or msg['rel'], msg['pos'], msg.get('yaw', 0))
       c = self.control.by_ws[ws]
@@ -1129,7 +1145,7 @@ class World:
       old, self.physics = self.physics, checked_physics(msg['physics'], PHYSICS_DEFAULTS)
       if old['speed'] != self.physics['speed'] and self.data is not None:
         self.resync()
-      if bool(old.get('sleep')) != bool(self.physics['sleep']):
+      if any(bool(old.get(f)) != bool(self.physics[f]) for f in ('sleep', 'ipc')):
         await self.set_scene(list(self.robots))  # compiled in (the state carries over)
       else:
         async with self.stepping:
@@ -1604,8 +1620,9 @@ class World:
   def state_bytes(self, ctrl=True):
     m, d = self.model, self.data
     dyn = bool(self.dynamics)
-    head = np.array([self.version, self.epoch, m.nq, m.nmocap, m.nu if ctrl else 0, m.nv if dyn else 0], np.int32)
-    parts = [d.qpos, d.mocap_pos.reshape(-1), d.mocap_quat.reshape(-1)] + ([d.ctrl] if ctrl else []) + ([d.qvel, d.qfrc_actuator] if dyn else [])
+    head = np.array([self.version, self.epoch, m.nq, m.nmocap, m.nu if ctrl else 0, m.nv if dyn else 0, m.nflexvert, 0], np.int32)
+    parts = ([d.qpos, d.mocap_pos.reshape(-1), d.mocap_quat.reshape(-1)] + ([d.ctrl] if ctrl else []) + ([d.qvel, d.qfrc_actuator] if dyn else [])
+             + ([d.flexvert_xpos.reshape(-1)] if m.nflexvert else []))
     return head.tobytes() + np.float64(d.time).tobytes() + np.concatenate(parts).astype(np.float32).tobytes()
 
   def world_tables(self):

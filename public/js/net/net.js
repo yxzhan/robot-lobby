@@ -175,15 +175,16 @@ export class NetClient {
   }
 
   push(buf) {
-    const [version, epoch, nq, nmocap, nu, nv] = new Int32Array(buf, 0, 6);
-    const time = new Float64Array(buf, 24, 1)[0];
-    const f = new Float32Array(buf, 32);
+    const [version, epoch, nq, nmocap, nu, nv, nflexvert] = new Int32Array(buf, 0, 8);
+    const time = new Float64Array(buf, 32, 1)[0];
+    const f = new Float32Array(buf, 40);
     let o = 0;
     const take = (n) => f.subarray(o, (o += n));
     const s = {
       version, epoch, time, recv: performance.now(),
       qpos: take(nq), mocap_pos: take(3 * nmocap), mocap_quat: take(4 * nmocap), ctrl: nu ? take(nu) : null,
       qvel: nv ? take(nv) : null, qfrc_actuator: nv ? take(nv) : null,  // (while asked for: wantDynamics)
+      flexvert: nflexvert ? take(3 * nflexvert) : null,  // the flex vertices (render/flex.js)
     };
     this.traffic.states++;
     const prev = this.snaps.at(-1);
@@ -246,6 +247,10 @@ export class NetClient {
     if (this.ctrl?.version === version && this.ctrl.ctrl.length === data.ctrl.length) data.ctrl.set(this.ctrl.ctrl);
     if (b.qvel?.length === data.qvel.length) { data.qvel.set(b.qvel); data.qfrc_actuator.set(b.qfrc_actuator); data.dynamics = true; }
     else data.dynamics = false;
+    if (b.flexvert && a.flexvert?.length === b.flexvert.length) {
+      if (data.flexvert_xpos?.length !== b.flexvert.length) data.flexvert_xpos = new Float64Array(b.flexvert.length);
+      lerp(data.flexvert_xpos, a.flexvert, b.flexvert, alpha);
+    } else data.flexvert_xpos = null;
     data.time = a.time + alpha * (b.time - a.time);
     forwardKinematics(robots, data);
     return true;

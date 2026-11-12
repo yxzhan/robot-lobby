@@ -23,6 +23,7 @@ const OPTIONS = [
   ['noslip_iterations', 'Noslip iter.', '', 1, 'noslip post-pass: takes the slip out of frictional contacts, so held things do not creep out of a grasp (0: off). Costs step time with many contacts'],
   ['noslip_tolerance', 'Noslip tol.', '', 1, 'noslip stops below this; it decides more than the iterations (MuJoCo\'s 1e-6 stops early and things still creep)'],
   ['speculative', 'Speculative', '', 'bool', 'speculative contacts (MuJoCo 4): contacts found ahead of time from the geoms\' velocities, so fast things do not pass through thin ones at large time steps (off: MuJoCo\'s default)'],
+  ['ipc', 'IPC', '', 'bool', 'incremental potential contacts for flex (soft) bodies (MuJoCo 4): cloth never passes through itself or other things; costs much step time. Changing it rebuilds the world'],
   ['integrator', 'Integrator', '', INTEGRATORS, 'implicitfast: stable with damping and stiff actuators, cheap (the menagerie models\'); implicit: also Coriolis terms; RK4: accurate, 4× the cost; Euler: MuJoCo\'s default; discrete (MuJoCo 4): passive damping and stiffness implicit in the solver, stable at much larger steps with stiff springs'],
   ['solver', 'Solver', '', SOLVERS, 'constraint solver: Newton converges in few iterations (MuJoCo\'s default); CG cheaper per iteration; PGS the old one, harder friction'],
   ['iterations', 'Iterations', '', 1, 'most solver iterations per step: more if contacts jitter or do not converge'],
@@ -104,7 +105,7 @@ export class WorldPanel {
       } else inputs = n === 1 ? [num(s[k], set(0), title)] : s[k].map((v, i) => num(v, set(i), `${title} (${'xyz'[i]})`));
       this.body.append(row(label, unit, title, ...inputs));
     }
-    this.body.append(el('div', { className: 'hint', textContent: 'Applied at once (Sleep rebuilds the world). Wind and fluid drag only act with a medium density or viscosity. Spawning a scene takes the options its model sets (time step, integrator, speculative, …).' }));
+    this.body.append(el('div', { className: 'hint', textContent: 'Applied at once (Sleep and IPC rebuild the world). Wind and fluid drag only act with a medium density or viscosity. Spawning a scene takes the options its model sets (time step, integrator, speculative, …).' }));
 
     if (this.app.net) {  // network mode: the server's options (server/server.py)
       this.body.append(el('div', { className: 'hint', textContent: 'Shared world: these are the server\'s settings, for everyone. Default geom properties are not available in server mode yet.' }));

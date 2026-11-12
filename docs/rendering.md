@@ -232,3 +232,21 @@ not part of the `@mujoco/mujoco` npm package (4.0.0). Its CMake has an
 Emscripten branch, but it requires a native build first (to compile the
 materials with matc) and then a full Emscripten build of Filament + MuJoCo.
 This example instead drives Filament.js directly from JavaScript.
+
+## Flex bodies
+
+Flex (soft) bodies, MuJoCo's cables, cloth and soft solids, are drawn by
+`public/js/render/flex.js`, ported from mjrf (`mesh_util.cc`
+FillFlexVertices, `model_renderables.cc`):
+- 2D: each triangle twice, front and back offset by the flex radius along
+  the vertex normals, and side faces along the boundary.
+- 3D: the boundary triangles, offset by the radius.
+- 1D: a rod per edge and a ball per vertex (mjrf draws capsules; a box
+  cross-section is drawn round).
+
+Normals are smooth (summed around each vertex) or flat (`flex_flatskin`).
+Each spawned copy has its own vertex buffer, rewritten every frame from
+`flexvert_xpos`. A flex gets one material: its first element's, else
+`flex_rgba`, with its texture where the flex has texture coordinates.
+They follow the Materials switch, cast shadows, and are not in the robots'
+depth and segmentation cameras yet.

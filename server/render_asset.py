@@ -171,6 +171,14 @@ def build(spec, model, rel, public):
   for k, v in cadr.items():
     arrays[k] = np.array(v, np.int32)
 
+  # Flex (soft) bodies, all of them (public/js/render/flex.js flexTemplates
+  # reads these; their vertices come with the states).
+  for f in ('flex_dim', 'flex_vertadr', 'flex_vertnum', 'flex_elemadr', 'flex_elemnum', 'flex_elemdataadr',
+            'flex_elem', 'flex_elemtexcoord', 'flex_shellnum', 'flex_shelldataadr', 'flex_shell', 'flex_edgeadr',
+            'flex_edgenum', 'flex_edge', 'flex_radius', 'flex_flatskin', 'flex_texcoordadr', 'flex_texcoord',
+            'flex_matid', 'flex_rgba', 'flex_group'):
+    arrays[f] = getattr(m, f)
+
   # Kinematic tree (mj_kinematics).
   for f in ('body_parentid', 'body_pos', 'body_quat', 'body_jntnum', 'body_jntadr', 'body_mocapid',
             'jnt_type', 'jnt_pos', 'jnt_axis', 'jnt_qposadr', 'jnt_bodyid', 'qpos0'):
@@ -189,7 +197,7 @@ def build(spec, model, rel, public):
       'cameras': cameras,
       'filament': render_settings(m),
       'ngeom': len(geoms), 'nmesh': len(meshes), 'nmat': m.nmat, 'ntex': m.ntex,
-      'nbody': m.nbody, 'njnt': m.njnt,
+      'nbody': m.nbody, 'njnt': m.njnt, 'nflex': m.nflex, 'nflexvert': m.nflexvert,
       'dims': {'nq': m.nq, 'nv': m.nv, 'na': m.na, 'nu': m.nu, 'nmocap': m.nmocap},
       'images': {str(k): v for k, v in images.items()},
       'same_as_face': same_as_face,

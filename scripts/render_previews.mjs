@@ -2,7 +2,7 @@
 // for every asset (of the given categories or <category>/<source>es of
 // mjcf_assets/) that has no screenshot yet, with the viewer itself in
 // headless Chrome: each asset is spawned alone, framed by its collision
-// geoms' bounds, and captured. A room (bodies named wall_*, as RoboCasa's
+// geoms' (and flex vertices') bounds, and captured. A room (bodies named wall_*, as RoboCasa's
 // kitchens) is shown cut away instead: framed by what is in it (its walls
 // and floors left out), from above the side facing its main wall, with the
 // walls on the camera's side hidden.
@@ -127,8 +127,15 @@ try {
       // fixture parts 10 m up).
       const [rlo, rhi] = room ? bounds((g) => ours(m.geom_bodyid[g]) && shell(m.geom_bodyid[g])) : [];
       const inside = (g) => [0, 1, 2].every((k) => d.geom_xpos[3 * g + k] > rlo[k] && d.geom_xpos[3 * g + k] < rhi[k]);
-      // Only the asset's own geoms: not the avatars' bodies (VR), parked 1 km up.
-      const [lo, hi] = bounds((g) => ours(m.geom_bodyid[g]) && (!room || (!shell(m.geom_bodyid[g]) && inside(g))));
+      // Only the asset's own geoms: not the avatars' bodies (VR), parked 1 km
+      // up; its static geoms too (on the world body after the floor, geom 0:
+      // it is the only model spawned), and its flex vertices (MuJoCo's soft
+      // bodies have no geoms; a scene of only those and static geoms had no
+      // bounds at all, and the camera went to NaN: a blank picture).
+      const [lo, hi] = bounds((g) => (m.geom_bodyid[g] === 0 || ours(m.geom_bodyid[g])) && (!room || (!shell(m.geom_bodyid[g]) && inside(g))));
+      const fx = d.flexvert_xpos ?? [];
+      for (let i = 0; i < fx.length; i++) { lo[i % 3] = Math.min(lo[i % 3], fx[i]); hi[i % 3] = Math.max(hi[i % 3], fx[i]); }
+      if (!lo.every(Number.isFinite)) { lo.splice(0, 3, -0.5, -0.5, 0); hi.splice(0, 3, 0.5, 0.5, 1); }
       const c = lo.map((v, k) => (v + hi[k]) / 2), radius = 0.5 * Math.hypot(...hi.map((v, k) => v - lo[k]));
       app.orbit.center = c;
       app.orbit.azim = -0.6; app.orbit.elev = 0.45;
