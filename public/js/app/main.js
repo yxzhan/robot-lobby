@@ -3029,6 +3029,12 @@ try {
   }
 
   async function spawn({ rel, name: label }, pos, yaw) {
+    // Some of MuJoCo 4.0's flex grids (the twisted bar and roller of its
+    // plasticity examples, a multi-cell bunny) fail to compile under any attach
+    // frame but the identity ("flex grid rotation R0 is not orthonormal"):
+    // those (asset.json "place": "origin") go to the origin, unturned.
+    const originOnly = assets.find((a) => a.rel === rel)?.originOnly;
+    if (originOnly) [pos, yaw] = [[0, 0, 0], 0];
     if (app.net) {
       app.net.send('spawn', { rel, label, pos, yaw });
       status.textContent = `spawning ${label} on the server…`;
@@ -3142,6 +3148,10 @@ try {
   // state kept). Resolves to false if busy.
   async function moveFixed(robot, pos, yaw) {
     if (busy) return false;
+    if (assets.find((a) => a.rel === robot.visual.rel)?.originOnly) {  // (see spawn)
+      status.textContent = `${robot.label} stays at the origin: MuJoCo 4.0 cannot compile its flex anywhere else`;
+      return false;
+    }
     if (app.net) { app.net.send('move', { id: robot.netId, pos, yaw }); return true; }
     busy = true;
     const old = [robot.pos, robot.yaw];

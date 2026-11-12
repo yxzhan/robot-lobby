@@ -6,7 +6,8 @@
     "postinstall": "node scripts/vendor.mjs && python3 scripts/thumbnails.py",
     "client": "python3 scripts/serve.py 4007",
     "server": "python3 server/server.py 4007",
-    "all": "node scripts/vendor.mjs && python3 scripts/thumbnails.py && python3 server/server.py 4007"
+    "all": "node scripts/vendor.mjs && python3 scripts/thumbnails.py && python3 server/server.py 4007",
+    "studio": "$([ -x .venv/bin/python ] && echo .venv/bin/python || echo python3) -m mujoco.studio.viewer --gfx opengl_software"
   },
   "license": "ISC",
   "dependencies": {

@@ -51,6 +51,7 @@ export async function loadAssets(index = 'json/assets.json') {
     return (await res.json()).map((m) => ({
       name: m.name, rel: `${m.dir}/${m.main}`, lib: m.source, category: m.category, group: m.group ?? null,
       ownPhysics: m.physics === 'own',  // spawning it takes its own <option> (physics.js sceneOptions)
+      originOnly: m.place === 'origin',  // spawned at the origin, unturned, and not moved (asset.json "place")
       // Written by scripts/thumbnails.py, also for a <name>.png the index has
       // not seen yet; a missing one falls back to initials (img.onerror).
       thumb: dataUrl(thumbPath(m)),

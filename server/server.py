@@ -299,6 +299,18 @@ MUJOCO_DEFAULTS = {
 }
 
 
+def origin_only(rel):
+  """Whether the asset is spawned only at the origin, unturned, and not moved
+  (asset.json "place": "origin", as in main.js spawn): some of MuJoCo 4.0's
+  flex grids fail to compile under any other attach frame ("flex grid
+  rotation R0 is not orthonormal")."""
+  meta = asset_path(rel).parent / 'asset.json'
+  try:
+    return json.loads(meta.read_text()).get('place') == 'origin'
+  except (OSError, ValueError, AttributeError):
+    return False
+
+
 def own_physics(rel):
   """Whether spawning the asset takes its own <option> (asset.json "physics":
   "own", as in main.js: the MuJoCo examples, not RoboCasa's 2 ms kitchens)."""
@@ -1084,7 +1096,8 @@ class World:
       if info['options']:  # its own options into the settings (own_physics, physics.js sceneOptions)
         base = copy.deepcopy(MUJOCO_DEFAULTS)  # physics.js sceneBase
         self.physics = checked_physics({**self.physics, **base, **info['options']}, self.physics)
-      r = Robot(self.next_id, msg['rel'], msg.get('label') or msg['rel'], msg['pos'], msg.get('yaw', 0))
+      pos, yaw = ([0, 0, 0], 0) if origin_only(msg['rel']) else (msg['pos'], msg.get('yaw', 0))
+      r = Robot(self.next_id, msg['rel'], msg.get('label') or msg['rel'], pos, yaw)
       c = self.control.by_ws[ws]
       r.by = c.id
       self.next_id += 1
@@ -1104,7 +1117,9 @@ class World:
       kept = [r for r in self.robots if r.id not in ids]
       await self.set_scene(kept, after=None if kept else self.renumber)  # cleared: numbered from r1 again
     elif op == 'move':
-      await self.move_fixed(self.robot(msg['id']), msg['pos'], msg['yaw'])
+      r = self.robot(msg['id'])
+      if not origin_only(r.rel):  # (stays at the origin: see origin_only)
+        await self.move_fixed(r, msg['pos'], msg['yaw'])
     elif op == 'place':
       self.place_free(self.robot(msg['id']), msg['pos'], msg['quat'], spawn=bool(msg.get('spawn', True)))
       await self.broadcast_meta()
