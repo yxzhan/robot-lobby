@@ -94,7 +94,9 @@ Server -> client:
   {type: 'reply', rid, ...} / {type: 'error', op, msg, rid?, code?, id?, holder?}
   {type: 'pong', t}
   binary state, physics['stateHz'] times a second (30 by default): int32 [version, epoch, nq, nmocap,
-  nu, nv, nflexvert, 0], float64 time, then float32 [qpos, mocap_pos, mocap_quat, ctrl,
+  nu, nv, nflexvert, avatar slots << 16 | the used slots' bits], float64 time, then float32 [qpos,
+  mocap_pos, mocap_quat (nmocap of them: every robot's, then only the used avatar slots'; the free
+  ones are parked, the page puts them there itself), ctrl,
   qvel, qfrc_actuator, flexvert_xpos] (the flex vertices: the page cannot place
   them from qpos itself, render/flex.js); ctrl only about CTRL_HZ times a second (nu 0 in the
   other states); qvel and qfrc_actuator (nv 0 without) while a client asks
@@ -1635,8 +1637,17 @@ class World:
   def state_bytes(self, ctrl=True):
     m, d = self.model, self.data
     dyn = bool(self.dynamics)
-    head = np.array([self.version, self.epoch, m.nq, m.nmocap, m.nu if ctrl else 0, m.nv if dyn else 0, m.nflexvert, 0], np.int32)
-    parts = ([d.qpos, d.mocap_pos.reshape(-1), d.mocap_quat.reshape(-1)] + ([d.ctrl] if ctrl else []) + ([d.qvel, d.qfrc_actuator] if dyn else [])
+    # The avatars' mocap bodies are the last SLOTS * SLOT_BODIES (compile_world),
+    # slot by slot: only the slots in use go, a free one is parked (the page
+    # parks the rest itself, net.js).
+    slots, per = AVATAR.SLOTS, AVATAR.SLOT_BODIES
+    used = sorted(s for s in self.avatars.owners if s < slots)
+    base = m.nmocap - slots * per
+    keep = np.concatenate([np.arange(base)] + [np.arange(base + s * per, base + (s + 1) * per) for s in used]).astype(np.int64)
+    mask = sum(1 << s for s in used)
+    head = np.array([self.version, self.epoch, m.nq, len(keep), m.nu if ctrl else 0, m.nv if dyn else 0, m.nflexvert,
+                     slots << 16 | mask], np.int32)
+    parts = ([d.qpos, d.mocap_pos[keep].reshape(-1), d.mocap_quat[keep].reshape(-1)] + ([d.ctrl] if ctrl else []) + ([d.qvel, d.qfrc_actuator] if dyn else [])
              + ([d.flexvert_xpos.reshape(-1)] if m.nflexvert else []))
     return head.tobytes() + np.float64(d.time).tobytes() + np.concatenate(parts).astype(np.float32).tobytes()
 

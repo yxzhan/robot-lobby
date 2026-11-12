@@ -16,6 +16,7 @@
 
 import { serverUrl, wsUrl } from '../app/endpoint.js';
 import { every } from '../app/ticker.js';
+import { SLOT_BODIES, park } from '../world/avatar.js';
 
 const MIN_DELAY = 0.04, MAX_DELAY = 0.25;  // s of server time the view runs behind the newest snapshot
 const LAG_JUMP = 0.15;  // s (wall, at the sim rate): the view this much (or twice its delay) further behind jumps
@@ -31,6 +32,34 @@ export const NET_MUJOCO = {
   mjtObj: Object.fromEntries(['BODY', 'JOINT', 'ACTUATOR', 'TEXTURE', 'SITE'].map((k) => [`mjOBJ_${k}`, { value: k.toLowerCase() }])),
   mj_id2name: (model, type, id) => model.names?.[type]?.[id] ?? '',
 };
+
+// A state's mocap bodies with the avatar slots it left out (server.py
+// state_bytes: only the used ones go; `avatars` is slots << 16 | the used
+// slots' bits) put back, parked: every mocap body of the world, as the
+// world's own numbering has them (the avatars last, slot by slot).
+function withAvatars(pos, quat, avatars) {
+  const slots = avatars >>> 16, used = avatars & 0xffff;
+  if (!slots) return [pos, quat];
+  let n = 0;
+  for (let k = 0; k < slots; k++) if (used & (1 << k)) n++;
+  const base = pos.length / 3 - n * SLOT_BODIES, total = base + slots * SLOT_BODIES;
+  const P = new Float32Array(3 * total), Q = new Float32Array(4 * total);
+  P.set(pos.subarray(0, 3 * base));
+  Q.set(quat.subarray(0, 4 * base));
+  let from = base;
+  for (let k = 0; k < slots; k++) {
+    const at = base + k * SLOT_BODIES;
+    if (used & (1 << k)) {
+      P.set(pos.subarray(3 * from, 3 * (from + SLOT_BODIES)), 3 * at);
+      Q.set(quat.subarray(4 * from, 4 * (from + SLOT_BODIES)), 4 * at);
+      from += SLOT_BODIES;
+    } else {
+      const p = park(k);
+      for (let i = at; i < at + SLOT_BODIES; i++) { P.set(p, 3 * i); Q[4 * i] = 1; }
+    }
+  }
+  return [P, Q];
+}
 
 export class NetClient {
   // handlers: {scene(msg), meta(msg), error(msg), connected(), closed(retryAt)}.
@@ -175,14 +204,15 @@ export class NetClient {
   }
 
   push(buf) {
-    const [version, epoch, nq, nmocap, nu, nv, nflexvert] = new Int32Array(buf, 0, 8);
+    const [version, epoch, nq, nmocap, nu, nv, nflexvert, avatars] = new Int32Array(buf, 0, 8);
     const time = new Float64Array(buf, 32, 1)[0];
     const f = new Float32Array(buf, 40);
     let o = 0;
     const take = (n) => f.subarray(o, (o += n));
+    const qpos = take(nq), [mocap_pos, mocap_quat] = withAvatars(take(3 * nmocap), take(4 * nmocap), avatars);
     const s = {
       version, epoch, time, recv: performance.now(),
-      qpos: take(nq), mocap_pos: take(3 * nmocap), mocap_quat: take(4 * nmocap), ctrl: nu ? take(nu) : null,
+      qpos, mocap_pos, mocap_quat, ctrl: nu ? take(nu) : null,
       qvel: nv ? take(nv) : null, qfrc_actuator: nv ? take(nv) : null,  // (while asked for: wantDynamics)
       flexvert: nflexvert ? take(3 * nflexvert) : null,  // the flex vertices (render/flex.js)
     };
