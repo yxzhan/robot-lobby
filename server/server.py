@@ -141,6 +141,7 @@ import time
 import traceback
 import uuid
 import warnings
+import xml.etree.ElementTree as ET
 
 import mujoco
 import numpy as np
@@ -194,11 +195,12 @@ PHYSICS_DEFAULTS = {
     'speed': 1,         # the most sim seconds per wall second; 0: as fast as it goes
     'stateHz': 30,      # state broadcasts per second (not physics, but the server's too)
     'sleep': True,  # island sleeping (physics.js): set at compile time
+    'speculative': False,  # speculative contacts (MuJoCo 4, physics.js), live
 }
 CONES = ['pyramidal', 'elliptic']  # mjtCone order
-INTEGRATORS = ['Euler', 'RK4', 'implicit', 'implicitfast']  # mjtIntegrator order
+INTEGRATORS = ['Euler', 'RK4', 'implicit', 'implicitfast', 'discrete']  # mjtIntegrator order
 SOLVERS = ['PGS', 'CG', 'Newton']  # mjtSolver order
-OPTION_KEYS = [k for k in PHYSICS_DEFAULTS if k not in ('sleep', 'speed', 'stateHz')]
+OPTION_KEYS = [k for k in PHYSICS_DEFAULTS if k not in ('sleep', 'speculative', 'speed', 'stateHz')]
 
 # A model's own <option> loses against the world's (like in the browser):
 # no need to hear about it. Other MuJoCo warnings go to the console, not to
@@ -218,9 +220,10 @@ def fmt(v):
 
 def base_xml(physics):
   opts = ' '.join(f'{k}="{fmt(physics[k])}"' for k in OPTION_KEYS)
+  flags = ' '.join(f'{f}="enable"' for f in ('sleep', 'speculative') if physics.get(f))
   return f"""
 <mujoco model="world">
-  <option {opts}>{'<flag sleep="enable"/>' if physics.get('sleep') else ''}</option>
+  <option {opts}>{f'<flag {flags}/>' if flags else ''}</option>
   <worldbody>
     <geom name="floor" type="plane" size="0 0 0.05"/>
   </worldbody>
@@ -238,6 +241,56 @@ def apply_options(model, physics):
   o.solver = SOLVERS.index(physics['solver'])
   o.iterations, o.tolerance = physics['iterations'], physics['tolerance']
   o.noslip_iterations, o.noslip_tolerance = physics['noslip_iterations'], physics['noslip_tolerance']
+  bit = int(mujoco.mjtEnableBit.mjENBL_SPECULATIVE)
+  o.enableflags = o.enableflags | bit if physics.get('speculative') else o.enableflags & ~bit
+
+
+def scene_options(path):
+  """The settings a model file's own <option> elements set, in it and the
+  files it includes (physics.js sceneOptions): the attributes it writes out,
+  and sleep / speculative from its <flag>. An environment's, taken into the
+  settings when it is spawned."""
+  out = {}
+  names = {'cone': CONES, 'integrator': INTEGRATORS, 'solver': SOLVERS}
+
+  def visit(path):
+    root = ET.parse(path).getroot()
+    for el in root:
+      if el.tag == 'include' and el.get('file'):
+        visit(path.parent / el.get('file'))
+      if el.tag != 'option':
+        continue
+      for k in OPTION_KEYS:
+        v = el.get(k)
+        if v is None:
+          continue
+        if k in names:
+          name = next((n for n in names[k] if n.lower() == v.strip().lower()), None)
+          if name:
+            out[k] = name
+          continue
+        try:
+          nums = [float(x) for x in v.split()]
+        except ValueError:
+          continue
+        out[k] = nums if isinstance(PHYSICS_DEFAULTS[k], list) else int(nums[0]) if k.endswith('iterations') else nums[0]
+      for flag in el.iter('flag'):
+        for f in ('sleep', 'speculative'):
+          if flag.get(f) is not None:
+            out[f] = flag.get(f) == 'enable'
+
+  visit(pathlib.Path(path))
+  return out
+
+
+def own_physics(rel):
+  """Whether spawning the asset takes its own <option> (asset.json "physics":
+  "own", as in main.js: the MuJoCo examples, not RoboCasa's 2 ms kitchens)."""
+  meta = asset_path(rel).parent / 'asset.json'
+  try:
+    return json.loads(meta.read_text()).get('physics') == 'own'
+  except (OSError, ValueError, AttributeError):
+    return False
 
 
 def checked_physics(physics, old):
@@ -289,6 +342,7 @@ def model_info(rel):
     raw = render_asset.build(spec, m, rel, PUBLIC)
     etag = hashlib.sha1(raw).hexdigest()
     _infos[rel] = {'dims': {'nq': m.nq, 'nv': m.nv, 'na': m.na, 'nu': m.nu, 'nmocap': m.nmocap},
+                   'options': scene_options(asset_path(rel)) if own_physics(rel) else None,
                    'nbody': m.nbody, 'key': key, 'render_size': len(raw), 'etag': etag,
                    'render': [gzip.compress(raw[i:i + RENDER_PART], 5) for i in range(0, max(len(raw), 1), RENDER_PART)]}
   return _infos[rel]
@@ -1010,7 +1064,10 @@ class World:
     op = msg.get('op')
     m, d = self.model, self.data
     if op == 'spawn':
-      await asyncio.to_thread(model_info, msg['rel'])  # compile it off the event loop (cached)
+      info = await asyncio.to_thread(model_info, msg['rel'])  # compile it off the event loop (cached)
+      if info['options']:  # its own options into the settings (own_physics, physics.js sceneOptions)
+        base = {k: copy.deepcopy(PHYSICS_DEFAULTS[k]) for k in (*OPTION_KEYS, 'sleep', 'speculative')}  # main.js sceneBase
+        self.physics = checked_physics({**self.physics, **base, **info['options']}, self.physics)
       r = Robot(self.next_id, msg['rel'], msg.get('label') or msg['rel'], msg['pos'], msg.get('yaw', 0))
       c = self.control.by_ws[ws]
       r.by = c.id

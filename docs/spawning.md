@@ -115,7 +115,8 @@ Picking uses `mj_ray` on the physics world, so it hits collision geoms.
   `npm install` (or `node scripts/vendor.mjs`) links the library as
   `public/mjcf_assets` and indexes it into `public/assets.json`. Within a tab, models are listed under their
   source, `aicor` first and the others by name; menagerie robots are
-  split by the table's sections (Humanoids, Quadrupeds, Arms, …); `{"group": "…"}` in an `asset.json` in
+  split by the table's sections (Humanoids, Quadrupeds, Arms, …); `"physics": "own"` in a model's
+  `asset.json` makes spawning it take its `<option>` into the Physics panel (world.md); `{"group": "…"}` in an `asset.json` in
   the model directory overrides the group. Re-run
   `node scripts/vendor.mjs` after adding models.
 - **Thumbnails** — `python3 scripts/thumbnails.py` (after `vendor.mjs`)

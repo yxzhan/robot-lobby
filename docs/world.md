@@ -28,7 +28,9 @@ follows the selection, are the Render panel's: rendering.md):
   smaller. It costs step time where there are many contacts (that grasp:
   25 → ~100 µs a step); 0 iterations turns it off.
 - **Solver** (Solver): the integrator (implicitfast by default, as the
-  menagerie models set it; Euler, RK4, implicit), the constraint solver
+  menagerie models set it; Euler, RK4, implicit, and MuJoCo 4's discrete:
+  passive damping and stiffness implicit in the solver, so stiff things
+  stay stable at much larger steps, as the dry-stone arches below at 6–8 ms), the constraint solver
   (Newton, CG, PGS), its most iterations and its tolerance, live like the
   options above.
 - **Timestep and speed** (Simulation): the physics step (0.005 s by default,
@@ -67,3 +69,37 @@ follows the selection, are the Render panel's: rendering.md):
   MuJoCo), so changing it rebuilds the world. The server does the same.
   Fixed and sleeping bodies also cost no drawing work: `syncTransforms`
   only updates the parts of bodies that moved (3.6 → 0.5 ms a frame there).
+- **Speculative** (Contacts; off, as in MuJoCo): MuJoCo 4's speculative
+  contacts (`<flag speculative="enable"/>`), found ahead of time from the
+  geoms' velocities, so that fast things do not pass through thin ones at
+  large time steps (the MuJoCo examples' bat hitting a ball at a 10 ms
+  step). Live, no rebuild; the server does the same.
+- **A scene's own options**: spawning a model whose `asset.json` says
+  `"physics": "own"` (the MuJoCo examples below) takes the options its
+  `<option>` writes out (time step, integrator, cone, impratio, medium,
+  noslip, the sleep and speculative flags) into these settings, on top of
+  the defaults (not of what an earlier one set: an arch's impratio 100
+  would stay for the next scene), and the status line names those that
+  changed (`sceneOptions` in physics.js, `scene_options` in server.py).
+  Every other model's `<option>` loses against these settings, as before:
+  RoboCasa's kitchens set a 2 ms step (and impratio 20), which would make
+  every robot's physics cost 2.5 times as much. They stay until changed,
+  also after the scene is removed; a stage keeps its own.
+
+## MuJoCo 4 examples
+
+The Scenes tab's **mujoco_examples** are example models of MuJoCo 4.0 that
+show its new physics, copied by the library's
+`scripts/import_mujoco_examples.py` (from a google-deepmind/mujoco checkout
+at tag 4.0.0) without their floors (the lowest plane facing up; a scene
+whose floor was below z = 0 is moved up onto ours), each with its own
+options (above): surface velocity (a treadmill sweeping a passive humanoid
+off, a carousel of conveyor ramps), speculative contacts (a bat and ball, a
+dropped chain caught by a thin bar, a cradle of 3 mm plates), adhesion (a
+fridge door held shut by magnets, Shift+drag it open; a sand castle),
+plasticity (wires that stay bent), sleep (dominos) and rigid bodies (a
+house of cards, a deck of cards, three dry-stone arches, balloons). Only
+rigid ones: flex (soft) bodies are not drawn yet, so the cable, cloth and
+soft-body examples are left out, and so are those that need actuator
+controls or plugins (active adhesion, tactile). Tendons are not drawn
+either (the balloons' strings).

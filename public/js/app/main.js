@@ -30,7 +30,7 @@ import { RosPanel } from '../ros/rospanel.js';
 import { bodyPose } from '../drive/goal.js';
 import { BaseController } from '../controllers/base/base.js';
 import { IkController } from '../controllers/ik/ik.js';
-import { applyOptions, geomOverrides, geomSignature, injectGeomDefaults, loadPhysics, needsRebuild, PHYSICS_DEFAULTS } from '../world/physics.js';
+import { applyOptions, geomOverrides, geomSignature, injectGeomDefaults, loadPhysics, needsRebuild, PHYSICS_DEFAULTS, sceneBase, sceneOptions } from '../world/physics.js';
 import { WorldPanel } from '../world/worldpanel.js';
 import { BehaviorPanel } from '../behavior/btpanel.js';
 import { AgentPanel } from '../agent/agent.js';
@@ -2697,6 +2697,7 @@ try {
             rel, parts: app.buildVisual(mujoco, model, images, models, isEnvironment(rel)),
             inertia: bodyInertia(model), sig, key: firstKey(docs), refs: referencedNames(docs), cameras: modelCameras(mujoco, model),
             dims: { nq: model.nq, nv: model.nv, na: model.na, nu: model.nu, nmocap: model.nmocap },
+            options: sceneOptions(docs),  // taken into the settings when spawned, for physics: 'own' (asset.json)
           };
         } finally {
           model.delete();
@@ -3000,10 +3001,12 @@ try {
     try {
       const progress = (msg) => { status.textContent = msg; setBusy(msg); };
       const robot = await makeRobot(rel, label, pos, yaw, progress);
+      const took = assets.find((a) => a.rel === rel)?.ownPhysics ? takeSceneOptions(robot.visual.options) : '';
       await rebuild([...robots, robot], [robot], progress);
       robots.push(robot);
+      if (took) app.world?.render();
       const secs = ((performance.now() - t0) / 1000).toFixed(1);
-      status.textContent = `spawned ${label} (${secs}s) · ${hint()}`;
+      status.textContent = `spawned ${label} (${secs}s)${took ? ` with its physics options (${took})` : ''} · ${hint()}`;
     } catch (err) {
       status.textContent = `spawn failed: ${err.message ?? err}`;
       console.error(err);
@@ -3011,6 +3014,23 @@ try {
       busy = false;
       setBusy(null);
     }
+  }
+
+  // A model's own options (physics.js sceneOptions) into the Physics panel's
+  // settings, before the world with it is built: for those whose asset.json
+  // says "physics": "own" (the MuJoCo examples, made to show speculative
+  // contacts at a 10 ms step and the like; not, say, RoboCasa's kitchens,
+  // whose 2 ms step would make every robot's physics cost 2.5 times as
+  // much). The names of those that changed, '' if none did.
+  function takeSceneOptions(options) {
+    if (!options) return '';
+    // On the defaults, not on what an earlier one set (an arch's impratio 100).
+    const next = { ...app.physics, ...sceneBase(), ...options };
+    const changed = Object.keys(next).filter((k) => JSON.stringify(next[k]) !== JSON.stringify(app.physics[k]));
+    if (!changed.length) return '';
+    app.physics = next;
+    if (app.model) applyOptions(app.model, app.physics);
+    return changed.join(', ');
   }
 
   // Clear / remove one: recompile with the robots of `list` (a subset

@@ -107,7 +107,9 @@ if (!existsSync(PY_TREES.to) || sha(readFileSync(PY_TREES.to)) !== PY_TREES.sha2
 // relative to public/, `screenshot` relative to `dir`. `group` is the header
 // the panel lists it under: the section of menagerie's README (or "Others")
 // for menagerie models, the source otherwise; "group" in an optional
-// asset.json in the model directory overrides it.
+// asset.json in the model directory overrides it, and its "physics": "own"
+// gives the entry physics: 'own' (spawning the model takes the options its
+// <option> sets into the Physics panel: physics.js sceneOptions).
 //
 // Order (the panel keeps it): aicor first, then the other sources by
 // name; menagerie models by README section, "Others" last; then by name.
@@ -261,6 +263,7 @@ function indexLibrary() {
         const meta = `${dir}/asset.json`;
         const over = existsSync(meta) ? JSON.parse(readFileSync(meta, 'utf8')) : {};
         const m = { name, dir, main, category, source, group: over.group ?? group };
+        if (over.physics === 'own') m.physics = 'own';  // spawning it takes its <option> (physics.js sceneOptions)
         if (screenshot) m.screenshot = screenshot;
         m.rank = [FIRST_SOURCES.includes(source) ? FIRST_SOURCES.indexOf(source) : FIRST_SOURCES.length, source,
                   over.group ? -1 : rank, m.group, name];

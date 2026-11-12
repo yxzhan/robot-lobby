@@ -46,6 +46,17 @@
 //   and props) rests, so this saves most of its physics time. On here, unlike
 //   MuJoCo's default; it is set when the model is compiled, so a change
 //   rebuilds the world.
+// - Speculative contacts (MuJoCo 4, <flag speculative>): contacts found
+//   ahead of time from the geoms' velocities, so that fast things do not
+//   pass through thin ones at large time steps. Off, as in MuJoCo; live.
+// - A model's own options: spawning one whose asset.json says "physics":
+//   "own" (the MuJoCo examples, environments/mujoco_examples) takes the
+//   options its <option> writes out (sceneOptions; not MuJoCo's defaults
+//   for the rest) into these settings, as if set in the panel, so that a
+//   scene made to show, say, speculative contacts at a 10 ms step runs as
+//   made: on top of the defaults (sceneBase), not of what an earlier one
+//   set. Other models' options lose against these, and so do those later
+//   (a stage keeps its own settings).
 
 // MuJoCo's own defaults, but for sleep.
 export const PHYSICS_DEFAULTS = Object.freeze({
@@ -66,6 +77,7 @@ export const PHYSICS_DEFAULTS = Object.freeze({
   speed: 1,
   stateHz: 30,  // network mode: the server's state broadcasts per second
   sleep: true,
+  speculative: false,
   geom: { density: 1000, mass: null, friction: [1, 0.005, 0.0001], condim: 3, solref: [0.02, 1], solimp: [0.9, 0.95, 0.001] },
 });
 
@@ -78,7 +90,7 @@ export function loadPhysics() {
 const OPTION_KEYS = ['timestep', 'gravity', 'wind', 'magnetic', 'density', 'viscosity', 'impratio', 'cone',
   'noslip_iterations', 'noslip_tolerance', 'integrator', 'solver', 'iterations', 'tolerance'];
 export const CONES = ['pyramidal', 'elliptic'];  // mjtCone order
-export const INTEGRATORS = ['Euler', 'RK4', 'implicit', 'implicitfast'];  // mjtIntegrator order
+export const INTEGRATORS = ['Euler', 'RK4', 'implicit', 'implicitfast', 'discrete'];  // mjtIntegrator order
 export const SOLVERS = ['PGS', 'CG', 'Newton'];  // mjtSolver order
 export const CONDIMS = [1, 3, 4, 6];
 export const SPEEDS = [0.1, 0.25, 0.5, 1, 2, 4, 10, 0];  // × real time; 0: as fast as it goes
@@ -88,7 +100,51 @@ const fmt = (v) => (Array.isArray(v) ? v.join(' ') : String(v));
 // The <option> element of the world spec.
 export function optionXml(s) {
   const attrs = OPTION_KEYS.map((k) => `${k}="${fmt(s[k])}"`).join(' ');
-  return `<option ${attrs}>${s.sleep ? '<flag sleep="enable"/>' : ''}</option>`;
+  const flags = [s.sleep && 'sleep', s.speculative && 'speculative'].filter(Boolean).map((f) => `${f}="enable"`);
+  return `<option ${attrs}>${flags.length ? `<flag ${flags.join(' ')}/>` : ''}</option>`;
+}
+
+const ENABLE_SPECULATIVE = 1 << 7;  // mjtEnableBit
+
+// What a model's own options go on top of: the defaults of the global
+// options and flags (not speed, sync rate or default geom properties).
+export function sceneBase() {
+  const out = {};
+  for (const k of [...OPTION_KEYS, 'sleep', 'speculative']) out[k] = structuredClone(PHYSICS_DEFAULTS[k]);
+  return out;
+}
+
+// The settings a model's own <option> elements set (in its parsed include
+// tree, `docs`): {key: value} for the attributes it writes out, and sleep /
+// speculative from its <flag>. An environment's, taken into the settings
+// when it is spawned.
+export function sceneOptions(docs) {
+  const out = {};
+  for (const doc of docs) {
+    for (const opt of doc.documentElement.children) {
+      if (opt.tagName !== 'option') continue;
+      for (const k of OPTION_KEYS) {
+        const v = opt.getAttribute(k);
+        if (v === null) continue;
+        if (k === 'cone' || k === 'integrator' || k === 'solver') {
+          const names = { cone: CONES, integrator: INTEGRATORS, solver: SOLVERS }[k];
+          const name = names.find((n) => n.toLowerCase() === v.trim().toLowerCase());
+          if (name) out[k] = name;
+        } else {
+          const nums = v.trim().split(/\s+/).map(Number);
+          if (nums.every(Number.isFinite)) out[k] = Array.isArray(PHYSICS_DEFAULTS[k]) ? nums : nums[0];
+        }
+      }
+      for (const flag of opt.children) {
+        if (flag.tagName !== 'flag') continue;
+        for (const f of ['sleep', 'speculative']) {
+          const v = flag.getAttribute(f);
+          if (v !== null) out[f] = v === 'enable';
+        }
+      }
+    }
+  }
+  return out;
 }
 
 // Sets the global options on a compiled model (takes effect at the next step).
@@ -106,6 +162,7 @@ export function applyOptions(model, s) {
   o.tolerance = s.tolerance;
   o.noslip_iterations = s.noslip_iterations;
   o.noslip_tolerance = s.noslip_tolerance;
+  o.enableflags = s.speculative ? o.enableflags | ENABLE_SPECULATIVE : o.enableflags & ~ENABLE_SPECULATIVE;
 }
 
 // The default geom attributes that differ from MuJoCo's ({name: value}).
