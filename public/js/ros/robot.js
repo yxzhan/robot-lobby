@@ -18,7 +18,10 @@
 //               tf.bodies off, when robot_state_publisher computes them
 //               from the URDF), `rate` times a second;
 //   subscribes  joint commands (sensor_msgs/JointState: position targets for
-//               the actuators that drive those joints) and cmd_vel
+//               the actuators that drive those joints; a joint with a
+//               velocity and no position, as topic_based_ros2_control sends
+//               velocity-commanded joints, has its velocity integrated here
+//               into the target: integrate) and cmd_vel
 //               (geometry_msgs/Twist: linear x/y and angular z), both into
 //               the drive layer (drive.js): cmd_vel drives the walking
 //               policy or base before the keys and the goal while fresh;
@@ -35,6 +38,14 @@
 //               y down) in its link's frame. Depth / segmentation cameras:
 //               <camera>/depth|segmentation/image_raw (32FC1 / 32SC1) and
 //               …/camera_info; RGB-D ones both the picture and the depth.
+//   publishes   control states, if on (sensor_msgs/JointState): the joint
+//               states, but for the velocity-commanded joints the
+//               integrated targets and commanded velocities, on each
+//               velocity command and with the joint states; what a
+//               velocity controller (giskardpy through ros2_control) should
+//               read, closing its loop on its own commands instead of
+//               through the network and the physics, whose delay makes it
+//               overshoot and oscillate (the robot follows the targets).
 // One prefix per robot (the robot's id, r1, unless set; / for none) goes
 // before every name, so robots of one model on one bridge do not overwrite
 // each other: the topics (r1/joint_states, r1/wrist_cam/image_raw/compressed;
@@ -59,6 +70,9 @@
 //             driven by that actuator (ctrl = position * scale + offset;
 //             e.g. a gripper on a tendon), beside those with actuators on
 //             their joints
+//   jointStatesBy  {topic: joint name prefix}: those joints' states on that
+//             topic too, with the joint states (Tracy's grippers on
+//             left_gripper/joint_states, where CRAM reads them)
 //   real      {robot}: a real robot can follow it (real.js: robot-station's
 //             follower over rosbridge, its robot name)
 //   cameras   {camera: {topic, frame}}: its topic namespace (…/image_raw,
@@ -81,6 +95,14 @@ const WORLD_STORE = 'robot-lobby/ros-world';
 const STORE = 'robot-lobby/ros';  // per robot file
 export const ROS_PROFILES = await fetch(new URL('../../json/ros_profiles.json', import.meta.url)).then((r) => r.json()).catch(() => ({}));
 const MAX_BUFFERED = 8e6;  // bytes waiting in the WebSocket: camera frames are dropped above
+// Velocity joint commands, integrated into position targets (integrate):
+const VEL = {
+  restart: 0.2,       // s without a command for a joint: it starts again from where the joint is
+  resyncAfter: 1,     // s of zero velocity after which ...
+  resyncBeyond: 0.1,  // ... a joint this far (rad, m) from its target starts again from where it is (moved by something else)
+  still: 1e-4,        // rad/s (m/s) below which a velocity counts as zero
+  maxStep: 0.05,      // s, the longest step integrated at once
+};
 
 export const WORLD_DEFAULTS = {
   url: 'localhost:9090',
@@ -93,6 +115,7 @@ export const ROBOT_DEFAULTS = {
   jointStates: { on: true, topic: 'joint_states' },  // what robot_state_publisher and RViz listen to
   tf: { on: true, topic: '/tf', bodies: true },
   jointCommand: { on: true, topic: 'joint_command', takeover: false },  // takeover: over a policy's or IK's joints too
+  controlStates: { on: false, topic: 'joint_states_for_control' },  // the targets of velocity-commanded joints as their states
   cmdVel: { on: true, topic: 'cmd_vel' },
   camera: { on: true, format: 'jpeg', quality: 80, off: [] },  // off: cameras not published
 };
@@ -100,10 +123,10 @@ const WORLD_KEYS = Object.keys(WORLD_DEFAULTS).filter((k) => k !== 'url');
 
 const TYPES = {
   jointStates: 'sensor_msgs/JointState', tf: 'tf2_msgs/TFMessage',
-  jointCommand: 'sensor_msgs/JointState', cmdVel: 'geometry_msgs/Twist', clock: 'rosgraph_msgs/Clock',
+  jointCommand: 'sensor_msgs/JointState', controlStates: 'sensor_msgs/JointState', cmdVel: 'geometry_msgs/Twist', clock: 'rosgraph_msgs/Clock',
   image: 'sensor_msgs/Image', compressed: 'sensor_msgs/CompressedImage', info: 'sensor_msgs/CameraInfo',
 };
-const PUBLISHED = ['jointStates', 'tf'];
+const PUBLISHED = ['jointStates', 'controlStates', 'tf'];
 const SUBSCRIBED = ['jointCommand', 'cmdVel'];
 
 // `over` on `base`, a level deep (a topic's {on, topic} merged).
@@ -363,7 +386,9 @@ export class RosRobot {
     this.topics = {};           // setting key -> the topic advertised or subscribed
     this.unsub = {};            // setting key -> its unsubscribe
     this.camTopics = new Set(); // camera topics advertised
+    this.byTopics = [];         // [topic, joint name prefix] advertised: the profile's jointStatesBy
     this.encoding = new Set();  // keys of cameras with a frame being encoded
+    this.integ = null;          // velocity-commanded joints: {model, joints: ROS name -> {target, v, at, moving}}
     this.real = new RealLink(this);  // a real robot following this one (real.js; profiles with `real`)
   }
 
@@ -430,6 +455,8 @@ export class RosRobot {
     this.unsub = {};
     this.topics = {};
     this.camTopics.clear();
+    this.byTopics = [];
+    this.integ = null;
     this.bridge = null;
     b.release(this);  // (also its topics)
   }
@@ -462,6 +489,10 @@ export class RosRobot {
       }
       this.topics[k] = want;
     }
+    // The profile's jointStatesBy, while the joint states go out.
+    for (const [topic] of this.byTopics) b.unadvertise(topic, this);
+    this.byTopics = this.topics.jointStates ? Object.entries(this.profile.jointStatesBy ?? {}).map(([topic, prefix]) => [this.topicName(topic, ns), prefix]) : [];
+    for (const [topic] of this.byTopics) b.advertise(topic, TYPES.jointStates, this);
     // Camera topics: advertised again as frames come (publishCamera).
     for (const topic of this.camTopics) b.unadvertise(topic, this);
     this.camTopics.clear();
@@ -522,14 +553,20 @@ export class RosRobot {
     const frame = (b) => t.frame.has(b) ? this.frameName(t.frame.get(b), ns) : world;
     if (this.topics.jointStates) {
       const dyn = !this.app.net || data.dynamics;  // (in network mode while the server sends them)
-      this.send(this.topics.jointStates, {
+      const states = (joints) => ({
         header: header(),
-        name: t.joints.map((jt) => jt.name),
-        position: t.joints.map((jt) => data.qpos[jt.q]),
-        velocity: dyn ? t.joints.map((jt) => data.qvel[jt.v]) : [],
-        effort: dyn ? t.joints.map((jt) => data.qfrc_actuator[jt.v]) : [],
+        name: joints.map((jt) => jt.name),
+        position: joints.map((jt) => data.qpos[jt.q]),
+        velocity: dyn ? joints.map((jt) => data.qvel[jt.v]) : [],
+        effort: dyn ? joints.map((jt) => data.qfrc_actuator[jt.v]) : [],
       });
+      this.send(this.topics.jointStates, states(t.joints));
+      for (const [topic, prefix] of this.byTopics) {
+        const some = t.joints.filter((jt) => jt.name.startsWith(prefix));
+        if (some.length) this.send(topic, states(some));
+      }
     }
+    if (this.topics.controlStates) this.publishControl(now);
     if (this.topics.tf) {
       const transforms = (this.settings.tf.bodies === false ? [] : t.bodies).map((b) => {
         const parent = model.body_parentid[b];
@@ -543,6 +580,22 @@ export class RosRobot {
       if (this.settings.camera.on) transforms.push(...this.cameraFrames(frame, header));
       if (transforms.length) this.send(this.topics.tf, { transforms });
     }
+  }
+
+  // Control states: the joint states, but the velocity-commanded joints'
+  // integrated targets and commanded velocities while their commands come
+  // (a joint whose commands stopped starts again from where it is: integrate).
+  publishControl(now) {
+    const { data } = this.app, t = this.tables(), at = performance.now();
+    const I = this.integ?.model === this.app.model ? this.integ.joints : null;
+    const live = (n) => { const s = I?.get(n); return s && at - s.at <= VEL.restart * 1000 ? s : null; };
+    this.send(this.topics.controlStates, {
+      header: { stamp: now, frame_id: '' },
+      name: t.joints.map((jt) => jt.name),
+      position: t.joints.map((jt) => live(jt.name)?.target ?? data.qpos[jt.q]),
+      velocity: t.joints.map((jt) => live(jt.name)?.v ?? data.qvel[jt.v]),
+      effort: [],
+    });
   }
 
   // ---- cameras ----
@@ -652,14 +705,20 @@ export class RosRobot {
   }
 
   // Position targets by joint name: the ctrl of the actuators on those
-  // joints (clamped to their control range), into the drive layer.
-  command({ name = [], position = [] }) {
+  // joints (clamped to their control range), into the drive layer. A joint
+  // with a velocity and no position: its integrated target (integrate).
+  command({ name = [], position = [], velocity = [] }) {
     const { model, data } = this.app;
     if (!model || !data) return;
-    const t = this.tables(), pairs = [];
+    const t = this.tables(), pairs = [], now = performance.now();
+    if (this.integ?.model !== model) this.integ = { model, joints: new Map() };
+    let integrated = false;
     name.forEach((n, i) => {
-      const jt = t.byName.get(n), v = position[i];
-      if (!Number.isFinite(v)) return;
+      const jt = t.byName.get(n);
+      let v = position[i];
+      if (Number.isFinite(v)) this.integ.joints.delete(n);
+      else if ((v = this.integrate(jt, velocity[i], now)) !== null) integrated = true;
+      else return;
       const drives = t.commands.get(n) ?? (jt ? (t.acts.get(jt.j) ?? []).map((a) => ({ a, scale: 1, offset: 0 })) : []);
       for (const { a, scale, offset } of drives) {
         let u = v * scale + offset;
@@ -668,6 +727,32 @@ export class RosRobot {
       }
     });
     this.app.drive.jointCommand(this.robot, pairs, this.settings.jointCommand.takeover);
+    if (integrated && this.topics.controlStates && this.bridge?.connected) this.publishControl(this.world.now());
+  }
+
+  // A velocity command for joint `jt`: its position target moved on by
+  // v·dt (dt since its last command, at most VEL.maxStep), within the
+  // joint's range; null if there is no such joint or velocity. It starts
+  // from where the joint is on its first command, after a pause in its
+  // commands (VEL.restart: a controller started again), and when it has
+  // been still a while yet is far from its target (something else moved
+  // it: IK, a reset, a sync with the real robot).
+  integrate(jt, v, now) {
+    if (!jt || !Number.isFinite(v)) return null;
+    const { model, data } = this.app, I = this.integ.joints, measured = data.qpos[jt.q];
+    let s = I.get(jt.name);
+    const dt = s ? (now - s.at) / 1000 : Infinity;
+    if (!s || dt > VEL.restart || (now - s.moving > VEL.resyncAfter * 1000 && Math.abs(measured - s.target) > VEL.resyncBeyond)) {
+      s = { target: measured, moving: now };
+      I.set(jt.name, s);
+    } else {
+      s.target += v * Math.min(dt, VEL.maxStep);
+    }
+    if (Math.abs(v) > VEL.still) s.moving = now;
+    if (model.jnt_limited[jt.j]) s.target = Math.min(model.jnt_range[2 * jt.j + 1], Math.max(model.jnt_range[2 * jt.j], s.target));
+    s.at = now;
+    s.v = v;
+    return s.target;
   }
 }
 

@@ -7,11 +7,12 @@
     }
   },
   "custom/franka_fr3_hand/franka_fr3_hand.xml": {
-    "about": "As franka_ros2 drives an FR3 with its hand through ros2_control: the lobby is the hardware behind topic_based_ros2_control's default topics (server/ros/fr3: launch, URDF, controllers); robot_state_publisher computes TF from the URDF",
+    "about": "As franka_ros2 drives an FR3 with its hand through ros2_control: the lobby is the hardware behind topic_based_ros2_control's default topics (velocity-commanded joints integrated here, their targets on /fr3/joint_states_for_control for the controller to read: ijcai_2026_workshop demo/fr3_giskard); robot_state_publisher computes TF from the URDF",
     "prefix": "/",
     "settings": {
       "jointStates": { "on": true, "topic": "/robot_joint_states" },
       "jointCommand": { "on": true, "topic": "/robot_joint_commands" },
+      "controlStates": { "on": true, "topic": "/fr3/joint_states_for_control" },
       "tf": { "on": true, "topic": "/tf", "bodies": false },
       "cmdVel": { "on": false, "topic": "cmd_vel" }
     },
@@ -20,13 +21,18 @@
     }
   },
   "aicor/tracy/tracy.xml": {
-    "about": "As the real Tracy's ros2_control runs it: the lobby is the hardware behind topic_based_ros2_control (ijcai_2026_workshop's demo/tracy_roscontrol: a controller manager per arm, a relay turning their velocity commands into position targets); robot_state_publisher computes TF from iai_tracy's URDF",
+    "about": "As the real Tracy's ros2_control runs it: the lobby is the hardware behind topic_based_ros2_control (ijcai_2026_workshop's demo/tracy_roscontrol: a controller manager per arm, their velocity commands integrated here, their targets on /tracy/joint_states_for_control for them to read; the grippers' joints on their own topics, as CRAM reads them); robot_state_publisher computes TF from iai_tracy's URDF",
     "prefix": "/",
     "settings": {
       "jointStates": { "on": true, "topic": "/robot_joint_states" },
       "jointCommand": { "on": true, "topic": "/robot_joint_commands" },
+      "controlStates": { "on": true, "topic": "/tracy/joint_states_for_control" },
       "tf": { "on": true, "topic": "/tf", "bodies": false },
       "cmdVel": { "on": false, "topic": "cmd_vel" }
+    },
+    "jointStatesBy": {
+      "/left_gripper/joint_states": "left_robotiq_85_",
+      "/right_gripper/joint_states": "right_robotiq_85_"
     }
   },
   "mujoco_menagerie/franka_emika_panda/panda.xml": {

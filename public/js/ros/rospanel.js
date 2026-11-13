@@ -190,6 +190,7 @@ export class RosPanel {
     det.append(el('div', { className: 'minor', textContent: 'Publish' }));
     topic('jointStates', 'Joints', 'sensor_msgs/JointState: the robot\'s joint positions, velocities and efforts (the actuators\' force on each joint)');
     topic('tf', 'TF', 'tf2_msgs/TFMessage: every body in its parent\'s frame, the root in "world"; the cameras\' optical frames');
+    topic('controlStates', 'Control', 'sensor_msgs/JointState: the joint states, but for joints commanded by velocity their integrated targets: what a velocity controller (giskardpy through ros2_control) reads, so it does not close its loop through the network');
     check('TF bodies', 'The bodies in TF; off when robot_state_publisher computes them from the URDF (the cameras\' frames still go)', 'every body',
       () => s.tf.bodies !== false, (v) => { s.tf.bodies = v; });
     this.renderCameras(det, r, rr, changed);
@@ -199,7 +200,7 @@ export class RosPanel {
       det.append(el('div', { className: 'note warn' }, document.createTextNode('cmd_vel has nothing to drive: no walking policy or base is on. '),
         this.link('Teleop', 'Switch one on in the Teleop panel', () => this.app.openPanel?.('teleop', r))));
     }
-    topic('jointCommand', 'Joint cmd', 'sensor_msgs/JointState: position targets for the actuators on those joints');
+    topic('jointCommand', 'Joint cmd', 'sensor_msgs/JointState: position targets for the actuators on those joints; a joint with only a velocity (topic_based_ros2_control\'s velocity interface) has it integrated into its target');
     check('Take over', 'Joint commands also move the joints a policy or IK drives, while they come (those give them up meanwhile, as the goal does for cmd_vel)',
       'over policy and IK', () => s.jointCommand.takeover, (v) => { s.jointCommand.takeover = v; });
     const joints = el('div', { className: 'note joints-owner' });
