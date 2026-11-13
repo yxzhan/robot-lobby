@@ -60,7 +60,8 @@
 import { BALL } from '../app/marker.js';
 import { XrMenu } from './xrmenu.js';
 import { HEAD_BACK, handPose } from '../world/avatar.js';
-import { FINGERS as HAND_FINGERS, amountFor, average, handAngles, loadCalibration, saveCalibration } from './handmap.js';
+import { FINGERS as HAND_FINGERS, HAND_DEFAULTS, amountFor, average, handAngles, loadCalibration, saveCalibration } from './handmap.js';
+import { serverUrl } from '../app/endpoint.js';
 import { snapToTip, strain } from '../controllers/ik/leash.js';
 
 const RUMBLE_MS = 80;           // a rumble pulse while a held marker is at its leash's end
@@ -162,6 +163,7 @@ export class XrControls {
     this.makePanel = panel;  // (the attach countdowns: countdown())
     this.calibration = loadCalibration();  // side -> {open, fist}: your hands' values (handmap.js)
     this.cal = null;  // a calibration running (calibrate())
+    this.calSaved = '';  // Save as defaults: how it went
     this.hands = new Map();  // handedness -> hand state
     this.rig = { x: 0, y: 0, yaw: 0 };
   }
@@ -508,11 +510,33 @@ export class XrControls {
           return `${step[c().phase]}  ${left()} s`;
         } },
         { label: 'Start', action: () => { this.startCalibration(); } },
-        { label: 'Calibrated', info: true, value: () => ['left', 'right'].filter((s) => this.calibration[s]).join(', ') || 'none: a typical hand' },
-        { label: 'Back to a typical hand', action: () => { this.calibration = {}; saveCalibration({}); this.cal = null; } },
+        { label: 'In use', info: true, value: () => ['left', 'right'].map((s) => `${s}: ${this.calibration[s] ? 'yours' : HAND_DEFAULTS[s] ? 'default' : 'typical'}`).join(', ') },
+        { label: 'Save as defaults', action: () => { this.saveDefaults(); } },
+        { label: '', info: true, value: () => this.calSaved },
+        { label: 'Back to the defaults', action: () => { this.calibration = {}; saveCalibration({}); this.cal = null; } },
       ],
     };
   }
+
+  // Your calibrated hands written to json/hand_calibration.json on the server
+  // (the other hand's default kept), the defaults for every browser from the
+  // next page load on.
+  async saveDefaults() {
+    const sides = ['left', 'right'].filter((s) => this.calibration[s]);
+    if (!sides.length) { this.calSaved = 'nothing calibrated here'; return; }
+    this.calSaved = 'saving...';
+    try {
+      const res = await fetch(serverUrl('api/hand_calibration'), { method: 'POST', body: JSON.stringify(this.calibration) });
+      if (!res.ok) throw new Error(await res.text() || res.statusText);
+      for (const s of sides) HAND_DEFAULTS[s] = this.calibration[s];
+      this.calSaved = `saved: ${sides.join(', ')}`;
+    } catch (err) {
+      this.calSaved = `not saved: ${err.message}`;
+    }
+  }
+
+  // A hand's calibration: yours, else the default (handmap.js).
+  calibrationOf(side) { return this.calibration[side] ?? HAND_DEFAULTS[side]; }
 
   startCalibration() {
     this.letGoAll();
@@ -728,7 +752,7 @@ export class XrControls {
     if (!grip.length || !h.curls) return;
     g.fingerOf ??= grip.map(({ a }) => fingerOf(g.ik.nameOf('mjOBJ_ACTUATOR', a)));
     // Each finger's curl as far between your calibrated open hand and fist (handmap.js).
-    const cal = this.calibration[h.name], curl = (f) => amountFor({ source: `${f}.curl` }, h.values, cal) ?? h.curls[f];
+    const cal = this.calibrationOf(h.name), curl = (f) => amountFor({ source: `${f}.curl` }, h.values, cal) ?? h.curls[f];
     const curls = Object.keys(h.curls).map(curl), all = curls.reduce((s, v) => s + v, 0) / (curls.length || 1);
     const named = g.fingerOf.some(Boolean);
     const amounts = grip.map((e, i) => amountFor(e, h.values, cal) ?? (!named ? h.pinch ?? 0 : (g.fingerOf[i] && h.curls[g.fingerOf[i]] != null ? curl(g.fingerOf[i]) : all)));

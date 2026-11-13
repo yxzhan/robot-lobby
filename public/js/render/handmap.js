@@ -10,8 +10,10 @@
 //
 // Where that angle is with your hand open and as a fist comes from your
 // calibration (the VR menu's Calibrate hands: per hand, kept in this browser,
-// CAL_STORE), else from a typical hand (TYPICAL); an entry's "range": [open,
-// fist] (degrees) overrides both.
+// CAL_STORE), else from the default one (json/hand_calibration.json,
+// HAND_DEFAULTS: the menu's Save as defaults writes yours there), else from a
+// typical hand (TYPICAL); an entry's "range": [open, fist] (degrees) overrides
+// them all.
 //
 // Sources (degrees; curl and pinch 0..1), the same for either hand:
 //   <finger>.mcp, .pip, .dip   index, middle, ring, pinky: the bend at the
@@ -31,6 +33,10 @@
 
 export const FINGERS = ['index', 'middle', 'ring', 'pinky'];
 export const CAL_STORE = 'robot-lobby/hand-calibration';
+
+// The default calibration, side -> {open, fist} (as saveCalibration keeps it):
+// for a hand not calibrated in this browser.
+export const HAND_DEFAULTS = await fetch(new URL('../../json/hand_calibration.json', import.meta.url)).then((r) => r.json()).catch(() => ({}));
 
 // A typical hand's values, open and as a fist (degrees; curl and pinch 0..1).
 export const TYPICAL = (() => {

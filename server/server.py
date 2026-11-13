@@ -1970,6 +1970,38 @@ async def api_publish_stage(request):
     raise web.HTTPBadRequest(text=str(err))
 
 
+HAND_CALIBRATION = PUBLIC / 'json' / 'hand_calibration.json'
+
+
+async def api_hand_calibration(request):
+  """Writes the VR hands' default calibration (json/hand_calibration.json;
+  handmap.js): {left, right}, either optional, each {open, fist}: source ->
+  number. A hand left out keeps its default."""
+  try:
+    body = await request.json()
+    cal = {}
+    for side in ('left', 'right'):
+      if body.get(side) is None:
+        continue
+      cal[side] = {k: {str(n): float(v) for n, v in body[side][k].items() if math.isfinite(float(v))} for k in ('open', 'fist')}
+    if not cal:
+      raise ValueError('no hand')
+  except (ValueError, KeyError, TypeError, AttributeError) as err:
+    raise web.HTTPBadRequest(text=str(err))
+  try:
+    old = json.loads(HAND_CALIBRATION.read_text())
+  except (OSError, ValueError):
+    old = {}
+  new = {**old, **cal}
+  # One line per hand pose (as json/ik_defaults.json keeps its lists).
+  lines = ',\n'.join(
+      f'  {json.dumps(side)}: {{\n' + ',\n'.join(f'    {json.dumps(k)}: {json.dumps({n: round(v, 2) for n, v in sorted(new[side][k].items())})}' for k in ('open', 'fist')) + '\n  }'
+      for side in ('left', 'right') if side in new)
+  HAND_CALIBRATION.write_text('{\n' + lines + '\n}\n')
+  print(f'hand calibration saved: {", ".join(cal)}')
+  return web.json_response({'saved': list(cal)})
+
+
 async def server_json(_request):
   return web.json_response({'server': 'mujoco-python', 'mujoco': mujoco.__version__})
 
@@ -1983,6 +2015,7 @@ async def main():
   app.router.add_get('/server.json', server_json)
   app.router.add_get('/api/robots', api_robots)
   app.router.add_post('/api/goal', api_goal)
+  app.router.add_post('/api/hand_calibration', api_hand_calibration)
   app.router.add_get('/api/stages', api_stages)
   app.router.add_post('/api/stages/capture', api_capture_stage)
   app.router.add_post('/api/stages/publish', api_publish_stage)
