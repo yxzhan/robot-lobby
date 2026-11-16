@@ -57,8 +57,17 @@ between: `{actuator, open, closed, source}` (`public/js/render/handmap.js`: `ind
 `.pip`, `.dip`, `.spread`, `thumb.cmc`, `.abduct`, `.mcp`, `.ip` in degrees, `<finger>.curl`
 and `pinch` 0..1); AgiBot G2's Wuji hands map each finger's four joints so (knuckle, sideways,
 middle, tip). Where each angle is with your hand open and as a fist comes from the VR menu's
-**Calibrate hands** (per hand, kept in the browser), else from a typical hand; an entry's
-`range` ([open, fist], degrees) overrides both. **Hand angles** shows the angles live. Found automatically: every named actuator on joints below the
+**Calibrate hands** (per hand, kept in the browser), else from the default calibration
+(`public/json/hand_calibration.json`), else from a typical hand; an entry's
+`range` ([open, fist], degrees) overrides them all. **Hand angles** shows the angles live.
+A robot finger whose joints are not your finger's takes two more things: a `source` of several
+angles, `{"thumb.cmc": 1, "thumb.abduct": -1.65}`, is their weighted sum, and `ctrl` gives the
+actuator's ctrl at the `range`'s two values in place of `open` and `closed` (which stay what the
+trigger and G go between). A range in plain degrees with a ctrl in the same radians puts the
+robot's joint where yours is, whatever the calibration. The Wuji thumbs are set so: the thumb's
+two bends one to one (bent back: below 0), and its two base joints, each of which turns the
+thumb both across the palm and out of it, each from both of your thumb's base angles (fitted
+to where the robot's thumb then points). Found automatically: every named actuator on joints below the
 tip that the chain does not have and no other controller drives (a lone
 one on a single hinge only when named like a gripper joint or followed by
 another joint: else it is likely a wrist). Which end of its range closes is

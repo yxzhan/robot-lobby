@@ -15,6 +15,19 @@
 // typical hand (TYPICAL); an entry's "range": [open, fist] (degrees) overrides
 // them all.
 //
+// A robot finger whose joints are not your finger's (a thumb's base: two
+// joints, each turning it both across the palm and out of it) takes more:
+//
+//   { "actuator": "hand_l_thumb_joint2", "open": -0.1, "closed": 0,
+//     "source": { "thumb.cmc": 1, "thumb.abduct": -1.65 }, "range": [-29, 91], "ctrl": [-0.139, 0.932] }
+//
+// a source of several angles is their weighted sum, and "ctrl" the actuator's
+// ctrl at the range's two values (linear, clamped outside) in place of open
+// and closed, which stay what the trigger and G go between. With a range in
+// plain degrees and a ctrl in the same radians the robot's joint is where
+// yours is, whatever your calibration: the amount such an entry gives may be
+// beyond 0..1 (ik.js setGripper keeps the ctrl in the actuator's range).
+//
 // Sources (degrees; curl and pinch 0..1), the same for either hand:
 //   <finger>.mcp, .pip, .dip   index, middle, ring, pinky: the bend at the
 //                              knuckle, the middle and the last joint (0
@@ -25,7 +38,7 @@
 //                              0 along the thumb side, 90 along the fingers
 //                              (across the palm: more)
 //   thumb.abduct               ... out of the palm's plane, + to the palm side
-//   thumb.mcp, thumb.ip        the thumb's two bends
+//   thumb.mcp, thumb.ip        the thumb's two bends (bent back: below 0)
 //   <finger>.curl, thumb.curl  0 straight .. 1 a fist (the whole finger)
 //   pinch                      0 apart .. 1 thumb and index tips together
 // An entry without a source: by its actuator's name, its finger's curl (xr.js),
@@ -65,7 +78,8 @@ const norm = (a) => { const l = Math.hypot(...a) || 1; return a.map((v) => v / l
 const DEG = 180 / Math.PI;
 const between = (a, b) => Math.acos(Math.max(-1, Math.min(1, dot(norm(a), norm(b))))) * DEG;
 
-// joints: joint name -> {pos} (scene frame), side 'left' | 'right'. The palm's
+// joints: joint name -> {pos, rot?} (scene frame; rot row-major), side 'left' |
+// 'right'. The palm's
 // frame: X from the wrist to the middle knuckle, Y toward the thumb side (the
 // pinky knuckle to the index one, made square to X), N out of the palm.
 export function handAngles(joints, side) {
@@ -90,24 +104,46 @@ export function handAngles(joints, side) {
     const meta = sub(tP, tM);
     out['thumb.cmc'] = Math.atan2(dot(meta, X), dot(meta, Y)) * DEG;
     out['thumb.abduct'] = Math.asin(Math.max(-1, Math.min(1, dot(norm(meta), N)))) * DEG;
-    out['thumb.mcp'] = between(meta, sub(tD, tP));
-    out['thumb.ip'] = between(sub(tD, tP), sub(tT, tD));
+    // A bend backward is below 0: the outer segment on the side of the inner
+    // bone's back, its joint's +Y (WebXR Hand Input: -Z along the bone, +Y out
+    // of the finger's back). No orientation, or one not along its bone: as
+    // bent forward.
+    const bend = (name, inner, outer) => {
+      const r = joints.get(name)?.rot, a = between(inner, outer);
+      if (!r || dot([r[2], r[5], r[8]], norm(inner)) > -0.7) return a;
+      return dot(outer, [r[1], r[4], r[7]]) > 0 ? -a : a;
+    };
+    out['thumb.mcp'] = bend('thumb-metacarpal', meta, sub(tD, tP));
+    out['thumb.ip'] = bend('thumb-phalanx-proximal', sub(tD, tP), sub(tT, tD));
   }
   return out;
+}
+
+// An entry's source in a set of values: that value, or the weighted sum of
+// several ({name: weight}); null when one is missing.
+function sourceValue(src, values) {
+  if (typeof src === 'string') return Number.isFinite(values?.[src]) ? values[src] : null;
+  const parts = Object.entries(src ?? {});
+  if (!parts.length || parts.some(([k]) => !Number.isFinite(values?.[k]))) return null;
+  return parts.reduce((sum, [k, w]) => sum + w * values[k], 0);
 }
 
 // An entry's amount, 0 (open) .. 1 (closed), from the hand's values (angles,
 // curls, pinch) and its calibration ({open, fist}: values; none: TYPICAL), or
 // null: no source, or the hand has no such value. Open and fist too close
-// together to tell apart: 0.
+// together to tell apart: 0. An entry with a ctrl: the amount that puts the
+// actuator there (beyond 0..1 where that is outside its open and closed).
 export function amountFor(entry, values, cal) {
-  const src = entry.source;
-  if (!src || values?.[src] == null) return null;
-  const kind = src.includes('.') ? src.slice(src.indexOf('.') + 1) : src;
-  const pick = (c) => (Number.isFinite(c?.open?.[src]) && Number.isFinite(c?.fist?.[src]) ? [c.open[src], c.fist[src]] : null);
+  const src = entry.source, v = src ? sourceValue(src, values) : null;
+  if (v == null) return null;
+  const kind = typeof src === 'string' ? src.slice(src.indexOf('.') + 1) : '';
+  const pick = (c) => { const a = sourceValue(src, c?.open), b = sourceValue(src, c?.fist); return a != null && b != null ? [a, b] : null; };
   const [a, b] = entry.range ?? pick(cal) ?? pick(TYPICAL) ?? [0, 1];
   if (Math.abs(b - a) < (MIN_SPAN[kind] ?? 3)) return 0;
-  return Math.max(0, Math.min(1, (values[src] - a) / (b - a)));
+  const k = Math.max(0, Math.min(1, (v - a) / (b - a)));
+  if (!entry.ctrl) return k;
+  const c = entry.ctrl[0] + k * (entry.ctrl[1] - entry.ctrl[0]);
+  return entry.closed === entry.open ? 0 : (c - entry.open) / (entry.closed - entry.open);
 }
 
 // A calibration step's samples (values per frame) averaged: source -> mean.

@@ -320,8 +320,9 @@ export class IkController {
   }
 
   // A config's gripper (see the top of the file) as [{a, open, closed,
-  // source?, range?}]: source and range, for VR hand tracking, the angle of
-  // the hand that drives it and that angle's values for open and closed
+  // source?, range?, ctrl?}]: source and range, for VR hand tracking, the
+  // angle of the hand that drives it (or several: {name: weight}) and that
+  // angle's values for open and closed, or for the two ctrl
   // (render/handmap.js).
   gripperOf(g) {
     const { model } = this;
@@ -329,10 +330,11 @@ export class IkController {
       const a = g ? this.id('mjOBJ_ACTUATOR', g) : -1;
       return a < 0 ? [] : [{ a, open: model.actuator_ctrlrange[2 * a + 1], closed: model.actuator_ctrlrange[2 * a] }];
     }
-    const range = (r) => (Array.isArray(r) && r.length === 2 && r.every(Number.isFinite) ? r.map(Number) : undefined);
-    return (g ?? []).map(({ actuator, open, closed, source, range: r }) => ({
+    const pair = (r) => (Array.isArray(r) && r.length === 2 && r.every(Number.isFinite) ? r.map(Number) : undefined);
+    const src = (s) => (typeof s === 'string' || (s && typeof s === 'object' && !Array.isArray(s) && Object.values(s).every(Number.isFinite)) ? s : undefined);
+    return (g ?? []).map(({ actuator, open, closed, source, range, ctrl }) => ({
       a: this.id('mjOBJ_ACTUATOR', actuator), open: +open, closed: +closed,
-      ...(typeof source === 'string' ? { source } : {}), ...(range(r) ? { range: range(r) } : {}),
+      ...(src(source) ? { source: src(source) } : {}), ...(pair(range) ? { range: pair(range) } : {}), ...(pair(ctrl) ? { ctrl: pair(ctrl) } : {}),
     })).filter((x) => x.a >= 0 && Number.isFinite(x.open) && Number.isFinite(x.closed));
   }
 
@@ -627,11 +629,14 @@ export class IkController {
   }
 
   // Sets the gripper part way: 0 open, 1 closed; or each actuator its own
-  // way (t an array, by gripper entry: a hand's fingers).
+  // way (t an array, by gripper entry: a hand's fingers; beyond 0..1 as far
+  // as the actuator's ctrlrange goes: handmap.js, an entry's ctrl).
   setGripper(chain, data, t) {
+    const { model } = this;
     (chain.gripper ?? []).forEach(({ a, open, closed }, i) => {
-      const k = Array.isArray(t) ? t[i] ?? 0 : t;
-      data.ctrl[a] = open + k * (closed - open);
+      const k = Array.isArray(t) ? t[i] ?? 0 : t, lim = model.actuator_ctrllimited[a];
+      const lo = lim ? model.actuator_ctrlrange[2 * a] : Math.min(open, closed), hi = lim ? model.actuator_ctrlrange[2 * a + 1] : Math.max(open, closed);
+      data.ctrl[a] = Math.min(hi, Math.max(lo, open + k * (closed - open)));
     });
   }
 

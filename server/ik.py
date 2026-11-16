@@ -324,7 +324,7 @@ class IkController:
     return float(np.linalg.norm(pts - pts.mean(0), axis=1).mean())
 
   def gripper_of(self, g):
-    """A config's gripper as [{a, open, closed, source?, range?}] (ik.js gripperOf)."""
+    """A config's gripper as [{a, open, closed, source?, range?, ctrl?}] (ik.js gripperOf)."""
     m = self.model
     if isinstance(g, str):
       a = self.id('mjOBJ_ACTUATOR', g) if g else -1
@@ -338,12 +338,16 @@ class IkController:
       if a >= 0 and math.isfinite(o) and math.isfinite(c):
         e = {'a': a, 'open': o, 'closed': c}
         # VR hand tracking (public/js/render/handmap.js): which angle of the
-        # hand drives it, and that angle's values for open and closed.
-        if isinstance(x.get('source'), str):
-          e['source'] = x['source']
-        r = x.get('range')
-        if isinstance(r, list) and len(r) == 2 and all(isinstance(v, (int, float)) for v in r):
-          e['range'] = [float(r[0]), float(r[1])]
+        # hand drives it (or several: {name: weight}), and that angle's values
+        # for open and closed, or for the two ctrl.
+        num = lambda v: isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)
+        src = x.get('source')
+        if isinstance(src, str) or (isinstance(src, dict) and all(num(v) for v in src.values())):
+          e['source'] = src
+        for key in ('range', 'ctrl'):
+          r = x.get(key)
+          if isinstance(r, list) and len(r) == 2 and all(num(v) for v in r):
+            e[key] = [float(r[0]), float(r[1])]
         out.append(e)
     return out
 
@@ -571,10 +575,14 @@ class IkController:
     self.set_gripper(chain, data, 0.0 if abs(data.ctrl[g['a']] - g['closed']) < abs(data.ctrl[g['a']] - g['open']) else 1.0)
 
   def set_gripper(self, chain, data, t):
-    """0 open, 1 closed; or a list, each actuator its own way (a hand's fingers)."""
+    """0 open, 1 closed; or a list, each actuator its own way (a hand's fingers:
+    beyond 0..1 as far as the actuator's ctrlrange goes; handmap.js, an entry's ctrl)."""
+    m = self.model
     for i, g in enumerate(chain['gripper']):
       k = (t[i] if i < len(t) else 0.0) if isinstance(t, (list, tuple)) else t
-      data.ctrl[g['a']] = g['open'] + k * (g['closed'] - g['open'])
+      a = g['a']
+      lo, hi = m.actuator_ctrlrange[a] if m.actuator_ctrllimited[a] else sorted((g['open'], g['closed']))
+      data.ctrl[a] = min(hi, max(lo, g['open'] + k * (g['closed'] - g['open'])))
 
   # -- solving --------------------------------------------------------------
 

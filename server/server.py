@@ -1270,9 +1270,11 @@ class World:
         if msg.get('amount') is None:
           ik.toggle_gripper(c, d)
         else:
+          # One amount: 0..1. A list (a hand's fingers): each its own, also
+          # beyond (set_gripper keeps the ctrl in the actuator's range).
           a = msg['amount']
-          clamp = lambda v: min(1.0, max(0.0, float(v)))
-          ik.set_gripper(c, d, [clamp(v) for v in a] if isinstance(a, list) else clamp(a))
+          amount = lambda v, lo, hi: min(hi, max(lo, float(v))) if math.isfinite(float(v)) else 0.0
+          ik.set_gripper(c, d, [amount(v, -1e3, 1e3) for v in a] if isinstance(a, list) else amount(a, 0.0, 1.0))
         self.dirty = True
       return
     elif op in ('ik_save', 'base_save'):

@@ -57,7 +57,8 @@ controller: its gestures are not read), each pointing the same kind of ray, its 
   actuator whose gripper entry names a `source` (an angle of your hand: a
   knuckle's bend, a finger's sideways spread, the thumb's base, …; [IK](ik.md),
   `public/js/render/handmap.js`) as far as that angle is between your open
-  hand and your fist, the others by their name (thumb, index, middle, ring, pinky /
+  hand and your fist (or, an entry with a `ctrl`, as the angle itself says:
+  the Wuji hands' thumbs), the others by their name (thumb, index, middle, ring, pinky /
   little), closing as far as your finger is curled (the angles between its
   bones added up; one on no named finger as the hand is on average). A
   gripper with no named fingers (Panda's) closes as far as you pinch. The

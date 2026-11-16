@@ -1197,7 +1197,7 @@ export class TeleopPanel {
     // (ik.js). Edited as a list; Auto finds them in the model again.
     const m = ik.model, mj = this.app.mujoco;
     const actName = (a) => (mj.mj_id2name(m, mj.mjtObj.mjOBJ_ACTUATOR.value, a) ?? '').slice(ik.prefix.length);
-    const grip = () => (chain.gripper ?? []).map(({ a, open, closed }) => ({ actuator: actName(a), open, closed }));
+    const grip = () => (chain.gripper ?? []).map(({ a, ...rest }) => ({ actuator: actName(a), ...rest }));  // (its hand-tracking source, range and ctrl kept)
     const setGrip = (list) => { cfg.gripper = list.length ? list : ''; changed(cfg, true); };
     const chainActs = new Set(chain.active?.map((d) => d.act)), have = new Set((chain.gripper ?? []).map((g) => g.a));
     const free = [['', '+ actuator…']];
