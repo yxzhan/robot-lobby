@@ -27,12 +27,13 @@ THINGS = [(TABLE, 0, 0, 0, 0), (ARM, *ARM_AT, 0, TOP), (PLATE, *PLATE_AT, 0, TOP
 CHAIN = "gripper"
 # The banana in its body frame (banana_1.xml): its middle, and its long axis's angle.
 BANANA_MID, BANANA_AXIS = (0.018, 0.012), math.radians(116)
-GRASP_Z = -0.004             # the tip (gripperframe, at the fingertips) over the banana's body origin (its middle height) when gripping
+GRASP_Z = 0.003             # the tip (gripperframe, at the fingertips) over the banana's body origin (its middle height) when gripping
 ABOVE = 0.08                 # m: the approach, over the grasp
 LIFT = 0.2                  # m: the banana lifted this far over the grasp
 DROP_Z = 0.08                # m: the tip over the plate's base when letting go
 NOSLIP = 10                  # the noslip post-pass's iterations (a held banana slips less)
 CONE = "pyramidal"           # the friction cone
+SIM_SPEED = 0.25             # simulated s per wall s (the Physics panel's speed)
 REACHED = 0.008              # m: a move is done this near its target,
 STALL, STALL_SECS = 0.002, 0.5  # or once the tip moves less than STALL m in STALL_SECS s,
 GIVE_UP = 6.0               # or after this long (s)
@@ -87,7 +88,7 @@ def chain():
 # -- behaviours --------------------------------------------------------------
 
 class Ready(py_trees.behaviour.Behaviour):
-    """Noslip and the cone set, the arm's IK on and its target known (the arm's
+    """Noslip, the cone and the speed set, the arm's IK on and its target known (the arm's
     starting pose, to go back to); where the banana is to be taken."""
 
     def __init__(self, spawn):
@@ -97,8 +98,8 @@ class Ready(py_trees.behaviour.Behaviour):
     def update(self):
         plan["arm"], plan["plate"], plan["banana"] = self.spawn.names[1:]
         ph = lobby.physics()
-        if ph.get("noslip_iterations") != NOSLIP or ph.get("cone") != CONE:
-            lobby.physics(noslip_iterations=NOSLIP, cone=CONE)
+        if ph.get("noslip_iterations") != NOSLIP or ph.get("cone") != CONE or ph.get("speed") != SIM_SPEED:
+            lobby.physics(noslip_iterations=NOSLIP, cone=CONE, speed=SIM_SPEED)
         if not lobby.controllers(plan["arm"])["ik"]:
             lobby.set_controller(plan["arm"], "ik", True)
             return Status.RUNNING
