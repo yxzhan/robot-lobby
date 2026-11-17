@@ -4,13 +4,15 @@
 # there is reset, not spawned again, and nothing else is touched; so Restart
 # resets the scene), then takes the banana from above, across its middle,
 # lifts it and carries it over the plate (from the lift on, the gripper's
-# orientation left free: held down, the tip reaches little) and lets go there.
+# orientation left free: held down, the tip reaches little), lets go there
+# and goes back to where it started, its gripper closed.
 #
 # The gripper comes straight down: its tip frame's x (the approach) pointing
-# down, its z (the way the jaws close) across the banana. Each move walks the
-# target along a straight line at SPEED (turning at TURN_SPEED) and is done
-# once the tip has caught up; a move with no orientation is a free target
-# (set_ik_target(..., free=True)): the IK only minds the position.
+# down, its z (the way the jaws close) across the banana. Each move sets the
+# target once, where the arm is to go (the IK takes it there at its own
+# pace), and is done once the tip has got there; a move with no orientation
+# is a free target (set_ik_target(..., free=True)): the IK only minds the
+# position.
 import math
 import py_trees
 from py_trees.common import Status
@@ -19,8 +21,8 @@ import lobby
 TABLE, ARM, PLATE, BANANA = "ikea_table", "robotstudio_so101", "plate_1", "banana_1"
 TOP = 0.75                    # the table top (m)
 ARM_AT = (-0.45, 0.0)         # the arm's base on the table, reaching towards +x
-PLATE_AT = (-0.15, -0.2)
-BANANA_AT, BANANA_YAW = (-0.20, 0.18), 0.3
+PLATE_AT = (-0.18, -0.2)
+BANANA_AT, BANANA_YAW = (-0.25, 0.18), 0.3
 THINGS = [(TABLE, 0, 0, 0, 0), (ARM, *ARM_AT, 0, TOP), (PLATE, *PLATE_AT, 0, TOP), (BANANA, *BANANA_AT, BANANA_YAW, TOP)]
 CHAIN = "gripper"
 # The banana in its body frame (banana_1.xml): its middle, and its long axis's angle.
@@ -28,12 +30,13 @@ BANANA_MID, BANANA_AXIS = (0.018, 0.012), math.radians(116)
 GRASP_Z = -0.004             # the tip (gripperframe, at the fingertips) over the banana's body origin (its middle height) when gripping
 ABOVE = 0.08                 # m: the approach, over the grasp
 LIFT = 0.2                  # m: the banana lifted this far over the grasp
-DROP_Z = 0.10                # m: the tip over the plate's base when letting go
-SPEED, TURN_SPEED = 0.12, 1.5  # m/s, rad/s of the target
+DROP_Z = 0.08                # m: the tip over the plate's base when letting go
 NOSLIP = 10                  # the noslip post-pass's iterations (a held banana slips less)
 CONE = "pyramidal"           # the friction cone
-REACHED, SETTLE = 0.008, 1.5   # m: a move is done this near; or this long (s) after its end
-plan = {}  # noted by Ready: arm, plate, banana (names); grasp (pos, yaw)
+REACHED = 0.008              # m: a move is done this near its target,
+STALL, STALL_SECS = 0.002, 0.5  # or once the tip moves less than STALL m in STALL_SECS s,
+GIVE_UP = 6.0               # or after this long (s)
+plan = {}  # noted by Ready: arm, plate, banana (names); grasp (pos, yaw); home (pos, quat)
 
 
 # -- rotations: row-major 3x3 as lists; quaternions (w, x, y, z) ------------
@@ -66,23 +69,6 @@ def to_quat(m):
     return [v / n for v in q]
 
 
-def slerp(p, q, t):
-    dot = sum(a * b for a, b in zip(p, q))
-    if dot < 0:
-        q, dot = [-v for v in q], -dot
-    if dot > 0.9995:
-        r = [a + (b - a) * t for a, b in zip(p, q)]
-    else:
-        th = math.acos(dot)
-        r = [(math.sin((1 - t) * th) * a + math.sin(t * th) * b) / math.sin(th) for a, b in zip(p, q)]
-    n = math.sqrt(sum(v * v for v in r))
-    return [v / n for v in r]
-
-
-def angle(p, q):
-    return 2 * math.acos(min(1.0, abs(sum(a * b for a, b in zip(p, q)))))
-
-
 def down(yaw):
     """The tip straight down (its x to -z), its z (the jaws' closing) along `yaw` in the world."""
     return to_quat(matmul(rot("z", yaw), rot("y", math.pi / 2)))
@@ -101,7 +87,8 @@ def chain():
 # -- behaviours --------------------------------------------------------------
 
 class Ready(py_trees.behaviour.Behaviour):
-    """Noslip and the cone set, the arm's IK on and its target known; where the banana is to be taken."""
+    """Noslip and the cone set, the arm's IK on and its target known (the arm's
+    starting pose, to go back to); where the banana is to be taken."""
 
     def __init__(self, spawn):
         super().__init__("IK on, find the banana")
@@ -122,6 +109,7 @@ class Ready(py_trees.behaviour.Behaviour):
         b = lobby.body(f'{plan["banana"]}/object')
         if b is None:
             return Status.RUNNING
+        plan["home"] = (c["target"]["pos"], c["target"]["quat"])
         cy, sy = math.cos(b["yaw"]), math.sin(b["yaw"])
         mx, my = BANANA_MID
         plan["grasp"] = ([b["x"] + cy * mx - sy * my, b["y"] + sy * mx + cy * my, b["z"] + GRASP_Z],
@@ -131,36 +119,38 @@ class Ready(py_trees.behaviour.Behaviour):
 
 
 class Move(py_trees.behaviour.Behaviour):
-    """The target along a straight line to where(plan) ((pos, quat)), at
-    SPEED and TURN_SPEED; quat None: the position only, the IK turning the
-    tip as it likes (set_ik_target's free). Done when the tip is within REACHED of its end, or
-    SETTLE after the walk ended."""
+    """The target straight to where(plan) ((pos, quat); quat None: the
+    position only, the IK turning the tip as it likes: set_ik_target's
+    free), at once: the IK moves the arm there at its own pace. Done when
+    the tip is within REACHED of it, or has stopped (STALL m in STALL_SECS)
+    short of it, or after GIVE_UP s."""
 
     def __init__(self, name, where):
         super().__init__(name)
         self.where = where
 
     def initialise(self):
-        t = chain()["target"]
-        self.start = (t["pos"], t["quat"])
-        self.end = self.where(plan)
-        turn = 0.0 if self.end[1] is None else angle(self.start[1], self.end[1]) / TURN_SPEED
-        self.secs = max(math.dist(self.start[0], self.end[0]) / SPEED, turn, 0.1)
-        self.t0 = lobby.time()
+        self.pos, quat = self.where(plan)
+        if quat is None:
+            lobby.set_ik_target(plan["arm"], CHAIN, self.pos, free=True)
+        else:
+            lobby.set_ik_target(plan["arm"], CHAIN, self.pos, quat)
+        self.t0 = self.mark_t = lobby.time()
+        self.mark = None
 
     def update(self):
-        elapsed = lobby.time() - self.t0
-        k = min(1.0, elapsed / self.secs)
-        (p0, q0), (p1, q1) = self.start, self.end
-        tip = chain().get("tip_pose")
-        pos = [a + (b - a) * k for a, b in zip(p0, p1)]
-        if q1 is None:
-            lobby.set_ik_target(plan["arm"], CHAIN, pos, free=True)
-        else:
-            lobby.set_ik_target(plan["arm"], CHAIN, pos, slerp(q0, q1, k))
-        far = math.dist(tip["pos"], p1) if tip else 1.0
+        now, tip = lobby.time(), chain().get("tip_pose")
+        if tip is None:
+            return Status.RUNNING
+        far = math.dist(tip["pos"], self.pos)
         self.feedback_message = f"{far * 100:.1f} cm to go"
-        return Status.SUCCESS if k >= 1 and (far < REACHED or elapsed > self.secs + SETTLE) else Status.RUNNING
+        if far < REACHED or now - self.t0 > GIVE_UP:
+            return Status.SUCCESS
+        if now - self.mark_t >= STALL_SECS:
+            if self.mark is not None and math.dist(tip["pos"], self.mark) < STALL:
+                return Status.SUCCESS
+            self.mark, self.mark_t = tip["pos"], now
+        return Status.RUNNING
 
 
 class Grip(py_trees.behaviour.Behaviour):
@@ -216,5 +206,7 @@ root = py_trees.composites.Sequence("soarm101 pick&place", memory=True, children
     Move("lift", over_banana(LIFT, free=True)),
     Move("over the plate", over_plate(DROP_Z)),
     Grip("let go", 0.0, 1.0),
+    Move("back home", lambda p: p["home"]),
+    Grip("close the gripper", 1.0, 1.0),
     Check(),
 ])
