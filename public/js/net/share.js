@@ -13,7 +13,7 @@
 // just this page, where the other device gets a world of its own.
 
 import { server, shareUrl } from '../app/endpoint.js';
-import { outward } from '../app/embed.js';
+import { embedded, linkOutward, outward, setLinkOutward } from '../app/embed.js';
 
 const TOKEN_PARAM = 'token';
 const TOKEN_KEY = 'robot-lobby/session-token';  // sessionStorage
@@ -170,6 +170,17 @@ export class SharePanel {
       setTimeout(() => { copy.textContent = 'Copy'; }, 1800);
     };
     b.append(el('div', { className: 'bar' }, input, copy));
+    if (embedded) {
+      // Embedded in another page: the link opens it (with this page in it),
+      // or, switched off, this page alone.
+      const box = el('input', { type: 'checkbox', checked: linkOutward() });
+      box.onchange = () => {
+        setLinkOutward(box.checked);
+        this.pair();  // a code for the new link
+      };
+      b.append(el('label', { className: 'hint', title: 'On: the link opens the page this one is embedded in. Off: it opens this page by itself.' },
+        box, ' Link to the embedding page'));
+    }
     const warning = linkWarning(this.token);
     if (warning) b.append(el('div', { className: 'warn', textContent: warning }));
   }

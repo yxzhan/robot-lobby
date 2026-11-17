@@ -12,7 +12,8 @@
 // go only to the origin ?embed= names and are taken only from it, from the
 // parent frame: a `server` parameter carries its access token.
 // The links this page gives others (Share panel, a stage's link) open the
-// embedding page with the same parameters (outward), not this page alone.
+// embedding page with the same parameters (outward), not this page alone,
+// unless the Share panel's switch says this page itself (linkOutward()).
 
 const OWN = ['embed', 'online'];
 
@@ -30,6 +31,18 @@ const embedUrl = (() => {
 // Whether this page is in the frame of the page ?embed= names.
 export const embedded = !!embedUrl && window.parent !== window;
 
+// Whether links lead to the embedding page (else to this page itself): the
+// Share panel's switch, remembered in this browser; on by default.
+const OUTWARD_KEY = 'robot-lobby/embed-links';
+let outwardLinks = (() => {
+  try { return localStorage.getItem(OUTWARD_KEY) !== 'off'; } catch { return true; }
+})();
+export const linkOutward = () => embedded && outwardLinks;
+export function setLinkOutward(on) {
+  outwardLinks = !!on;
+  try { localStorage.setItem(OUTWARD_KEY, on ? 'on' : 'off'); } catch { /* no storage */ }
+}
+
 // This page's parameters that the two share.
 const shared = (search) => [...new URLSearchParams(search)].filter(([k]) => !OWN.includes(k));
 
@@ -40,9 +53,15 @@ export function publishUrl() {
 }
 
 // `url` (a link to this page) as a link to the embedding page with the same
-// parameters, when embedded; else `url` itself.
+// parameters, when embedded (and the switch is on); else `url` itself
+// (without ?embed=, which only the frame needs).
 export function outward(url) {
   if (!embedded) return url;
+  if (!outwardLinks) {
+    const own = new URL(url, location.href);
+    own.searchParams.delete('embed');
+    return own.href;
+  }
   const from = new URL(url, location.href);
   const to = new URL(embedUrl.href);
   for (const [k, v] of shared(from.search)) to.searchParams.set(k, v);
