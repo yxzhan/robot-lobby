@@ -662,7 +662,7 @@ class IkController:
     home = np.array([t['home'].get(d['name'], q[c]) for c, d in enumerate(active)])
     free = np.ones(n, bool)
     for _ in range(4):
-      z = np.where(free, NULL_GAIN * dt * (home - q), 0.0)
+      z = np.where(free, 0.0 if t.get('free') else NULL_GAIN * dt * (home - q), 0.0)  # (no home pull for a free target: ik.js)
       dq = dls_step(J * free, e, z)
       again = False
       for c, dof in enumerate(active):

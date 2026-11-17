@@ -718,14 +718,16 @@ export class IkController {
     const q = active.map((dof) => this.value(dof, data));
 
     // dq = Jᵀ (J Jᵀ + λ² I)⁻¹ e, plus the home pull projected into J's null
-    // space. A joint the step would push past its range is taken out (its
+    // space (none for a free target: its null space is the turns the tip
+    // is free to take, and the pull would keep rolling the wrist there
+    // after the tip arrived). A joint the step would push past its range is taken out (its
     // column zeroed) and the step solved again, so the others do not chase
     // what it cannot do.
     const free = active.map(() => true);
     let dq;
     for (let pass = 0; pass < 4; pass++) {
       dq = this.dlsStep(rows.map((row) => row.map((v, c) => (free[c] ? v : 0))), e, n,
-        q.map((v, c) => (free[c] ? NULL_GAIN * dt * ((t.home.get(active[c].name) ?? v) - v) : 0)));
+        q.map((v, c) => (free[c] && !t.free ? NULL_GAIN * dt * ((t.home.get(active[c].name) ?? v) - v) : 0)));
       let again = false;
       active.forEach((jt, c) => {
         const next = q[c] + dq[c];
