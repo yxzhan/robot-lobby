@@ -150,9 +150,34 @@ export class IkController {
     this.model = model;
     this.owner = owner;
     this.bodies = bodies;
+    this.rebase(IkController.bases(model, bodies));
     this.scratch = new mujoco.MjData(model);
     this.config ??= this.autoConfig();
     this.resolve();
+  }
+
+  // The robot's first body, joint and dof in `model` ([first, end) bodies).
+  static bases(model, [b0, b1]) {
+    let j = 0;
+    while (j < model.njnt && model.jnt_bodyid[j] < b0) j++;
+    return { body: b0, end: b1, joint: j, dof: j < model.njnt ? model.jnt_dofadr[j] : model.nv };
+  }
+
+  // The world was recompiled (something spawned or deleted before this
+  // robot): its bodies, joints and dofs keep their order but shift, so
+  // the ids the targets hold (their reference body, software servo
+  // joints, pushed dofs) move with them. Else a target would be read in
+  // the frame of whatever body now has its old id and jump.
+  rebase(now) {
+    const was = this.base;
+    this.base = now;
+    if (!was) return;
+    const db = now.body - was.body, dj = now.joint - was.joint, dd = now.dof - was.dof;
+    if (!db && !dj && !dd) return;
+    for (const t of this.targets.values()) if (t.ref >= was.body && t.ref < was.end) t.ref += db;
+    this.servoTargets = new Map([...this.servoTargets].map(([j, v]) => [j + dj, v]));
+    // Its qfrc_applied is in the old MjData: nothing to clear in the new one.
+    this.applied = new Set([...this.applied].map((d) => d + dd));
   }
 
   // Position servos on a single joint (trntype 0, a -kp bias): joint -> actuator.

@@ -83,6 +83,7 @@ class IkController:
     self.servo_targets = {}  # joint -> software servo target
     self.applied = set()
     self.model = None
+    self.base = None
 
   @property
   def has_defaults(self):
@@ -107,10 +108,38 @@ class IkController:
     self.model = model
     self.owner = owner
     self.bodies = bodies or (1, model.nbody)
+    self.rebase(self.bases(model, self.bodies))
     self.scratch = mujoco.MjData(model)
     if self.config is None:
       self.config = self.auto_config()
     self.resolve()
+
+  @staticmethod
+  def bases(model, bodies):
+    """The robot's first body, joint and dof in `model` ([first, end) bodies)."""
+    b0, b1 = bodies
+    j = 0
+    while j < model.njnt and model.jnt_bodyid[j] < b0:
+      j += 1
+    return {'body': b0, 'end': b1, 'joint': j, 'dof': int(model.jnt_dofadr[j]) if j < model.njnt else model.nv}
+
+  def rebase(self, now):
+    """The world was recompiled (something spawned or deleted before this
+    robot): its bodies, joints and dofs keep their order but shift, so the
+    ids the targets hold (their ref body, software servo joints, pushed
+    dofs) move with them. Else a target would be read in the frame of
+    whatever body now has its old id and jump (ik.js, rebase)."""
+    was, self.base = self.base, now
+    if was is None:
+      return
+    db, dj, dd = now['body'] - was['body'], now['joint'] - was['joint'], now['dof'] - was['dof']
+    if not (db or dj or dd):
+      return
+    for t in self.targets.values():
+      if was['body'] <= t['ref'] < was['end']:
+        t['ref'] += db
+    self.servo_targets = {j + dj: v for j, v in self.servo_targets.items()}
+    self.applied = {d + dd for d in self.applied}
 
   # -- names ----------------------------------------------------------------
 
