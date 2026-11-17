@@ -582,10 +582,13 @@ class IkController:
       self.targets[name] = t
     return t
 
-  def set_target(self, chain, data, pos, rot):
-    """A target in the chain's ref body frame (as the browser sends it)."""
+  def set_target(self, chain, data, pos, rot, free=False):
+    """A target in the chain's ref body frame (as the browser sends it);
+    free: the position only, the orientation left to the IK (rot ignored)."""
     t = self.target(chain, data)
-    t['pos'], t['rot'] = np.asarray(pos, float), np.asarray(rot, float)
+    t['pos'], t['free'] = np.asarray(pos, float), free
+    if not free:
+      t['rot'] = np.asarray(rot, float)
 
   def snap_target(self, chain, data):
     """A marker let go: its target onto where the tip is commanded to be (ahead
@@ -629,6 +632,8 @@ class IkController:
     tp, tr = self.tip_frame(s, chain)
     rp, rr = self.frame(data, chain['ref'])
     R = rr.reshape(3, 3)
+    if t.get('free'):  # position only: its orientation where the tip is commanded to be (ik.js)
+      t['rot'] = (R.T @ tr.reshape(3, 3)).reshape(-1)
     goal = R @ t['pos'] + rp
     ep = goal - tp
     er = rot_vec(((R @ t['rot'].reshape(3, 3)) @ tr.reshape(3, 3).T).reshape(-1))
@@ -650,8 +655,9 @@ class IkController:
     slide = (self.model.jnt_type[js] == 2)[:, None]
     J = np.zeros((6, n))
     np.add.at(J.T, cols, np.hstack([np.where(slide, axes, np.cross(axes, tp - s.xanchor[js])), np.where(slide, 0.0, axes)]))
-    J[3:] *= ROT_WEIGHT
-    e = np.concatenate([ep, er * ROT_WEIGHT])
+    w = 0.0 if t.get('free') else ROT_WEIGHT
+    J[3:] *= w
+    e = np.concatenate([ep, er * w])
     q = np.array([self.value(d, data) for d in active])
     home = np.array([t['home'].get(d['name'], q[c]) for c, d in enumerate(active)])
     free = np.ones(n, bool)

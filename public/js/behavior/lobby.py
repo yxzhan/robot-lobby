@@ -412,13 +412,15 @@ def ik_target(robot, chain=None):
   return c and c.get('target')
 
 
-def set_ik_target(robot, chain, pos, quat=None):
+def set_ik_target(robot, chain, pos, quat=None, free=False):
   """The tip of `robot`'s IK chain `chain` (a name, an index, or None for
   its only one) to go to `pos` ([x, y, z], m, in the world), turned to
   `quat` ([w, x, y, z]) or, without, keeping its orientation. The IK
-  controller must be on (set_controller(robot, 'ik', True)). The arm moves
-  there at its own pace: for a path, set targets along it."""
-  lobby_js.set_ik_target(str(robot), chain, [float(v) for v in pos], None if quat is None else [float(v) for v in quat])
+  controller must be on (set_controller(robot, 'ik', True)). free=True: the
+  position only, the IK turning the tip however it reaches it best (quat
+  ignored; the next target without it fixes the orientation again). The arm
+  moves there at its own pace: for a path, set targets along it."""
+  lobby_js.set_ik_target(str(robot), chain, [float(v) for v in pos], None if quat is None else [float(v) for v in quat], bool(free))
 
 
 def set_gripper(robot, chain, amount):

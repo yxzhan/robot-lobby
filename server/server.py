@@ -1251,7 +1251,7 @@ class World:
     elif op == 'ik_target':  # while a marker is dragged: no echo to everyone
       c = chain()
       if c and not c['error']:
-        ik.set_target(c, d, msg['pos'], msg['rot'])
+        ik.set_target(c, d, msg['pos'], msg['rot'], bool(msg.get('free')))
       return
     elif op == 'ik_snap_target':
       c = chain()

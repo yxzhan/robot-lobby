@@ -147,12 +147,12 @@ export function loadPython(onProgress) {
           ...(c.err && { err: { pos: c.err[0], rot: c.err[1] } }),
         })));
       },
-      set_ik_target: (name, chain, pos, quat) => {
+      set_ik_target: (name, chain, pos, quat, free) => {
         const r = robotOf(name) ?? fail(`no robot ${name}`), ik = ikOf(r), c = chainOf(r, ik, chain), d = world.app.data;
         const p = plain(pos), q = quat == null ? null : plain(quat);
         if (p.length !== 3 || p.some((v) => !Number.isFinite(v))) fail('pos: [x, y, z]');
         const rot = q ? quatToMat(q) : (ik.targetPose(c, d) ?? tipPose(ik, c, d)).rot;
-        ik.setTargetPose(c, d, { pos: p, rot });
+        ik.setTargetPose(c, d, { pos: p, rot, free: !!free });
       },
       set_gripper: (name, chain, amount) => {
         const r = robotOf(name) ?? fail(`no robot ${name}`), ik = ikOf(r), c = chainOf(r, ik, chain);

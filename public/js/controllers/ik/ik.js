@@ -639,10 +639,12 @@ export class IkController {
     return { pos: mulMV(ref.rot, t.pos).map((v, i) => v + ref.pos[i]), rot: mulMM(ref.rot, t.rot) };
   }
 
-  setTargetPose(chain, data, { pos, rot }) {
+  // `free`: the position only, the orientation left to the IK (rot ignored).
+  setTargetPose(chain, data, { pos, rot, free = false }) {
     const t = this.target(chain, data), ref = IkController.frame(data, chain.ref);
     t.pos = mulTV(ref.rot, pos.map((v, i) => v - ref.pos[i]));
-    t.rot = mulTM(ref.rot, rot);
+    t.free = free;
+    if (!free) t.rot = mulTM(ref.rot, rot);
   }
 
   // Opens a closed gripper or closes an open one (closed: its first
@@ -676,6 +678,10 @@ export class IkController {
     const { cfg, active } = chain, n = active.length;
     const t = this.target(chain, data, s);
     const tip = this.tipFrame(s, chain), ref = IkController.frame(data, chain.ref);
+    // A free target (setTargetPose's `free`): position only, its orientation
+    // where the tip is commanded to be (not the measured tip: chasing that,
+    // which lags and sways, shakes the arm).
+    if (t.free) t.rot = mulTM(ref.rot, tip.rot);
     const goal = mulMV(ref.rot, t.pos).map((v, i) => v + ref.pos[i]);
     let ep = goal.map((v, i) => v - tip.pos[i]);
     let er = rotVec(mulMT(mulMM(ref.rot, t.rot), tip.rot));  // R_goal R_tipᵀ
@@ -706,7 +712,7 @@ export class IkController {
     }
     // Position and orientation rows; a chain with fewer than 6 joints gets
     // the damped least-squares compromise between them.
-    const rows = [], e = [], w = ROT_WEIGHT;
+    const rows = [], e = [], w = t.free ? 0 : ROT_WEIGHT;
     for (let i = 0; i < 3; i++) { rows.push(cols.map((c) => c[0][i])); e.push(ep[i]); }
     for (let i = 0; i < 3; i++) { rows.push(cols.map((c) => c[1][i] * w)); e.push(er[i] * w); }
     const q = active.map((dof) => this.value(dof, data));

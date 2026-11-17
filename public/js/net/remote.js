@@ -138,13 +138,13 @@ export class RemoteIk {
   }
 
   // (Nothing is sent while the reference body's pose is not known.)
-  setTargetPose(chain, data, { pos, rot }) {
+  setTargetPose(chain, data, { pos, rot, free = false }) {
     const ref = this.refFrame(chain, data);
     if (!ref) return;
     const t = { pos: mulTV(ref.rot, pos.map((v, i) => v - ref.pos[i])), rot: mulTM(ref.rot, rot) };
     this.remote.set(chain.cfg.name, t);
     this.setAt.set(chain.cfg.name, performance.now());
-    this.send('ik_target', { chain: chain.cfg.name, pos: t.pos, rot: t.rot });
+    this.send('ik_target', { chain: chain.cfg.name, pos: t.pos, rot: t.rot, ...(free && { free: true }) });
   }
 
   toggleGripper(chain) { this.send('ik_gripper', { chain: chain.cfg.name }); }
