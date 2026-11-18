@@ -33,11 +33,12 @@ Protocol (client -> server, JSON {op, ...}; `rid` asks for a reply):
                     (VR Avatar mode, server/avatar.py): its head and hand joints
                     where it sends them, a slot taken on the first; off: parked,
                     the slot free (also when the client leaves)
-  joint_cmd {id, ctrl: [[a, v], ...], takeover}  ROS joint commands for robot
-                    `id` (public/js/drive/drive.js jointCommand, the same rules): an
+  joint_cmd {id, ctrl: [[a, v], ...], takeover, ramp}  ROS joint commands for
+                    robot `id` (public/js/drive/drive.js jointCommand, the same rules): an
                     actuator a switched-on controller drives (item.owners) is
                     left to it, unless `takeover`: then written over it while
-                    they come (JOINT_TIMEOUT)
+                    they come (JOINT_TIMEOUT); ramp > 0 (s, drive.js ramp): each
+                    reached linearly over that much simulated time, from where it is
   ray {eye, dir} -> {body, point, normal} or {body: -1}        ping {t} -> pong {t}
   Teleop (robot `id`): use {kind: policy|base|ik, on (policy: its id or '')}
   cmd {kind: policy|base, cmd: [vx, vy, yaw rate], height?} (repeated while
@@ -402,6 +403,7 @@ class Robot:
     self.arrived = False
     self.model = None
     self.overrides = {}  # actuator -> (ctrl, when): ROS joint commands taking over (joint_command)
+    self.ramps = {}  # actuator -> (u0, u1, t0, t1): targets moved there linearly in simulated time (joint_command's ramp)
     if self.key:
       self.use = {'policy': POL.default_policy(self.key), 'base': None, 'ik': True}
       self.base = BASE.BaseController(self.key, self.prefix, BASE_SAVED)
@@ -466,7 +468,7 @@ class Robot:
 
   def bind(self, model):
     """Finds the controllers' joints and actuators in a new world."""
-    self.model, self.overrides = model, {}
+    self.model, self.overrides, self.ramps = model, {}, {}
     if not self.key:
       return
     if self.use['policy'] and self.policy and not self.bind_controller('policy', model):
@@ -515,22 +517,34 @@ class Robot:
             out[a] = 'ik'
     return out
 
-  def joint_command(self, pairs, takeover, data):
+  def joint_command(self, pairs, takeover, data, ramp=0.0):
     """ROS joint commands [[actuator, ctrl], ...] (op joint_cmd): the
     actuators no controller drives get them; the others only with
-    `takeover`, written over the controllers before every step (override)."""
+    `takeover`, written over the controllers before every step (override).
+    ramp > 0 (drive.js ramp): the free ones reached linearly over that many
+    s of simulated time, from where each is now, written before every step."""
     owners, now, nu = self.owners(), time.monotonic(), self.model.nu if self.model is not None else 0
     for a, u in pairs:
       a, u = int(a), float(u)
       if not 0 <= a < nu:
         continue
       if a not in owners:
-        data.ctrl[a] = u
+        if ramp > 0:
+          self.ramps[a] = (float(data.ctrl[a]), u, data.time, data.time + ramp)
+        else:
+          self.ramps.pop(a, None)
+          data.ctrl[a] = u
       elif takeover:
         self.overrides[a] = (u, now)
 
   def override(self, data, now):
-    """Joint commands taking over, while fresh (before every physics step)."""
+    """Ramps (joint_command's ramp), and joint commands taking over, while
+    fresh (before every physics step)."""
+    for a, (u0, u1, t0, t1) in list(self.ramps.items()):
+      f = min(1.0, (data.time - t0) / max(t1 - t0, 1e-9))
+      data.ctrl[a] = u0 + (u1 - u0) * f
+      if f >= 1:
+        self.ramps.pop(a, None)
     for a, (u, at) in list(self.overrides.items()):
       if now - at > JOINT_TIMEOUT:
         self.overrides.pop(a, None)
@@ -1186,7 +1200,7 @@ class World:
         del self.ros_holds[key]
       await self.send_holds()
     elif op == 'joint_cmd':
-      self.robot(msg['id']).joint_command(msg.get('ctrl') or [], bool(msg.get('takeover')), d)
+      self.robot(msg['id']).joint_command(msg.get('ctrl') or [], bool(msg.get('takeover')), d, float(msg.get('ramp') or 0))
       self.dirty = True
     elif op == 'real_sync':
       return self.real_sync(ws, msg)
@@ -1587,8 +1601,8 @@ class World:
         self.apply_perturbs()
         self.perturbed = bool(self.perturbs)
       substeps.step(d)  # software servos
-      overriding = [r for r in self.robots if r.overrides]
-      if overriding:  # ROS joint commands taking over (Robot.joint_command)
+      overriding = [r for r in self.robots if r.overrides or r.ramps]
+      if overriding:  # ramps, and ROS joint commands taking over (Robot.joint_command)
         now = time.monotonic()
         for r in overriding:
           r.override(d, now)

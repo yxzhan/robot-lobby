@@ -33,7 +33,7 @@ clears its goals when interrupted. Angles in rad, or a string '90deg'.
 The world: robots() lists {name, label, model, drives, pose: {x, y, yaw},
 spawned (where Reset puts it: {x, y, yaw}), goal, arrived} of every spawned
 thing, pose(name) one's pose, distance(a, b) between two, body(name) any
-body of the world ('r1/ball', or 'ball': the first so named) as {x, y, z, yaw, up}, upright(robot) the z of its trunk's
+body of the world ('r1/ball', or 'ball': the first so named) as {x, y, z, yaw, up, quat}, upright(robot) the z of its trunk's
 up axis (1 standing, 0 lying on its side), time() the simulated time (s).
 Acting outside the behaviours: set_goal(robot, x, y, yaw) and stop(robot)
 (its goal marker, as GoTo / Stop do), use_skill(robot, skill, duration=None)
@@ -64,6 +64,13 @@ target, tip_pose, err}]: poses in the world as {pos, quat (w, x, y, z)}),
 set_ik_target(robot, chain, pos, quat=None) (where the chain's tip is to
 go; no quat: its orientation kept), set_gripper(robot, chain, amount) (0
 open, 1 closed); chain: a name, an index, or None for a robot with one.
+Joints directly: set_actuators(robot, {actuator: target}, ramp=0) (the IK
+off; ramp: reached linearly over that many s).
+CRAM (a kernel in a cramera Binder session, public/js/cram/): Cram() (the
+link ready: RUNNING while the session starts), CramRun(name, code,
+on_result=None) (a cell; its value in .result), cram_call(function, *args,
+**kwargs) (such a cell's code), cram_run(code) / cram_result(id) (a cell
+without a behaviour: None until it is done), cram_state().
 Removing and resetting ask the user first in a tree the Agent runs (while
 its "Ask before removing or resetting" is on); declined, the tree fails.
 """
@@ -91,7 +98,8 @@ def _py(v):
 __all__ = ['GoTo', 'Move', 'Approach', 'Follow', 'Stop', 'Wait', 'robots', 'pose', 'time', 'distance',
            'body', 'upright', 'set_goal', 'stop', 'use_skill', 'reset_world', 'reset', 'Spawn', 'place', 'set_policy', 'policy',
            'active_skill', 'place_body', 'spawn', 'models', 'remove', 'clear_world', 'pause', 'physics',
-           'set_controller', 'controllers', 'inspect', 'ik_chains', 'ik_target', 'set_ik_target', 'set_gripper']
+           'set_controller', 'controllers', 'inspect', 'ik_chains', 'ik_target', 'set_ik_target', 'set_gripper',
+           'set_actuators', 'cram_state', 'cram_call', 'cram_run', 'cram_result', 'Cram', 'CramRun']
 
 _STATUS = {'running': Status.RUNNING, 'success': Status.SUCCESS, 'failure': Status.FAILURE}
 
@@ -201,7 +209,7 @@ def time():
 
 
 def body(name):
-  """{x, y, z, yaw, up} of a body by its name ('r1/ball', or 'ball'), or None."""
+  """{x, y, z, yaw, up, quat (w, x, y, z)} of a body by its name ('r1/ball', or 'ball'), or None."""
   return _py(lobby_js.body(str(name)))
 
 
@@ -427,6 +435,103 @@ def set_gripper(robot, chain, amount):
   """The gripper of `robot`'s IK chain `chain`: 0 open, 1 closed, or in
   between."""
   lobby_js.set_gripper(str(robot), chain, float(amount))
+
+
+def set_actuators(robot, targets, ramp=0.0):
+  """Targets of `robot`'s actuators by name, {actuator: ctrl} (the names in
+  its model, without the 'r1/' prefix; a position actuator's target is its
+  joint's position), as ROS joint commands write them: not on the joints a
+  switched-on policy, base or IK drives (switch those off first). ramp > 0:
+  each target reached linearly over that many simulated seconds, from where
+  it is now (a path played back by setting its next point every tick moves
+  smoothly so). Returns how many of them such a controller keeps."""
+  return lobby_js.set_actuators(str(robot), {str(k): float(v) for k, v in targets.items()}, float(ramp))
+
+
+# ---- CRAM (public/js/cram/cram.js: a kernel in a cramera Binder session) ----
+
+def cram_state():
+  """The CRAM link: {phase ('off', 'launching', 'connecting', 'loading',
+  'ready', 'failed'), message, error, url (the session's)}."""
+  return json.loads(lobby_js.cram_state())
+
+
+def cram_call(function, *args, **kwargs):
+  """A cell calling `function` (a name in the CRAM kernel, e.g. lobby_cram.py's
+  'pick_and_place') with these arguments (numbers, strings, lists, dicts…)."""
+  parts = [repr(a) for a in args] + [f'{k}={v!r}' for k, v in kwargs.items()]
+  return f'{function}({", ".join(parts)})'
+
+
+def cram_run(code):
+  """Starts a cell in the CRAM kernel (the link started if it is not):
+  returns its id, for cram_result."""
+  return lobby_js.cram_run(str(code))
+
+
+def cram_result(job):
+  """None while cram_run's cell `job` runs, then (once) {ok, value (the
+  cell's application/json value, else its text), stdout, error}."""
+  out = lobby_js.cram_result(job)
+  return None if out is None or out is jsnull else json.loads(out)
+
+
+class Cram(py_trees.behaviour.Behaviour):
+  """Sees that the CRAM link is ready: RUNNING while it starts (a new Binder
+  session: about a minute; loading CRAM in its kernel: some 12 s), FAILURE
+  if it cannot."""
+
+  def __init__(self, name='CRAM'):
+    super().__init__(name)
+
+  def initialise(self):
+    lobby_js.cram_start()
+
+  def update(self):
+    s = cram_state()
+    if s['phase'] == 'ready':
+      self.feedback_message = s['url'] or ''
+      return Status.SUCCESS
+    self.feedback_message = s['error'] or s['message'] or s['phase']
+    if s['phase'] == 'failed':
+      return Status.FAILURE
+    if s['phase'] == 'off':
+      lobby_js.cram_start()
+    return Status.RUNNING
+
+
+class CramRun(py_trees.behaviour.Behaviour):
+  """Runs a cell in the CRAM kernel: `code`, or a function returning it
+  (called as it starts, e.g. with cram_call). RUNNING until it is done;
+  SUCCESS when it raised nothing and its value (application/json, else its
+  text) is not a dict with ok False. `result` holds {ok, value, stdout,
+  error}; `on_result(result)`, if given, is called with it (its return value
+  False fails the behaviour)."""
+
+  def __init__(self, name, code, on_result=None):
+    super().__init__(name)
+    self.code, self.on_result = code, on_result
+    self.result = None
+
+  def initialise(self):
+    self.result = None
+    self.job = cram_run(self.code() if callable(self.code) else self.code)
+    self.t0 = _clock.monotonic()
+
+  def update(self):
+    r = cram_result(self.job)
+    if r is None:
+      self.feedback_message = f'running in CRAM ({_clock.monotonic() - self.t0:.0f} s)'
+      return Status.RUNNING
+    self.result = r
+    v = r.get('value')
+    if r.get('ok') and isinstance(v, dict) and v.get('ok') is False:
+      r['ok'], r['error'] = False, v.get('error')
+    ok = bool(r.get('ok'))
+    if ok and self.on_result is not None and self.on_result(r) is False:
+      ok = False
+    self.feedback_message = 'done' if ok else (r.get('error') or 'failed').splitlines()[0][:200]
+    return Status.SUCCESS if ok else Status.FAILURE
 
 
 def set_policy(robot, policy_id):

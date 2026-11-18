@@ -45,6 +45,28 @@ export class Drive {
     this.frame = 0;            // ticks so far (the keys last the frame they are pushed in)
     this.overrides = new Map();  // robot prefix -> {model, ctrl: Map(actuator -> {u, at})}: joint commands taking over
     this.commanded = new Map();  // robot prefix -> {at, acts: Set}: the last joint commands (for the panels)
+    this.ramps = { model: null, acts: new Map() };  // actuator -> {u0, u1, t0, t1}: targets moved there linearly in simulated time
+  }
+
+  // Actuators' targets [[actuator, ctrl], …] of robot r reached linearly
+  // over `seconds` of simulated time, written before every physics step
+  // (override; on a server, server.py's), from where each is now; not on the
+  // joints a switched-on controller drives (as jointCommand without
+  // takeover). A playback setting the next point of a path every tick moves
+  // smoothly so.
+  ramp(r, pairs, seconds) {
+    const { model, data, net } = this.app;
+    if (!model || !data || !pairs.length) return;
+    if (net) {  // (the server ramps them: server.py Robot.joint_command)
+      if (!this.app.control?.blocked(r)) net.send('joint_cmd', { id: r.netId, ctrl: pairs, takeover: false, ramp: seconds });
+      return;
+    }
+    if (this.ramps.model !== model) this.ramps = { model, acts: new Map() };
+    const owners = this.owners(r), t = data.time;
+    for (const [a, u] of pairs) {
+      if (owners.has(a)) continue;
+      this.ramps.acts.set(a, { u0: data.ctrl[a], u1: u, t0: t, t1: t + Math.max(seconds, 1e-9) });
+    }
   }
 
   // Robot r's input from `source`: 'cmdVel' (a twist [vx, vy, wz]) or
@@ -174,14 +196,22 @@ export class Drive {
     let o = this.overrides.get(r.prefix);
     if (o?.model !== model) this.overrides.set(r.prefix, o = { model, ctrl: new Map() });
     for (const [a, u] of pairs) {
-      if (!owners.has(a)) data.ctrl[a] = u;
+      if (!owners.has(a)) { data.ctrl[a] = u; this.ramps.acts.delete(a); }
       else if (takeover) o.ctrl.set(a, { u, at: now });
     }
   }
 
   // Local mode, before every physics step (App.advance), after the
-  // controllers wrote: joint commands taking over, while fresh.
+  // controllers wrote: ramps (ramp), and joint commands taking over, while fresh.
   override(data) {
+    if (this.ramps.acts.size) {
+      if (this.ramps.model !== this.app.model) this.ramps = { model: null, acts: new Map() };
+      for (const [a, { u0, u1, t0, t1 }] of this.ramps.acts) {
+        const f = Math.min(1, (data.time - t0) / (t1 - t0));
+        data.ctrl[a] = u0 + (u1 - u0) * f;
+        if (f >= 1) this.ramps.acts.delete(a);
+      }
+    }
     if (!this.overrides.size) return;
     const now = performance.now();
     for (const [prefix, o] of this.overrides) {

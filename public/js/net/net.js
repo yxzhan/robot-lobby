@@ -27,10 +27,12 @@ const RETRY_MAX = 10000;  // ms between reconnect attempts, at most
 
 
 // Stands in for the MuJoCo module where the page's code asks it for names
-// (inspect.js, teleop.js, main.js buildVisual): models made here carry them.
+// (inspect.js, teleop.js, main.js buildVisual, pybt.js set_actuators): models
+// made here carry them.
 export const NET_MUJOCO = {
   mjtObj: Object.fromEntries(['BODY', 'JOINT', 'ACTUATOR', 'TEXTURE', 'SITE'].map((k) => [`mjOBJ_${k}`, { value: k.toLowerCase() }])),
   mj_id2name: (model, type, id) => model.names?.[type]?.[id] ?? '',
+  mj_name2id: (model, type, name) => model.names?.[type]?.indexOf(name) ?? -1,
 };
 
 // A state's mocap bodies with the avatar slots it left out (server.py

@@ -159,6 +159,42 @@ export function loadPython(onProgress) {
         if (!c.gripper?.length) fail(`${c.cfg.name} of ${name} has no gripper`);
         ik.setGripper(c, world.app.data, Math.min(1, Math.max(0, +amount)));
       },
+      // Actuator targets by name (without the robot's prefix), as ROS joint
+      // commands write them (drive.js jointCommand): not on the joints a
+      // switched-on policy, base or IK drives; ramp > 0: reached linearly
+      // over that many simulated seconds (drive.js ramp).
+      set_actuators: (name, targets, ramp) => {
+        const r = robotOf(name) ?? fail(`no robot ${name}`), { app } = world, m = app.model;
+        const t = plain(targets), pairs = [];
+        for (const [act, u] of Object.entries(t)) {
+          const a = app.mujoco.mj_name2id(m, app.mujoco.mjtObj.mjOBJ_ACTUATOR.value, r.prefix + act);
+          if (a < 0) fail(`${name} has no actuator ${act}`);
+          if (!Number.isFinite(+u)) fail(`${act}: not a number`);
+          pairs.push([a, +u]);
+        }
+        if (ramp > 0) app.drive.ramp(r, pairs, ramp);
+        else app.drive.jointCommand(r, pairs);
+        const owned = app.drive.owners(r);
+        return pairs.filter(([a]) => owned.has(a)).length;  // (how many a controller keeps)
+      },
+      // The CRAM link (cram/cram.js): cram_run(code) -> an id, cram_result(id)
+      // -> null while it runs, then JSON {ok, value, stdout, error}.
+      cram_start: () => { cramLink().then((c) => c.start()).catch(() => {}); },
+      cram_state: () => JSON.stringify(cramState ? cramState.state() : { phase: 'off', message: '', error: null, url: null }),
+      cram_run: (code) => {
+        const id = ++cramJobs.n;
+        cramJobs.out.set(id, null);
+        cramLink().then((c) => c.run(String(code)))
+          .then((r) => cramJobs.out.set(id, r), (err) => cramJobs.out.set(id, { ok: false, error: err.message }));
+        return id;
+      },
+      cram_result: (id) => {
+        const r = cramJobs.out.get(id);
+        if (r === undefined) fail(`no CRAM run ${id}`);
+        if (r === null) return null;
+        cramJobs.out.delete(id);
+        return JSON.stringify(r);
+      },
     });
     py.runPython(`
 import sys, types
@@ -175,6 +211,11 @@ import py_trees, lobby
 }
 
 const fail = (msg) => { throw new Error(msg); };
+
+// The CRAM link, loaded on first use; its runs' results until read.
+let cramState = null;
+const cramLink = () => import('../cram/cram.js').then((m) => (cramState = m.cram));
+const cramJobs = { n: 0, out: new Map() };
 // Asks the user first when the tree's starter wants that (the Agent's trees);
 // declined: an error, the tree fails.
 const ask = (what) => { if (world?.confirm && !world.confirm(what)) fail('the user declined'); };
@@ -237,7 +278,7 @@ function matToQuat(m) {
   return q[0] < 0 ? q.map((v) => -v) : q;
 }
 
-// {x, y, z, yaw, up} of the world body `name` ('r1/ball', or 'ball': the
+// {x, y, z, yaw, up, quat (w, x, y, z)} of the world body `name` ('r1/ball', or 'ball': the
 // first body of that name in any model), or null; up: the z of its z axis.
 // Names from the model (in network mode the server's, the same call).
 let bodies = { model: null, ids: new Map() };
@@ -257,7 +298,7 @@ function bodyState(name) {
   if (id < 0) return null;
   const R = d.xmat.subarray(9 * id, 9 * id + 9);
   return { name: app.mujoco.mj_id2name(m, app.mujoco.mjtObj.mjOBJ_BODY.value, id), x: d.xpos[3 * id], y: d.xpos[3 * id + 1], z: d.xpos[3 * id + 2],
-           yaw: Math.atan2(R[3], R[0]), up: R[8] };
+           yaw: Math.atan2(R[3], R[0]), up: R[8], quat: Array.from(d.xquat.subarray(4 * id, 4 * id + 4)) };
 }
 
 // A syntax error of a Python script: {line, column, message}, or null; null
