@@ -3,7 +3,8 @@
 # "path" in deploy.json). It starts on the first request there, and again
 # after it has died. It is also where the session opens (default_url)
 # instead of JupyterLab, which stays at <session URL>/lab. postBuild copies
-# this file to ~/.jupyter/.
+# this file to the environment's etc/jupyter/ (not ~/.jupyter/, which a home
+# volume mounted into the pod hides).
 import os
 import sys
 
@@ -21,4 +22,6 @@ c.ServerProxy.servers = {
     'launcher_entry': {'title': 'Robot Lobby'},
   },
 }
+# Both: JupyterLab's own default_url (/lab) wins over ServerApp's otherwise.
 c.ServerApp.default_url = '/robot-lobby/'
+c.LabApp.default_url = '/robot-lobby/'

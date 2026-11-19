@@ -10,5 +10,8 @@ npm ci  # its postinstall indexes an empty library here
 npm cache clean --force
 ln -sfn "${MJCF_ASSETS:-/shared/mjcf_assets}" public/mjcf_assets
 
-mkdir -p ~/.jupyter
-cp binder/jupyter_server_config.py ~/.jupyter/
+# In the environment's config dir, like cramera's Dockerfile, not ~/.jupyter
+# (a home volume mounted into the pod would hide it).
+jupyter_etc="$(python3 -c 'import sys; print(sys.prefix)')/etc/jupyter"
+mkdir -p "$jupyter_etc"
+cp binder/jupyter_server_config.py "$jupyter_etc/"
